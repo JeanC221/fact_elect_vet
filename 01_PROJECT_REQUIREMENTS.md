@@ -1,89 +1,89 @@
-# Especificación de Requerimientos y Directivas del Proyecto
-**Integrador Provet Cloud ↔ Siigo Nube (Facturación Electrónica DIAN)**
+# Project Requirements Specification and Guidelines
+**Provet Cloud ↔ Siigo Nube Integrator (DIAN Electronic Invoicing)**
 
-Este documento constituye la referencia técnica y funcional completa del proyecto para garantizar la coherencia arquitectónica en todos los entornos de desarrollo y chats asociados.
-
----
-
-## 1. Visión General y Definición del Proyecto
-
-### 1.1 Naturaleza del Sistema
-* **Tipo:** Aplicación Web Interna (Middleware API + Dashboard de Operación).
-* **Propósito:** Automatizar la emisión de Facturación Electrónica en Colombia avalada por la DIAN, eliminando la digitación manual entre el PMS clínico (**Provet Cloud**) y el ERP contable (**Siigo Nube**).
-* **Entorno de Despliegue & Dominio:** Vercel / Render / AWS bajo una instancia o subdominio privado corporativo de la clínica (ej. `https://facturacion.tuveterinaria.com`).
-* **Acceso y Seguridad de Usuario:** Dashboard protegido por autenticación basada en JWT, restringido exclusivamente a personal de recepción y administración autorizado.
-
-### 1.2 Requerimientos Funcionales Esenciales (Core)
-1. **Ingesta Automatizada de Atenciones:** Captura de datos de servicios, productos, propietarios y pacientes desde Provet Cloud vía REST API (`/consultations`, `/clients`, `/patients`) y Webhooks en tiempo real (`List of Webhook Triggers` - evento `45: Consultation finalized`).
-2. **Pre-visualización e Interacción (1-Click Invoicing):** Interfaz ágil que permite a la recepcionista validar o ajustar datos críticos (Cédula/NIT, dirección, correo electrónico, método de pago) antes de confirmar la facturación.
-3. **Mapeo Dinámico de Catálogos:** Módulo administrativo para relacionar dinámicamente ítems/servicios de Provet con códigos de productos/impuestos en Siigo (`/products`) y asociar formas de pago de Provet con formas de pago activas en Siigo (`/payment-types`).
-4. **Transformación Contable y Fiscal DIAN:** Construcción del payload JSON estricto para `POST /v1/invoices` cumpliendo la Resolución 948 y parámetros de salud DIAN si aplicaren.
-5. **Transmisión y Emisión Integrada:** Firma electrónica directa (`stamp.send: true`), recuperación del **CUFE** y despacho automático de correo electrónico al cliente final (`mail.send: true`).
-6. **Auditoría, Historial y Reintentos:** Registro de transacciones (Borradores, Aceptadas, Rechazadas) con detalle técnico visible y botón de reintento directo.
-7. **Módulo de Configuración de Credenciales:** Módulo protegido donde los administradores ingresan credenciales (`Partner-Id`, `Username`, `Access Key`, `Client ID`, `Client Secret`) y conmutan dinámicamente entre **Modo Pruebas (Mock/Sandbox)** y **Producción Real**.
-
-### 1.3 Requerimientos No Esenciales (Wishlist / Fases Futuras)
-* Exportación de reportes masivos en formatos Excel/CSV.
-* Indicadores gráficos de ventas diarias y mensuales.
-* Envíos de la factura en PDF mediante WhatsApp API.
+This document serves as the complete technical and functional reference for the project to ensure architectural consistency across all development environments and associated chat sessions.
 
 ---
 
-## 2. Directivas de Seguridad e Información Sensible
+## 1. Project Overview & Scope
 
-Dado el procesamiento de datos personales (RUT/Cédula, emails, direcciones) y responsabilidad ante la DIAN:
+### 1.1 System Nature
+- **Type:** Internal Web Application (Middleware API + Operational Dashboard).
+- **Purpose:** Automate the issuance of DIAN-approved Electronic Invoicing in Colombia, eliminating manual data entry between the clinical PMS (**Provet Cloud**) and the accounting ERP (**Siigo Nube**).
+- **Deployment Environment & Domain:** Vercel / Render / AWS hosted under a private corporate instance or subdomain of the clinic (e.g., `https://invoicing.yourvetclinic.com`).
+- **Access & User Security:** Dashboard protected by JWT-based authentication, strictly restricted to authorized reception and administrative staff.
 
-1. **Gestión de Secretos:** 
-   * Prohibición absoluta de hardcodear llaves API en el código.
-   * Las credenciales se leen exclusivamente desde Variables de Entorno (`.env`) o desde la base de datos cifrada (AES-256).
-2. **Seguridad en Frontend & Sesión:**
-   * HTTPS obligatorio.
-   * Tokens de sesión JWT en cookies con atributos `HttpOnly`, `SameSite=Strict` y `Secure`.
-   * Protección contra vulnerabilidades XSS, CSRF y Clickjacking.
-3. **Estándares Técnicos API (Siigo & Provet):**
-   * Encabezado obligatorio `Partner-Id` en peticiones a Siigo (entre 3 y 100 caracteres alfanuméricos válidos).
-   * Encabezado `Idempotency-Key` (alfanumérico, máx. 30 caracteres) en peticiones `POST /v1/invoices` para evitar duplicidad de facturas.
-   * Renovación automática de Tokens JWT (`POST /auth`) antes de su vencimiento (24h).
+### 1.2 Core Functional Requirements
+1. **Automated Consultation Ingestion:** Ingest services, products, owners, and patients data from Provet Cloud via REST API (`/consultations`, `/clients`, `/patients`) and real-time Webhooks (`List of Webhook Triggers` - Event `45: Consultation finalized`).
+2. **Preview & Interaction (1-Click Invoicing):** An agile interface enabling receptionists to validate or adjust critical client details (ID/NIT, address, email, payment method) before confirming emission.
+3. **Dynamic Catalog Mapping:** Administrative module to dynamically link Provet items/services with Siigo product/tax codes (`/products`) and map Provet payment methods to active Siigo payment types (`/payment-types`).
+4. **Accounting & DIAN Tax Transformation:** Build the strict JSON payload for `POST /v1/invoices` adhering to Resolution 948 and DIAN health parameters, if applicable.
+5. **Integrated Emission & Transmission:** Direct electronic signing (`stamp.send: true`), **CUFE** hash retrieval, and automated email dispatch to the end client (`mail.send: true`).
+6. **Auditing, History & Retries:** Transaction logging (Drafts, Accepted, Rejected) with visible technical details and a 1-click retry mechanism.
+7. **Credentials Configuration Module:** Protected view where administrators input access keys (`Partner-Id`, `Username`, `Access Key`, `Client ID`, `Client Secret`) and dynamically toggle between **Test Mode (Mock/Sandbox)** and **Production Real Mode**.
+
+### 1.3 Non-Essential Requirements (Wishlist / Future Phases)
+- Bulk report export in Excel/CSV formats.
+- Graphical dashboards for daily and monthly sales metrics.
+- Automated invoice PDF delivery via WhatsApp API.
 
 ---
 
-## 3. Fallbacks, Tolerancia a Fallos y Manejo de Errores
+## 2. Security Directives & Sensitive Data Protection
 
-El sistema debe interceptar los códigos de error crudos y presentarlos en lenguaje claro con acciones correctivas inmediatas:
+Given the handling of personal data (Tax ID/Cedula, emails, physical addresses) and legal liability before the DIAN:
 
-| Código Error | Descripción / Causa | Mensaje en Pantalla | Fallback / Acción Sugerida |
+1. **Secrets Management:**
+   - Absolute prohibition of hardcoding API keys within source code.
+   - Credentials must be retrieved exclusively from Environment Variables (`.env`) or an encrypted database layer (AES-256).
+2. **Frontend & Session Security:**
+   - Enforced HTTPS protocol.
+   - JWT session tokens stored in cookies with `HttpOnly`, `SameSite=Strict`, and `Secure` flags.
+   - Defense mechanisms against XSS, CSRF, and Clickjacking vulnerabilities.
+3. **API Integration Standards (Siigo & Provet):**
+   - Mandatory `Partner-Id` header in all requests to Siigo (between 3 and 100 valid alphanumeric characters).
+   - `Idempotency-Key` header (alphanumeric, max 30 characters) on `POST /v1/invoices` endpoints to prevent duplicate invoice generation.
+   - Automatic JWT Token renewal (`POST /auth`) prior to expiration (24h validity).
+
+---
+
+## 3. Fallbacks, Fault Tolerance & Error Handling
+
+The system must intercept raw API error codes and present human-readable messages alongside immediate corrective options:
+
+| Error Code | Cause / Trigger | User-Facing Message | Suggested Fallback / Action |
 | :--- | :--- | :--- | :--- |
-| `invalid_identification` | Cédula/NIT con formato inválido. | "La cédula o NIT ingresado no es válido para la DIAN." | Habilitar edición rápida de la cédula en el modal antes de reintentar. |
-| `invalid_total_payments` | Descuadre entre total de ítems y total pagado. | "El valor pagado no coincide con el total de la atención médica." | Recalcular automáticamente los decimales y ajustar diferencias de redondeo. |
-| `parameter_required` | Falta información requerida (ej. correo, dirección). | "Falta el correo electrónico del cliente para enviar la factura." | Abrir campo editable del correo y reintentar la emisión. |
-| `requests_limit` (429) | Superado el límite de 100 req/min (o 10 req/min en Sandbox). | "Servidor de facturación ocupado. Reintentando..." | Aplicar reintento automático con algoritmo de Exponential Backoff. |
-| `service_unavailable` (503)| Servicio de Siigo o la DIAN temporalmente fuera de línea. | "El servicio de la DIAN no responde. Factura guardada en Borrador." | Guardar en estado `Draft` / Borrador con encolamiento de reintento diferido. |
+| `invalid_identification` | Invalid Cedula/NIT format. | "The entered ID or NIT is invalid for DIAN processing." | Enable inline editing modal to correct the Tax ID before retrying. |
+| `invalid_total_payments` | Discrepancy between line items subtotal and payment total. | "The total paid amount does not match the consultation total." | Automatically recalculate line-item decimals and smooth rounding differences. |
+| `parameter_required` | Missing mandatory field (e.g., email, address). | "Customer email address is required to dispatch the invoice." | Highlight the missing field for fast manual entry and retry. |
+| `requests_limit` (429) | Exceeded 100 req/min rate limit (or 10 req/min in Sandbox). | "Invoicing server busy. Retrying automatically..." | Trigger an automatic retry using an Exponential Backoff algorithm. |
+| `service_unavailable` (503)| Siigo or DIAN services temporarily offline. | "DIAN service is unreachable. Invoice saved as Draft." | Store document as `Draft` and place into an asynchronous retry queue. |
 
 ---
 
-## 4. Estándares de Rendimiento, Optimización y Métricas Web
+## 4. Performance Standards, Metrics & Web Benchmarks
 
-Para asegurar una experiencia fluida e insuperable según métricas de la industria:
+To ensure a seamless operational experience adhering to high industry performance benchmarks:
 
-* **Core Web Vitals Exigidas:**
-  * **LCP (Largest Contentful Paint):** `< 2.5s`
-  * **INP (Interaction to Next Paint):** `< 200ms`
-  * **CLS (Cumulative Layout Shift):** `< 0.1`
-* **Herramientas Estándar de Evaluación de Rendimiento:**
-  1. **Google Lighthouse / PageSpeed Insights:** Evaluación de velocidad, accesibilidad, buenas prácticas y SEO.
-  2. **WebPageTest / GTmetrix:** Análisis profundo del waterfall de red, TTFB (Time to First Byte) y renderizado inicial.
-* **Estrategias de Optimización:**
-  * Renderizado híbrido (SSR en vistas base, Client Components para partes interactivas).
-  * Lazy loading de tablas masivas de historial.
-  * Estrategia de caching y *Revalidation* para catálogos de Siigo (`/products`, `/payment-types`) evitando golpear innecesariamente la API.
+- **Target Core Web Vitals:**
+  - **LCP (Largest Contentful Paint):** `< 2.5s`
+  - **INP (Interaction to Next Paint):** `< 200ms`
+  - **CLS (Cumulative Layout Shift):** `< 0.1`
+- **Standard Performance Measurement Tools:**
+  1. **Google Lighthouse / PageSpeed Insights:** Speed, accessibility, best practices, and technical SEO evaluations.
+  2. **WebPageTest / GTmetrix:** Deep-dive analysis into network waterfalls, TTFB (Time to First Byte), and initial rendering pipeline.
+- **Optimization Strategies:**
+  - Hybrid rendering (SSR for shell layouts, Client Components for isolated interactive controls).
+  - Lazy loading for large historical data tables.
+  - Caching and *Revalidation* strategy for Siigo static catalogs (`/products`, `/payment-types`) to avoid hitting API rate limits.
 
 ---
 
-## 5. Reglas de Limpieza de Código y Arquitectura
+## 5. Code Cleanliness & Architectural Rules
 
-* **Cero Código Muerto:** Eliminar funciones sin uso, variables declaradas no utilizadas, imports obsoletos o bloques comentados.
-* **Separación Estricta de Capas:**
-  * `/services`: Comunicación directa con las API (Provet, Siigo).
-  * `/mappers`: Transformaciones puras de JSON sin efectos secundarios.
-  * `/components`: UI modular, responsiva e interactiva.
-* **Formularios & Validaciones:** Uso de React Hook Form + Zod (o equivalentes ligeros) para validación en cliente/servidor sin sobrecargar la aplicación.
+- **Zero Dead Code:** Strip unused functions, declared but unreferenced variables, legacy imports, and commented code blocks prior to commits.
+- **Strict Layer Decoupling:**
+  - `/services`: Direct HTTP communication layer with external APIs (Provet, Siigo).
+  - `/mappers`: Pure, side-effect-free JSON data transformation utilities.
+  - `/components`: Modular, responsive, and interactive UI components.
+- **Forms & Validation:** Leverage React Hook Form combined with Zod schema validation (or lightweight equivalents) for strict runtime checking across client and server.

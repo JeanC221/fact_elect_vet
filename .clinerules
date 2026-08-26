@@ -1,0 +1,63 @@
+# AGENT SYSTEM DIRECTIVES & IDE GOVERNANCE (.clinerules)
+# Project: Provet Cloud ↔ Siigo Nube Integrator (DIAN Electronic Invoicing)
+
+---
+
+## 1. MANDATORY READ-FIRST PROTOCOL
+Before writing, refactoring, or planning any code, you MUST inspect the following root files:
+1. `PROJECT_STATE.md` -> Identify current phase, completed tasks, and Next Pending Task.
+2. `01_PROJECT_REQUIREMENTS.md` -> Validate business logic, DIAN tax rules, and API spec.
+3. `02_AGENT_WORKFLOW_RULES.md` -> Follow token rules, atomic scope, and agent matrix[cite: 1, 3].
+4. `03_UI_UX_DESIGN_SPEC.md` -> Apply strict clinical UI design constraints[cite: 4].
+
+---
+
+## 2. OPERATIONAL MODES & EXECUTION FLOW
+
+### Mode 1: PLAN MODE (Complex / Multi-file Tasks)
+- When assigned a new Task, output a concise 5-step strategy FIRST.
+- Specify target files, modified routes, Zod schemas, and test cases[cite: 1].
+- DO NOT edit files until the user or system approves the plan.
+
+### Mode 2: ACT & VERIFY MODE (Execution)
+- Modify ONLY the target files listed under `Next Pending Task` in `PROJECT_STATE.md`[cite: 1].
+- Follow Test-Driven Development (TDD): Write or update Zod schemas & Vitest unit tests before logic implementation[cite: 1].
+- Execute the mandatory **Verification Loop** before finalizing:
+  1. `npx tsc --noEmit` (Zero TypeScript compilation errors allowed).
+  2. `npx vitest run` (100% test suite pass rate).
+  3. `npm run lint` (Zero unused variables or dead imports).
+- If any command fails, fix the errors automatically before updating `PROJECT_STATE.md`[cite: 1].
+
+---
+
+## 3. DOMAIN & INTEGRATION LAWS (PROVET ↔ SIIGO DIAN)
+
+- **Mandatory API Headers:** All Siigo outgoing requests MUST include `Partner-Id` and a unique `Idempotency-Key` (max 30 chars) to avoid double invoicing[cite: 1, 8].
+- **Environment Safety:** Keep `stamp.send` set to `false` in Sandbox/Mock modes. Toggle to `true` strictly when running DIAN production flows[cite: 1, 2, 8].
+- **Runtime Validation:** All input payloads from Provet and output JSONs for `POST /v1/invoices` MUST pass strict Zod schema parsing before hitting the network[cite: 1, 8].
+- **Error Translation Layer:** Never expose raw API 500/429/400 stack traces to the UI. Map them to Spanish human-readable messages (`invalid_identification`, `invalid_total_payments`) with fast-edit triggers[cite: 1, 8].
+
+---
+
+## 4. UI/UX CLINICAL CONSTRAINTS
+- Strictly enforce `03_UI_UX_DESIGN_SPEC.md`[cite: 4].
+- Palette: Cool Grey (`#F4F6F8`), Pure White (`#FFFFFF`), Clinical Blue (`#0052CC`), Slate Text (`#1A202C`)[cite: 4].
+- Layout: Dense tabular display, compact padding (`p-2` to `p-4`), max border-radius `rounded-md` (6px)[cite: 4].
+- Strictly PROHIBITED: Glowing neon colors, floating cards with massive drop shadows, oversized rounded corners (`rounded-2xl`/`3xl`), and generic SaaS illustrations[cite: 4].
+
+---
+
+## 5. ZERO SMALL-TALK DIRECTIVE & OUTPUT FORMAT
+
+Do NOT print greetings, conversational confirmations, or filler text (e.g., "Hello!", "Sure, I can help")[cite: 1, 2].
+
+All task completion responses MUST strictly adhere to this format[cite: 1]:
+1. **Technical Summary:** 3 lines max summarizing the code changes[cite: 1].
+2. **Code/Diff Block:** Exact modified files or clean targeted diffs[cite: 1].
+3. **Updated PROJECT_STATE.md:** Markdown snippet reflecting completed task, modified files, and the Next Pending Task for the next agent[cite: 1].
+
+## CODE EFFICIENCY & REUSE LAWS
+- REUSE BEFORE CREATING: Always search `/src` for existing helpers, interfaces, or mappers before writing new code. Reinventing existing utilities is strictly forbidden.
+- ALGORITHMIC SIMPLICITY: Prefer functional, pure transformations (Zod / native JS methods). Maximum complexity allowed for data transformation is O(n).
+- FILE SIZE LIMIT: No single file under `/src/services`, `/src/mappers`, or `/src/components` shall exceed 150 lines of code. Split into smaller modules if exceeded.
+- ZERO DUPLICATION: UI components must NEVER perform raw data mapping or direct API calls. Use existing `/services` and `/mappers` exclusively.
