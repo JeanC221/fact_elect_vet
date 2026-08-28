@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { AlertTriangle, CheckCircle2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, RefreshCw } from "lucide-react";
 import { Pagination, PAGE_SIZE_OPTIONS, type PageSizeOption } from "./Pagination";
 import type { ItemMappingRow } from "@/mappers/catalogMapping";
 import type { SiigoProduct } from "@/schemas/siigo";
@@ -10,6 +10,8 @@ interface CatalogMappingProps {
   rows: ItemMappingRow[];
   siigoProducts: SiigoProduct[];
   onSelect: (provetCode: string, siigoProductId: string | null) => void;
+  isRefreshing?: boolean;
+  onSync?: () => void;
 }
 
 const COLUMNS = [
@@ -28,7 +30,7 @@ const TAX_LABELS: Record<string, string> = {
   INC: "INC",
 };
 
-export function CatalogMapping({ rows, siigoProducts, onSelect }: CatalogMappingProps) {
+export function CatalogMapping({ rows, siigoProducts, onSelect, isRefreshing, onSync }: CatalogMappingProps) {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<PageSizeOption>(PAGE_SIZE_OPTIONS[0]);
 
@@ -48,9 +50,14 @@ export function CatalogMapping({ rows, siigoProducts, onSelect }: CatalogMapping
     <section className="flex flex-col rounded-md border border-grid-line bg-pure-white">
       <div className="flex items-center justify-between border-b border-grid-line px-3 py-2">
         <h2 className="text-base font-semibold text-slate-text">Ítems / Servicios</h2>
-        <span className="text-xs text-muted">
-          {mappedCount}/{rows.length} mapeados
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted">{mappedCount}/{rows.length} mapeados</span>
+          {onSync && (
+            <button type="button" onClick={onSync} disabled={isRefreshing} className="inline-flex items-center gap-1 rounded-md border border-grid-line px-2 py-1 text-xs font-semibold text-muted hover:bg-cool-grey disabled:opacity-40">
+              <RefreshCw className={`h-3 w-3 ${isRefreshing ? "animate-spin" : ""}`} aria-hidden="true" /> Sincronizar Catálogos
+            </button>
+          )}
+        </div>
       </div>
       <div className="scrollbar-thin max-h-[40vh] overflow-y-auto">
         <table className="w-full table-fixed border-collapse text-xs">

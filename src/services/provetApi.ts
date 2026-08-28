@@ -1,43 +1,69 @@
+import { z } from "zod";
 import {
-  consultationSchema,
-  clientSchema,
-  patientSchema,
-} from "@/schemas/provet";
-import type { Consultation, Client, Patient } from "@/schemas/provet";
-import { mockConsultations, mockClients, mockPatients } from "@/mocks/provet";
+  provetConsultationRawSchema,
+  provetClientRawSchema,
+  provetPatientRawSchema,
+  provetInvoiceRawSchema,
+  provetPaginatedSchema,
+} from "@/schemas/provetApi";
 
-/**
- * Fetch a single consultation by its Provet ID.
- * Stub: returns mock data with Zod runtime validation.
- *
- * Replace with `fetch()` when Provet API credentials are configured.
- */
-export async function fetchConsultation(id: string): Promise<Consultation> {
-  const found = mockConsultations.find((c) => c.id === id);
-  if (!found) {
-    throw new Error(`Consultation not found: ${id}`);
+/** Custom error class wrapping Provet REST API failures. */
+export class ProvetApiError extends Error {
+  constructor(public code: string, message: string) {
+    super(message);
+    this.name = "ProvetApiError";
   }
-  return consultationSchema.parse(found);
 }
 
-/**
- * Fetch a client (owner) by its Provet ID.
- */
-export async function fetchClient(id: string): Promise<Client> {
-  const found = mockClients.find((c) => c.id === id);
-  if (!found) {
-    throw new Error(`Client not found: ${id}`);
-  }
-  return clientSchema.parse(found);
-}
+const BASE = process.env.PROVET_BASE_URL ?? "https://api.provetcloud.com";
 
 /**
- * Fetch a patient by its Provet ID.
+ * Fetch one page of a Provet REST resource. Auth uses the opaque OAuth
+ * access_token as the `?access_token=` query parameter (per the live API),
+ * never a header. Ordering forced to `-created` so the most recent records
+ * arrive first — reception staff see freshly closed consultations.
  */
-export async function fetchPatient(id: string): Promise<Patient> {
-  const found = mockPatients.find((p) => p.id === id);
-  if (!found) {
-    throw new Error(`Patient not found: ${id}`);
+async function fetchProvetPage<S extends z.ZodTypeAny>(
+  path: string,
+  token: string,
+  schema: S,
+  pageUrl: string | null,
+): Promise<{ results: z.infer<S>[]; next: string | null }> {
+  const url =
+    pageUrl ??
+    `${BASE}${path}?access_token=${encodeURIComponent(token)}&page=1&page_size=100&ordering=-modified`;
+  let res: Response;
+  try {
+    res = await fetch(url, { headers: { Accept: "application/json" } });
+  } catch {
+    throw new ProvetApiError(
+      "service_unavailable",
+      `No se pudo contactar la API de Provet (${path}).`,
+    );
   }
-  return patientSchema.parse(found);
+  if (!res.ok) {
+    throw new ProvetApiError(
+      res.status === 401 ? "auth_failed" : "request_failed",
+      `Provet ${path} falló (HTTP ${res.status}).`,
+    );
+  }
+  const parsed = provetPaginatedSchema(schema).safeParse(await res.json());
+  if (!parsed.success) {
+    throw new ProvetApiError("parse_failed", `Respuesta de Provet ${path} con formato inesperado.`);
+  }
+  return { results: parsed.data.results, next: parsed.data.next };
 }
+
+/** Fetch the first (most-recent) page of each Provet resource. */
+async function firstPage<S extends z.ZodTypeAny>(path: string, token: string, schema: S): Promise<z.infer<S>[]> {
+  return (await fetchProvetPage(path, token, schema, null)).results;
+}
+
+export const fetchConsultations = (token: string) =>
+  firstPage("/consultation", token, provetConsultationRawSchema);
+export const fetchClients = (token: string) =>
+  firstPage("/client", token, provetClientRawSchema);
+export const fetchPatients = (token: string) =>
+  firstPage("/patient", token, provetPatientRawSchema);
+export const fetchInvoices = (token: string) =>
+  firstPage("/invoice", token, provetInvoiceRawSchema);
