@@ -27,15 +27,11 @@ export default function MappingPage() {
   const provetItems = useMemo(() => extractProvetItems(mockConsultations), []);
   const provetMethods = useMemo(() => extractProvetPaymentMethods(mockConsultations), []);
 
-  const [mapping, setMapping] = useState<CatalogMappingState>(() => ({
-    items: defaultItemMapping(provetItems, mockSiigoProducts),
-    payments: defaultPaymentMapping(provetMethods, mockSiigoPaymentTypes),
-    version: 0,
-    updatedAt: new Date().toISOString(),
-  }));
+  const [mapping, setMapping] = useState<CatalogMappingState>(() => ({ items: defaultItemMapping(provetItems, mockSiigoProducts), payments: defaultPaymentMapping(provetMethods, mockSiigoPaymentTypes), version: 0, updatedAt: new Date().toISOString() }));
   const [dirty, setDirty] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
 
   // SSR-safe load: reconcile persisted mapping against current catalogs.
   useEffect(() => {
@@ -92,6 +88,16 @@ export default function MappingPage() {
     setTimeout(() => setToast(null), 2500);
   }, [mapping]);
 
+  // Re-sync catalogs: re-reconcile mapping against current Siigo catalogs (mock now; swap for `await fetchProducts()`/`fetchPaymentTypes()` when live).
+  const handleSyncCatalogs = useCallback(async () => {
+    setIsSyncing(true);
+    try {
+      setMapping((prev) => reconcileMapping(prev, provetItems, mockSiigoProducts, provetMethods, mockSiigoPaymentTypes));
+      setToast("Catálogos sincronizados");
+      setTimeout(() => setToast(null), 2500);
+    } finally { setIsSyncing(false); }
+  }, [provetItems, provetMethods]);
+
   return (
     <main className="flex h-screen w-screen flex-col gap-2 overflow-hidden bg-cool-grey p-2">
       <header className="flex items-center justify-between px-1">
@@ -130,7 +136,7 @@ export default function MappingPage() {
         </div>
       </header>
       <div className="scrollbar-thin flex h-[calc(100vh-64px)] flex-col gap-2 overflow-y-auto">
-        <CatalogMapping rows={itemRows} siigoProducts={mockSiigoProducts} onSelect={handleItemSelect} />
+        <CatalogMapping rows={itemRows} siigoProducts={mockSiigoProducts} onSelect={handleItemSelect} isRefreshing={isSyncing} onSync={handleSyncCatalogs} />
         <PaymentMapping rows={paymentRows} siigoPaymentTypes={mockSiigoPaymentTypes} onSelect={handlePaymentSelect} />
       </div>
       {toast && (

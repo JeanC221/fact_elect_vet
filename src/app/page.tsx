@@ -8,7 +8,6 @@ import { QuickEditDrawer } from "@/components/QuickEditDrawer";
 import { InvoiceHistory } from "@/components/InvoiceHistory";
 import { CreditNoteModal } from "@/components/CreditNoteModal";
 import {
-  buildConsultationQueue,
   buildInvoicePayloadFromQuickEdit,
   buildQuickEditDetail,
   type InvoiceStatus,
@@ -27,23 +26,15 @@ import { ErrorBanner } from "@/components/ErrorBanner";
 import { mockClients, mockConsultations, mockPatients } from "@/mocks/provet";
 import { mockSiigoInvoiceResponses } from "@/mocks/siigo";
 import { useEmissionOptions } from "@/hooks/useEmissionOptions";
+import { useConsultationQueue } from "@/hooks/useConsultationQueue";
 
 type Tab = "queue" | "history";
 
-const TABS: { id: Tab; label: string }[] = [
-  { id: "queue", label: "Cola de Consultas" },
-  { id: "history", label: "Historial de Facturas" },
-];
+const TABS: { id: Tab; label: string }[] = [{ id: "queue", label: "Cola de Consultas" }, { id: "history", label: "Historial de Facturas" }];
 
 export default function HomePage() {
-  const [rows, setRows] = useState(() =>
-    buildConsultationQueue(mockConsultations, mockClients, mockPatients),
-  );
-  const [history, setHistory] = useState<InvoiceHistoryEntry[]>(() => [
-    toInvoiceHistoryEntry(mockSiigoInvoiceResponses[0], "CON-001", new Date("2026-08-15T09:30:00.000Z")),
-    toInvoiceHistoryEntry(mockSiigoInvoiceResponses[1], "CON-002", new Date("2026-08-16T10:30:00.000Z")),
-    toInvoiceHistoryEntry(mockSiigoInvoiceResponses[2], "CON-003", new Date("2026-08-17T11:45:00.000Z")),
-  ]);
+  const { rows, isInitialLoading, isRefreshing, fetchError: queueFetchError, clearFetchError, handleRefresh, setRowStatus } = useConsultationQueue();
+  const [history, setHistory] = useState<InvoiceHistoryEntry[]>(() => [toInvoiceHistoryEntry(mockSiigoInvoiceResponses[0], "CON-001", new Date("2026-08-15T09:30:00.000Z")), toInvoiceHistoryEntry(mockSiigoInvoiceResponses[1], "CON-002", new Date("2026-08-16T10:30:00.000Z")), toInvoiceHistoryEntry(mockSiigoInvoiceResponses[2], "CON-003", new Date("2026-08-17T11:45:00.000Z"))]);
   const [tab, setTab] = useState<Tab>("queue");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -60,7 +51,16 @@ export default function HomePage() {
 
   const showToast = useCallback((msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3000); }, []);
 
-  const setRowStatus = useCallback((id: string, status: InvoiceStatus) => { setRows((prev) => prev.map((r) => (r.id === id ? { ...r, invoiceStatus: status } : r))); }, []);
+  // Wrap the hook's refresh so a manual sync surfaces a success toast (fetch
+  // logic, persistence & fallback live in useConsultationQueue).
+  const handleRefreshConsultations = useCallback(async () => {
+    const r = await handleRefresh();
+    if (r.ok) showToast(`${r.count} consultas sincronizadas desde Provet`);
+  }, [handleRefresh, showToast]);
+
+  const disableActions = isInitialLoading || isRefreshing || isSubmitting;
+  const displayError = translatedError ?? queueFetchError;
+  const handleDismissError = useCallback(() => { setTranslatedError(null); clearFetchError(); }, [clearFetchError]);
 
   const handleDownload = useCallback(async (invoiceId: string, format: "pdf" | "xml") => {
     setBusyInvoiceId(invoiceId);
@@ -137,9 +137,9 @@ export default function HomePage() {
             <button key={t.id} type="button" onClick={() => setTab(t.id)} className={`rounded-md px-3 py-1 text-sm font-semibold ${tab === t.id ? "bg-clinical-blue text-white" : "border border-grid-line text-muted hover:bg-cool-grey"}`}>{t.label}</button>
           ))}
         </nav>
-        <ErrorBanner error={translatedError} retryAttempt={retryAttempt} maxRetries={5} onQuickAction={handleQuickAction} onDismiss={() => setTranslatedError(null)} />
+        <ErrorBanner error={displayError} retryAttempt={retryAttempt} maxRetries={5} onQuickAction={handleQuickAction} onDismiss={handleDismissError} />
         {tab === "queue" ? (
-          <ConsultationQueue rows={rows} onInvoiceClick={(id) => setSelectedId(id)} />
+          <ConsultationQueue rows={rows} isRefreshing={isRefreshing} isInitialLoading={isInitialLoading} disableActions={disableActions} onRefresh={handleRefreshConsultations} onInvoiceClick={(id) => setSelectedId(id)} />
         ) : (
           <InvoiceHistory entries={history} rows={rows} busyInvoiceId={busyInvoiceId} onDownload={handleDownload} onAnnul={handleAnnul} />
         )}

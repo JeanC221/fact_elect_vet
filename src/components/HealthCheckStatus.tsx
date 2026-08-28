@@ -13,13 +13,6 @@ const STATE_STYLE: Record<ServiceState, { dot: string; text: string; border: str
   unknown: { dot: "bg-muted", text: "text-muted", border: "border-grid-line", Icon: HelpCircle },
 };
 
-const OVERALL_LABEL: Record<ServiceState, string> = {
-  online: "Todos los servicios operativos",
-  degraded: "Algún servicio responde lentamente",
-  offline: "Uno o más servicios no disponibles",
-  unknown: "Estado indeterminado",
-};
-
 /** Fetch the same-origin health endpoint and validate with Zod. */
 async function fetchHealth(): Promise<HealthReport> {
   const res = await fetch("/api/health", { cache: "no-store" });
@@ -36,13 +29,16 @@ export function HealthCheckStatus() {
   const [report, setReport] = useState<HealthReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [isConnected, setIsConnected] = useState(false);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const run = useCallback(async () => {
     setLoading(true);
     setError(false);
+    setIsConnected(false);
     try {
       setReport(await fetchHealth());
+      setIsConnected(true);
     } catch {
       setError(true);
     } finally {
@@ -57,8 +53,6 @@ export function HealthCheckStatus() {
       if (timer.current) clearInterval(timer.current);
     };
   }, [run]);
-
-  const overall = report?.overall ?? "unknown";
 
   return (
     <section className="w-full max-w-md rounded-md border border-grid-line bg-pure-white p-4 shadow-sm">
@@ -75,12 +69,20 @@ export function HealthCheckStatus() {
         </button>
       </header>
 
-      <div
-        className={`mb-3 flex items-center gap-2 rounded-md border px-3 py-2 text-sm font-semibold ${STATE_STYLE[overall].border} ${STATE_STYLE[overall].text}`}
-      >
-        <span className={`inline-block h-2.5 w-2.5 rounded-full ${STATE_STYLE[overall].dot}`} />
-        {OVERALL_LABEL[overall]}
-      </div>
+      {isConnected ? (
+        <div
+          className={`mb-3 flex items-center gap-2 rounded-md border px-3 py-2 text-sm font-semibold ${STATE_STYLE.online.border} ${STATE_STYLE.online.text}`}
+        >
+          <span className={`inline-block h-2.5 w-2.5 rounded-full ${STATE_STYLE.online.dot}`} />
+          <CheckCircle2 className="mr-1 inline h-4 w-4" />
+          Sistema de monitoreo activo
+        </div>
+      ) : error && (
+        <p className="mb-3 flex items-center gap-1 text-xs text-status-rejected-text">
+          <AlertTriangle className="h-3 w-3" />
+          No se pudo obtener el estado de los servicios. Reintente.
+        </p>
+      )}
 
       <ul className="divide-y divide-grid-line">
         {loading && !report
@@ -110,13 +112,6 @@ export function HealthCheckStatus() {
               );
             })}
       </ul>
-
-      {error && (
-        <p className="mt-2 flex items-center gap-1 text-xs text-status-rejected-text">
-          <AlertTriangle className="h-3 w-3" />
-          No se pudo obtener el estado de los servicios. Reintente.
-        </p>
-      )}
     </section>
   );
 }
