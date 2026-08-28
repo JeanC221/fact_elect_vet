@@ -40,8 +40,9 @@ export function LoginForm({ action }: LoginFormProps) {
     setServerError(null);
     try {
       const res = await action(values);
-      if (res.error) setServerError(res.error);
-      // On success the action calls redirect(); the client navigates automatically.
+      if (res?.error) setServerError(res.error);
+      // res is undefined when the server action calls redirect("/") on success.
+      // Next.js intercepts the redirect and navigates to the dashboard automatically.
     } finally {
       setIsSubmitting(false);
     }
@@ -60,7 +61,7 @@ export function LoginForm({ action }: LoginFormProps) {
     >
       <div className="space-y-1">
         <label htmlFor="email" className={LABEL}>
-          Correo institucional
+          Correo o usuario
         </label>
         <input
           id="email"

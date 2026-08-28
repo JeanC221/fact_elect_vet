@@ -43,7 +43,7 @@ export default async function LoginPage() {
       <section className="w-full max-w-sm rounded-md border border-grid-line bg-pure-white p-5 shadow-sm">
         <header className="mb-4 space-y-1">
           <h1 className="text-base font-semibold text-clinical-blue">
-            Provet → Siigo | Facturación
+            Facturación
           </h1>
           <p className="text-xs text-muted">Acceso restringido a personal autorizado.</p>
         </header>

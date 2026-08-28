@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Provet → Siigo | Facturación Electrónica",
+  title: "Facturación Electrónica",
   description:
     "Dashboard clínico para emisión automatizada de facturación electrónica DIAN — Provet Cloud ↔ Siigo Nube.",
 };
