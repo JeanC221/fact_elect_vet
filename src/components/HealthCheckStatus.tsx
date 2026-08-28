@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, Clock, HelpCircle, RefreshCw } from "lucide-react";
-import { healthReportSchema, type HealthReport, type ServiceState } from "@/services/healthCheck";
+import { healthReportSchema, type HealthReport, type ServiceState } from "@/schemas/health";
 
 const REFRESH_MS = 60_000;
 
@@ -92,7 +92,7 @@ export function HealthCheckStatus() {
               </li>
             ))
           : report?.services.map((s) => {
-              const { dot, text, Icon } = STATE_STYLE[s.state];
+              const { dot, text, Icon = HelpCircle } = STATE_STYLE[s.state] ?? STATE_STYLE.unknown;
               return (
                 <li key={s.name} className="flex items-center gap-2 py-2 px-1">
                   <span className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${dot}`} />

@@ -50,8 +50,10 @@ Edit `.env.local` with your actual values:
 | Variable | Purpose | Example |
 |----------|---------|---------|
 | `JWT_SECRET` | HMAC-SHA256 signing key for session tokens | `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"` |
-| `EMPLOYEE_EMAIL` | Authorized login email | `recepcion@vetclinic.com` |
+| `EMPLOYEE_EMAIL` | Receptionist login email | `recepcion@vetclinic.com` |
 | `EMPLOYEE_PASSWORD_HASH` | sha256(password) in base64url | `node -e "console.log(require('crypto').createHash('sha256').update('YOUR_PASSWORD').digest('base64url'))"` |
+| `ADMIN_EMAIL` | Administrator login email (separate account) | `admin@vetclinic.com` |
+| `ADMIN_PASSWORD_HASH` | sha256(admin password) in base64url | `node -e "console.log(require('crypto').createHash('sha256').update('YOUR_ADMIN_PASSWORD').digest('base64url'))"` |
 | `SIIGO_PARTNER_ID` | Siigo API partner identifier | `your-partner-id` |
 | `SIIGO_USERNAME` | Siigo API username | `api-user@company.com` |
 | `SIIGO_ACCESS_KEY` | Siigo API access key | `your-access-key` |
@@ -190,6 +192,13 @@ Update `JWT_SECRET` in Vercel env vars. All active sessions will be invalidated.
 node -e "console.log(require('crypto').createHash('sha256').update('NEW_PASSWORD').digest('base64url'))"
 ```
 Update `EMPLOYEE_PASSWORD_HASH` in Vercel env vars.
+
+**Admin Password:**
+```bash
+node -e "console.log(require('crypto').createHash('sha256').update('NEW_ADMIN_PASSWORD').digest('base64url'))"
+```
+Update `ADMIN_PASSWORD_HASH` in Vercel env vars. This is independent from the
+receptionist password — rotate it separately.
 
 **Siigo/Provet API Keys:**
 Regenerate in respective dashboards and update env vars. No downtime required.

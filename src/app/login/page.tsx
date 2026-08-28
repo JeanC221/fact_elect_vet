@@ -2,12 +2,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { LoginForm } from "@/components/LoginForm";
 import { loginFormSchema, authErrorToSpanish, type LoginFormValues } from "@/mappers/auth";
-import {
-  AuthError,
-  authenticateEmployee,
-  isAdminEmail,
-  verifySessionToken,
-} from "@/services/auth";
+import { AuthError, authenticate, verifySessionToken } from "@/services/auth";
 import {
   SESSION_COOKIE_NAME,
   createRoleCookie,
@@ -31,15 +26,18 @@ export default async function LoginPage() {
     const parsed = loginFormSchema.safeParse(values);
     if (!parsed.success) return { error: authErrorToSpanish("invalid_credentials") };
     let sessionToken: string;
+    let isAdmin: boolean;
     try {
-      sessionToken = await authenticateEmployee(parsed.data.email, parsed.data.password);
+      const result = await authenticate(parsed.data.email, parsed.data.password);
+      sessionToken = result.token;
+      isAdmin = result.admin;
     } catch (error) {
       if (error instanceof AuthError) return { error: authErrorToSpanish(error.code) };
       return { error: authErrorToSpanish("default") };
     }
     // redirect() throws NEXT_REDIRECT — must stay outside the try/catch above.
     cookies().set(createSessionCookie(sessionToken));
-    cookies().set(createRoleCookie(isAdminEmail(parsed.data.email)));
+    cookies().set(createRoleCookie(isAdmin));
     redirect("/");
   }
 

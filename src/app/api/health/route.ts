@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { checkHealth, healthReportSchema } from "@/services/healthCheck";
+import { checkHealth } from "@/services/healthCheck";
+import { healthReportSchema } from "@/schemas/health";
 
 /**
  * Dedicated health endpoint (GET /api/health).
