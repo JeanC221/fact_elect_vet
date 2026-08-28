@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { type LucideIcon, Cog, Home, LogOut, User } from "lucide-react";
+import { type LucideIcon, Cog, Home, LogOut, Settings, User } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { logoutAction } from "@/app/actions";
@@ -15,6 +15,7 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { href: "/", label: "Dashboard", icon: Home },
+  { href: "/settings", label: "Configuración", icon: Settings },
   { href: "/settings/credentials", label: "Credenciales", icon: Cog, adminOnly: true },
   { href: "/settings/mapping", label: "Catálogo", icon: Cog, adminOnly: true },
   { href: "/settings/profile", label: "Perfil", icon: User },
