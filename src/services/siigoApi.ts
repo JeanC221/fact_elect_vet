@@ -22,32 +22,6 @@ export function generateIdempotencyKey(): string {
   return crypto.randomUUID().replace(/-/g, "").substring(0, 30);
 }
 
-/**
- * Genera una respuesta simulada para pruebas en modo sandbox/mock.
- * Evita llamar a la API real de Siigo cuando no hay credenciales válidas.
- */
-function mockSiigoResponse<R>(path: string, responseSchema: z.ZodType<R>): R {
-  const id = `INV-${crypto.randomUUID().replace(/-/g, "").substring(0, 8).toUpperCase()}`;
-  const cufe = crypto.randomUUID().replace(/-/g, "").substring(0, 32).toUpperCase();
-
-  if (path === "/v1/invoices") {
-    return responseSchema.parse({
-      id,
-      cufe,
-      status: "Accepted",
-      observations: "Mock sandbox — factura simulada sin envío a DIAN",
-    });
-  }
-  if (path === "/v1/credit-notes") {
-    return responseSchema.parse({
-      id: `NC-${crypto.randomUUID().replace(/-/g, "").substring(0, 8).toUpperCase()}`,
-      cufe,
-      status: "Accepted",
-    });
-  }
-  return responseSchema.parse({ id, cufe, status: "Accepted" });
-}
-
 /** HTTP status → fallback error code when the body is not a standard Siigo error. */
 const STATUS_ERROR_CODES: Record<number, string> = {
   429: "requests_limit",
@@ -80,13 +54,6 @@ async function postToSiigo<B, R>(
   accessToken: string, partnerId: string, idempotencyKey: string,
 ): Promise<R> {
   const validBody = bodySchema.parse(body);
-  
-  // Sandbox mock mode: cuando no hay accessToken real o es token simulado,
-  // devuelve una respuesta mock sin llamar a la API real de Siigo.
-  if (!accessToken || accessToken.startsWith("sandbox-mock-")) {
-    return mockSiigoResponse<R>(path, responseSchema);
-  }
-
   let res: Response;
   try {
     res = await fetch(`${SIIGO_API_BASE_URL}${path}`, {
@@ -147,15 +114,6 @@ function base64ToBlob(base64: string, mimeType: string): Blob {
 async function fetchInvoiceFile(
   invoiceId: string, format: "pdf" | "xml", accessToken: string, partnerId: string,
 ): Promise<Blob> {
-  // Sandbox mock mode: devuelve un blob vacío simulando el documento
-  if (!accessToken || accessToken.startsWith("sandbox-mock-")) {
-    const mime = format === "pdf" ? "application/pdf" : "application/xml";
-    const content = format === "xml"
-      ? `<?xml version="1.0"?><Factura><ID>${invoiceId}</ID></Factura>`
-      : `%PDF-1.4 mock invoice ${invoiceId}`;
-    return new Blob([content], { type: mime });
-  }
-
   let res: Response;
   try {
     res = await fetch(`${SIIGO_API_BASE_URL}/v1/invoices/${invoiceId}/${format}`, {
