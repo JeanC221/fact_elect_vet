@@ -108,6 +108,19 @@ describe("generateIdempotencyKey", () => {
   });
 });
 
+describe("postToSiigo header validation (defense-in-depth)", () => {
+  it("rejects a Partner-Id shorter than 3 chars before any network call", async () => {
+    await expect(submitInvoice(payload, "t", "AB")).rejects.toThrow();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects an Idempotency-Key longer than 30 chars before any network call", async () => {
+    const longKey = "A".repeat(31);
+    await expect(submitInvoice(payload, "t", "PARTNER1", longKey)).rejects.toThrow();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
 const cnPayload = toCreditNotePayload(
   payload,
   { id: "INV-7751", cufe: "CUFE-abc123" },

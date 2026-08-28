@@ -4,6 +4,7 @@ import {
   siigoTaxEnum,
   type SiigoInvoicePayload,
 } from "@/schemas/siigo";
+import { hasMaxDecimals, toCents } from "@/schemas/provet";
 
 /** DIAN-compliant credit note reason codes for invoice annulment. */
 export type AnnulmentReason =
@@ -24,17 +25,17 @@ export const ANNULMENT_REASONS: { value: AnnulmentReason; label: string }[] = [
 
 /** Reversal line item — price is negated relative to the original invoice. */
 export const siigoCreditNoteItemSchema = z.object({
-  code: z.string().trim().min(1),
-  description: z.string().trim().min(1),
-  quantity: z.number().positive(),
-  price: z.number(),
+  code: z.string().trim().min(1).max(50),
+  description: z.string().trim().min(1).max(200),
+  quantity: z.number().positive().max(1e6),
+  price: z.number().max(1e9).refine((n) => hasMaxDecimals(n, 6), "Price max 6 decimals"),
   taxes: z.array(z.object({ tax_code: siigoTaxEnum })).min(1),
 });
 
 /** Reversal payment — amount is negated relative to the original invoice. */
 export const siigoCreditNotePaymentSchema = z.object({
-  payment_type_id: z.string().trim().min(1),
-  amount: z.number(),
+  payment_type_id: z.string().trim().min(1).max(50),
+  amount: z.number().max(1e12).refine((n) => hasMaxDecimals(n, 2), "Amount max 2 decimals"),
   paid_date: z.coerce.date(),
 });
 
@@ -65,7 +66,7 @@ export const siigoCreditNoteSchema = z
     (cn) => {
       const itemsTotal = cn.items.reduce((s, i) => s + i.price * i.quantity, 0);
       const paymentsTotal = cn.payments.reduce((s, p) => s + p.amount, 0);
-      return itemsTotal === cn.total && paymentsTotal === cn.total;
+      return toCents(itemsTotal) === toCents(cn.total) && toCents(paymentsTotal) === toCents(cn.total);
     },
     {
       message:

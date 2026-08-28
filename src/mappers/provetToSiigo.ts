@@ -3,6 +3,11 @@ import type { SiigoInvoicePayload, SiigoProduct } from "@/schemas/siigo";
 import type { CatalogMapping } from "@/mappers/catalogMapping";
 import { stampSendFor, type EnvironmentMode } from "@/mappers/credentials";
 
+/** Round to 6 decimals (unit prices) — defeats float drift before reconciliation. */
+const round6 = (n: number): number => Math.round(n * 1e6) / 1e6;
+/** Round to 2 decimals (totals/payments) — DIAN cent precision. */
+const round2 = (n: number): number => Math.round(n * 100) / 100;
+
 /** Siigo DIAN tax classification codes (derived from the invoice schema). */
 type SiigoTaxCode =
   SiigoInvoicePayload["items"][number]["taxes"][number]["tax_code"];
@@ -118,8 +123,7 @@ export function provetToSiigoInvoice(
         code: product?.code ?? item.code,
         description: item.name,
         quantity: item.quantity,
-        price:
-          item.unit_price * (1 + item.tax_rate) - item.discount / item.quantity,
+        price: round6(item.unit_price * (1 + item.tax_rate) - item.discount / item.quantity),
         taxes: [
           { tax_code: product?.tax_classification ?? mapTaxRateToSiigo(item.tax_rate) },
         ],
@@ -128,11 +132,11 @@ export function provetToSiigoInvoice(
     payments: [
       {
         payment_type_id: paymentTypeId,
-        amount: consultation.total,
+        amount: round2(consultation.total),
         paid_date: consultation.updated_at,
       },
     ],
-    total: consultation.total,
+    total: round2(consultation.total),
     stamp: { send },
     mail: { send },
   };

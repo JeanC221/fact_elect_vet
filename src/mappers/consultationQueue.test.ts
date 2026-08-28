@@ -108,6 +108,22 @@ describe("quickEditFormSchema", () => {
     expect(quickEditFormSchema.safeParse({ ...validFormValues, identificationType: "NIT" }).success).toBe(false);
     expect(quickEditFormSchema.safeParse({ ...validFormValues, paidAmount: 0 }).success).toBe(false);
   });
+
+  it("accepts a NIT with the verification-digit hyphen (900123456-1)", () => {
+    expect(
+      quickEditFormSchema.safeParse({ ...validFormValues, identificationType: "NIT", identificationNumber: "900123456-1" }).success,
+    ).toBe(true);
+  });
+
+  it("rejects a NIT missing the hyphen verification digit (9001234561)", () => {
+    expect(
+      quickEditFormSchema.safeParse({ ...validFormValues, identificationType: "NIT", identificationNumber: "9001234561" }).success,
+    ).toBe(false);
+  });
+
+  it("rejects a paidAmount with more than 2 decimals", () => {
+    expect(quickEditFormSchema.safeParse({ ...validFormValues, paidAmount: 95200.001 }).success).toBe(false);
+  });
 });
 
 describe("buildInvoicePayloadFromQuickEdit", () => {

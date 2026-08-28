@@ -139,3 +139,19 @@ describe("provetToSiigoInvoice", () => {
     expect(production.mail.send).toBe(true);
   });
 });
+
+describe("provetToSiigoInvoice — zero-drift rounding", () => {
+  it("rounds the unit price to 6 decimals and reconciles totals at cent level", () => {
+    const consultation = {
+      ...mockConsultations[0],
+      items: [{ name: "Svc", code: "SERV-CG-01", quantity: 1, unit_price: 100.123456, tax_rate: 0.19, discount: 0 }],
+      subtotal: 100.123456,
+      tax_total: 19.023456,
+      total: 119.15,
+    };
+    const result = provetToSiigoInvoice(consultation, mockClients[0], mockPatients[0], opts());
+    const frac = String(result.items[0].price).split(".")[1] ?? "";
+    expect(frac.length).toBeLessThanOrEqual(6);
+    expect(() => siigoInvoicePayloadSchema.parse(result)).not.toThrow();
+  });
+});

@@ -23,10 +23,10 @@ export const credentialsSchema = z.object({
     .min(3, "Partner-Id requiere entre 3 y 100 caracteres")
     .max(100, "Partner-Id no puede exceder 100 caracteres")
     .regex(/^[A-Za-z0-9]+$/, "Partner-Id solo admite caracteres alfanuméricos"),
-  username: z.string().trim().min(1, "El usuario es obligatorio"),
-  accessKey: z.string().trim().min(1, "La llave de acceso es obligatoria"),
-  clientId: z.string().trim().min(1, "El Client ID es obligatorio"),
-  clientSecret: z.string().trim().min(1, "El Client Secret es obligatorio"),
+  username: z.string().trim().min(1, "El usuario es obligatorio").max(100),
+  accessKey: z.string().trim().min(1, "La llave de acceso es obligatoria").max(200),
+  clientId: z.string().trim().min(1, "El Client ID es obligatorio").max(100),
+  clientSecret: z.string().trim().min(1, "El Client Secret es obligatorio").max(200),
 });
 export type Credentials = z.infer<typeof credentialsSchema>;
 

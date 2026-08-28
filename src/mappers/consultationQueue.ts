@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  hasMaxDecimals,
   identificationSchema,
   identificationTypes,
   type Client,
@@ -73,7 +74,7 @@ export const quickEditFormSchema = z
     email: z.string().trim().email("Correo electrónico inválido"),
     address: z.string().trim().min(1, "Dirección requerida"),
     paymentMethod: z.string().trim().min(1, "Método de pago requerido"),
-    paidAmount: z.number().positive("El monto pagado debe ser positivo"),
+    paidAmount: z.number().positive("El monto pagado debe ser positivo").refine((n) => hasMaxDecimals(n, 2), "Monto pagado max 2 decimales"),
   })
   .superRefine((data, ctx) => {
     const r = identificationSchema.safeParse({ type: data.identificationType, number: data.identificationNumber });

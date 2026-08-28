@@ -9,6 +9,7 @@ import {
   type QuickEditDetail,
   type QuickEditFormValues,
 } from "@/mappers/consultationQueue";
+import { toCents } from "@/schemas/provet";
 import { ReconciliationBar } from "./ReconciliationBar";
 
 interface QuickEditDrawerProps {
@@ -38,7 +39,7 @@ export function QuickEditDrawer({ detail, isSubmitting, errorMessage, onClose, o
 
   const parsed = quickEditFormSchema.safeParse(values);
   const errors: Record<string, string> = parsed.success ? {} : Object.fromEntries(parsed.error.issues.map((i) => [String(i.path[0]), i.message]));
-  const balanced = (detail?.total ?? 0) - values.paidAmount === 0;
+  const balanced = toCents(detail?.total ?? 0) - toCents(values.paidAmount) === 0;
   const canSubmit = parsed.success && balanced && !isSubmitting && detail !== null;
 
   useEffect(() => {
@@ -72,11 +73,11 @@ export function QuickEditDrawer({ detail, isSubmitting, errorMessage, onClose, o
                 {["CC", "CE", "NIT", "PA"].map((t) => (<option key={t} value={t}>{t}</option>))}
               </select>
             </Field>
-            <Field label="Número / NIT" error={errors.identificationNumber} hint={values.identificationType === "NIT" ? "NIT requiere dígito de verificación (ej. 900123456-1)" : undefined}>
-              <input value={values.identificationNumber} onChange={(e) => update({ identificationNumber: e.target.value.replace(/[\s-]/g, "") })} className={INPUT} disabled={isSubmitting} />
+            <Field label="Número / NIT" error={errors.identificationNumber} hint={values.identificationType === "CC" ? "Cédula válida: 6–10 dígitos" : values.identificationType === "NIT" ? "NIT requiere dígito de verificación (ej. 900123456-1)" : undefined}>
+              <input value={values.identificationNumber} onChange={(e) => update({ identificationNumber: e.target.value.replace(/\s/g, "") })} className={INPUT} disabled={isSubmitting} />
             </Field>
           </div>
-          <Field label="Correo electrónico" error={errors.email ? "⚠️ Falta correo - Requerido para envío DIAN" : undefined}>
+          <Field label="Correo electrónico" error={errors.email ? (values.email.trim() ? errors.email : "⚠️ Falta correo — Requerido para envío DIAN") : undefined}>
             <input type="email" value={values.email} onChange={(e) => update({ email: e.target.value })} className={INPUT} disabled={isSubmitting} />
           </Field>
           <Field label="Dirección" error={errors.address}>
@@ -89,7 +90,7 @@ export function QuickEditDrawer({ detail, isSubmitting, errorMessage, onClose, o
               </select>
             </Field>
             <Field label="Monto pagado (COP)">
-              <input type="number" min={0} value={values.paidAmount} onChange={(e) => update({ paidAmount: Number(e.target.value) })} className={INPUT} disabled={isSubmitting} />
+              <input type="number" min={0} step="0.01" value={values.paidAmount} onChange={(e) => update({ paidAmount: Math.round(Number(e.target.value) * 100) / 100 })} className={INPUT} disabled={isSubmitting} />
             </Field>
           </div>
           <ReconciliationBar consultationTotal={detail.total} paidAmount={values.paidAmount} />

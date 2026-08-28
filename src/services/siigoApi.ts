@@ -22,6 +22,10 @@ export function generateIdempotencyKey(): string {
   return crypto.randomUUID().replace(/-/g, "").substring(0, 30);
 }
 
+/** Runtime validation for mandatory Siigo headers (defense-in-depth for non-UI callers). */
+const partnerIdHeaderSchema = z.string().trim().min(3, "Partner-Id requiere 3-100 caracteres").max(100).regex(/^[A-Za-z0-9-]+$/, "Partner-Id inválido");
+const idempotencyKeyHeaderSchema = z.string().trim().min(1, "Idempotency-Key requerido").max(30, "Idempotency-Key max 30 caracteres").regex(/^[A-Za-z0-9-]+$/, "Idempotency-Key inválido");
+
 /** HTTP status → fallback error code when the body is not a standard Siigo error. */
 const STATUS_ERROR_CODES: Record<number, string> = {
   429: "requests_limit",
@@ -54,14 +58,16 @@ async function postToSiigo<B, R>(
   accessToken: string, partnerId: string, idempotencyKey: string,
 ): Promise<R> {
   const validBody = bodySchema.parse(body);
+  const validPartnerId = partnerIdHeaderSchema.parse(partnerId);
+  const validIdempotencyKey = idempotencyKeyHeaderSchema.parse(idempotencyKey);
   let res: Response;
   try {
     res = await fetch(`${SIIGO_API_BASE_URL}${path}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Partner-Id": partnerId,
-        "Idempotency-Key": idempotencyKey,
+        "Partner-Id": validPartnerId,
+        "Idempotency-Key": validIdempotencyKey,
         Authorization: `Bearer ${accessToken}`,
       },
       body: JSON.stringify(validBody),
