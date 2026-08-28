@@ -2,7 +2,7 @@
   "node": {
     "8c12e0cfb7788c96b3d39f5ade320bf3f8029a1a": {
       "workers": {
-        "app/page": "(action-browser)/./node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22C%3A%5C%5CProgramacion%5C%5CTrabajo%5C%5Cfact_vet%5C%5Csrc%5C%5Capp%5C%5Cactions.ts%22%2C%5B%22getSiigoCredentials%22%2C%22logoutAction%22%5D%5D%5D&__client_imported__=true!"
+        "app/page": "(action-browser)/./node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22C%3A%5C%5CProgramacion%5C%5CTrabajo%5C%5Cfact_vet%5C%5Csrc%5C%5Capp%5C%5Cactions.ts%22%2C%5B%22logoutAction%22%5D%5D%5D&__client_imported__=true!"
       },
       "layer": {
         "app/page": "action-browser"
@@ -10,10 +10,24 @@
     },
     "ecf7b5334c16c549c1917ee053df486b4bd9697c": {
       "workers": {
-        "app/page": "(action-browser)/./node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22C%3A%5C%5CProgramacion%5C%5CTrabajo%5C%5Cfact_vet%5C%5Csrc%5C%5Capp%5C%5Cactions.ts%22%2C%5B%22getSiigoCredentials%22%2C%22logoutAction%22%5D%5D%5D&__client_imported__=true!"
+        "app/page": "(action-browser)/./node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22C%3A%5C%5CProgramacion%5C%5CTrabajo%5C%5Cfact_vet%5C%5Csrc%5C%5Capp%5C%5Cactions.ts%22%2C%5B%22logoutAction%22%5D%5D%5D&__client_imported__=true!",
+        "app/settings/credentials/page": "(action-browser)/./node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22C%3A%5C%5CProgramacion%5C%5CTrabajo%5C%5Cfact_vet%5C%5Csrc%5C%5Capp%5C%5Cactions.ts%22%2C%5B%22logoutAction%22%5D%5D%5D&__client_imported__=true!",
+        "app/settings/profile/page": "(rsc)/./node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22C%3A%5C%5CProgramacion%5C%5CTrabajo%5C%5Cfact_vet%5C%5Csrc%5C%5Capp%5C%5Cactions.ts%22%2C%5B%22logoutAction%22%5D%5D%5D&__client_imported__=!",
+        "app/settings/mapping/page": "(action-browser)/./node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22C%3A%5C%5CProgramacion%5C%5CTrabajo%5C%5Cfact_vet%5C%5Csrc%5C%5Capp%5C%5Cactions.ts%22%2C%5B%22logoutAction%22%5D%5D%5D&__client_imported__=true!"
       },
       "layer": {
-        "app/page": "action-browser"
+        "app/page": "action-browser",
+        "app/settings/credentials/page": "action-browser",
+        "app/settings/profile/page": "rsc",
+        "app/settings/mapping/page": "action-browser"
+      }
+    },
+    "8306056c517b48a305b22e5694ac1a90b0d1539f": {
+      "workers": {
+        "app/login/page": "(rsc)/./node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22C%3A%5C%5CProgramacion%5C%5CTrabajo%5C%5Cfact_vet%5C%5Csrc%5C%5Capp%5C%5Clogin%5C%5Cpage.tsx%22%2C%5B%22%24%24ACTION_0%22%5D%5D%5D&__client_imported__=!"
+      },
+      "layer": {
+        "app/login/page": "rsc"
       }
     }
   },
