@@ -622,6 +622,9 @@ video {
 .ml-1 {
   margin-left: 0.25rem;
 }
+.ml-auto {
+  margin-left: auto;
+}
 .mr-1 {
   margin-right: 0.25rem;
 }
@@ -636,9 +639,6 @@ video {
 }
 .mt-2 {
   margin-top: 0.5rem;
-}
-.ml-auto {
-  margin-left: auto;
 }
 .block {
   display: block;
@@ -664,6 +664,9 @@ video {
 .hidden {
   display: none;
 }
+.h-2\.5 {
+  height: 0.625rem;
+}
 .h-3 {
   height: 0.75rem;
 }
@@ -685,11 +688,17 @@ video {
 .h-screen {
   height: 100vh;
 }
-.h-2\.5 {
-  height: 0.625rem;
-}
 .max-h-\[40vh\] {
   max-height: 40vh;
+}
+.w-16 {
+  width: 4rem;
+}
+.w-2\.5 {
+  width: 0.625rem;
+}
+.w-24 {
+  width: 6rem;
 }
 .w-3 {
   width: 0.75rem;
@@ -714,15 +723,6 @@ video {
 }
 .w-screen {
   width: 100vw;
-}
-.w-16 {
-  width: 4rem;
-}
-.w-2\.5 {
-  width: 0.625rem;
-}
-.w-24 {
-  width: 6rem;
 }
 .min-w-0 {
   min-width: 0px;
@@ -844,11 +844,11 @@ video {
 .break-all {
   word-break: break-all;
 }
-.rounded-md {
-  border-radius: 6px;
-}
 .rounded-full {
   border-radius: 9999px;
+}
+.rounded-md {
+  border-radius: 6px;
 }
 .rounded-sm {
   border-radius: 2px;
@@ -895,6 +895,14 @@ video {
   --tw-bg-opacity: 1;
   background-color: rgb(244 246 248 / var(--tw-bg-opacity, 1));
 }
+.bg-grid-line {
+  --tw-bg-opacity: 1;
+  background-color: rgb(226 232 240 / var(--tw-bg-opacity, 1));
+}
+.bg-muted {
+  --tw-bg-opacity: 1;
+  background-color: rgb(90 106 133 / var(--tw-bg-opacity, 1));
+}
 .bg-pure-white {
   --tw-bg-opacity: 1;
   background-color: rgb(255 255 255 / var(--tw-bg-opacity, 1));
@@ -906,29 +914,21 @@ video {
   --tw-bg-opacity: 1;
   background-color: rgb(209 231 221 / var(--tw-bg-opacity, 1));
 }
-.bg-status-draft-bg {
-  --tw-bg-opacity: 1;
-  background-color: rgb(255 243 205 / var(--tw-bg-opacity, 1));
-}
-.bg-status-rejected-bg {
-  --tw-bg-opacity: 1;
-  background-color: rgb(248 215 218 / var(--tw-bg-opacity, 1));
-}
-.bg-grid-line {
-  --tw-bg-opacity: 1;
-  background-color: rgb(226 232 240 / var(--tw-bg-opacity, 1));
-}
-.bg-muted {
-  --tw-bg-opacity: 1;
-  background-color: rgb(90 106 133 / var(--tw-bg-opacity, 1));
-}
 .bg-status-accepted-border {
   --tw-bg-opacity: 1;
   background-color: rgb(186 218 204 / var(--tw-bg-opacity, 1));
 }
+.bg-status-draft-bg {
+  --tw-bg-opacity: 1;
+  background-color: rgb(255 243 205 / var(--tw-bg-opacity, 1));
+}
 .bg-status-draft-border {
   --tw-bg-opacity: 1;
   background-color: rgb(255 236 181 / var(--tw-bg-opacity, 1));
+}
+.bg-status-rejected-bg {
+  --tw-bg-opacity: 1;
+  background-color: rgb(248 215 218 / var(--tw-bg-opacity, 1));
 }
 .bg-status-rejected-border {
   --tw-bg-opacity: 1;

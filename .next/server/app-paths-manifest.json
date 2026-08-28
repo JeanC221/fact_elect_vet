@@ -1,9 +1,5 @@
 {
-  "/page": "app/page.js",
-  "/settings/credentials/page": "app/settings/credentials/page.js",
-  "/settings/mapping/page": "app/settings/mapping/page.js",
-  "/settings/page": "app/settings/page.js",
   "/login/page": "app/login/page.js",
-  "/api/health/route": "app/api/health/route.js",
-  "/settings/profile/page": "app/settings/profile/page.js"
+  "/page": "app/page.js",
+  "/settings/credentials/page": "app/settings/credentials/page.js"
 }

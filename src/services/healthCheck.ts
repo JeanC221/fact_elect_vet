@@ -1,44 +1,15 @@
-import { z } from "zod";
 import { SIIGO_API_BASE_URL } from "./siigoApi";
+import type { ServiceState, ServiceName, ServiceHealth, HealthReport } from "@/schemas/health";
 
-/** Tri-state semaphore value for a single external service. */
-export type ServiceState = "online" | "degraded" | "offline" | "unknown";
-
-/** External services monitored by the health semaphore. */
-export type ServiceName = "provet" | "siigo" | "dian";
-
-/** Health snapshot for a single service. */
-export interface ServiceHealth {
-  name: ServiceName;
-  label: string;
-  state: ServiceState;
-  latencyMs: number | null;
-  detail: string;
-  checkedAt: string;
-}
-
-/** Aggregated health report consumed by the settings dashboard. */
-export interface HealthReport {
-  services: ServiceHealth[];
-  overall: ServiceState;
-  checkedAt: string;
-}
-
-/** Zod schema validating the route handler's own JSON output (§3 runtime validation). */
-export const healthReportSchema = z.object({
-  services: z.array(
-    z.object({
-      name: z.enum(["provet", "siigo", "dian"]),
-      label: z.string().min(1),
-      state: z.enum(["online", "degraded", "offline", "unknown"]),
-      latencyMs: z.number().nullable(),
-      detail: z.string().min(1),
-      checkedAt: z.string().min(1),
-    }),
-  ),
-  overall: z.enum(["online", "degraded", "offline", "unknown"]),
-  checkedAt: z.string().min(1),
-});
+/**
+ * Re-export the client-safe schema + types from @/schemas/health (single source
+ * of truth) so server-side callers — the /api/health route and these unit tests —
+ * keep one import. The "use client" HealthCheckStatus card imports @/schemas/health
+ * DIRECTLY to avoid pulling this server-leaning service (and siigoApi.ts) into the
+ * browser bundle, which was triggering the RSC "promise resolves to undefined" crash.
+ */
+export { healthReportSchema } from "@/schemas/health";
+export type { ServiceState, ServiceName, ServiceHealth, HealthReport } from "@/schemas/health";
 
 const DEGRADED_THRESHOLD_MS = 2000;
 const TIMEOUT_MS = 5000;
