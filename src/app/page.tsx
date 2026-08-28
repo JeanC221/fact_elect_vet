@@ -21,7 +21,8 @@ import {
   type InvoiceHistoryRow,
 } from "@/mappers/invoiceHistory";
 import { toCreditNotePayload, siigoCreditNoteSchema, type AnnulmentReason } from "@/mappers/creditNote";
-import { fetchInvoicePdf, fetchInvoiceXml, generateIdempotencyKey, submitCreditNote, submitInvoice } from "@/services/siigoApi";
+import { fetchInvoicePdf, fetchInvoiceXml, generateIdempotencyKey, SiigoApiError, submitCreditNote } from "@/services/siigoApi";
+import { siigoInvoiceResponseSchema } from "@/schemas/siigo";
 import { translateSiigoError, retryWithBackoff, type TranslatedError, type QuickAction } from "@/services/errorTranslator";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { mockClients, mockConsultations, mockPatients } from "@/mocks/provet";
@@ -63,10 +64,10 @@ export default function HomePage() {
       identificationType: knownTypes.has(docParts[0]) ? (docParts[0] as QuickEditDetail["identificationType"]) : "CC",
       identificationNumber: docParts.slice(1).join(" ") || "",
       email: "",
-      address: "",
+      phone: "",
       patientName: row.patientName,
       paymentMethod: row.paymentMethod,
-      paymentMethodOptions: ["Efectivo", "Tarjeta Crédito", "Transferencia"],
+      paymentMethodOptions: ["Bancolombia", "Davivienda", "Efectivo"],
       total: row.total,
       items: [],
       createdAt: row.createdAt,
@@ -118,7 +119,7 @@ export default function HomePage() {
     try {
       const d = buildQuickEditDetail(mockConsultations, mockClients, mockPatients, annulTarget.consultationId);
       if (!d) throw new Error("missing_source_data");
-      const original = buildInvoicePayloadFromQuickEdit(mockConsultations, mockClients, mockPatients, annulTarget.consultationId, { identificationType: d.identificationType, identificationNumber: d.identificationNumber, email: d.email, address: d.address, paymentMethod: d.paymentMethod, paidAmount: d.total });
+      const original = buildInvoicePayloadFromQuickEdit(mockConsultations, mockClients, mockPatients, annulTarget.consultationId, { name: d.clientName, phone: d.phone, identificationType: d.identificationType, identificationNumber: d.identificationNumber, email: d.email, paymentMethod: d.paymentMethod, paidAmount: d.total });
       if (!original) throw new Error("missing_source_data");
       const cn = toCreditNotePayload(original, { id: annulTarget.invoiceId, cufe: annulTarget.cufe }, reason);
       siigoCreditNoteSchema.parse(cn);
@@ -137,10 +138,20 @@ export default function HomePage() {
       const payload = buildInvoicePayloadFromQuickEdit(mockConsultations, mockClients, mockPatients, selectedId, values, options);
       if (!payload) throw new Error("missing_source_data");
       const idemKey = generateIdempotencyKey();
-      const response = await retryWithBackoff(() => submitInvoice(payload, "", "", idemKey), { maxRetries: 5, onRetry: (n) => setRetryAttempt(n) });
+      const response = await retryWithBackoff(async () => {
+        const res = await fetch("/api/invoices", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Idempotency-Key": idemKey },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new SiigoApiError(data.error?.code ?? "default", data.error?.message ?? "Error al emitir la factura.");
+        return siigoInvoiceResponseSchema.parse(data);
+      }, { maxRetries: 5, onRetry: (n) => setRetryAttempt(n) });
       setRowStatus(selectedId, response.status);
       setHistory((prev) => [...prev, toInvoiceHistoryEntry(response, selectedId, new Date())]);
-      if (response.status === "Accepted") { setSelectedId(null); showToast(`Factura ${response.id} generada con éxito · CUFE: ${response.cufe}`); }
+      const number = response.number ?? response.id;
+      if (response.status === "Accepted") { setSelectedId(null); showToast(`Factura ${number} generada con éxito · CUFE: ${response.cufe}`); }
       else if (response.status === "Rejected") { setTranslatedError({ code: "rejected", message: "La DIAN rechazó la factura. Corrija los datos y reintente.", severity: "error", quickAction: "none", retryable: false }); }
       else { setTranslatedError({ code: "draft", message: "Factura guardada como borrador.", severity: "warning", quickAction: "save_draft", retryable: false }); }
     } catch (error) {
@@ -148,7 +159,7 @@ export default function HomePage() {
       setTranslatedError(te);
       if (te.quickAction === "save_draft") setRowStatus(selectedId, "Draft");
     } finally { setIsSubmitting(false); setRetryAttempt(0); }
-  }, [selectedId, setRowStatus, showToast]);
+  }, [selectedId, options, setRowStatus, showToast]);
 
   const handleClose = useCallback(() => { if (!isSubmitting) { setSelectedId(null); setTranslatedError(null); setRetryAttempt(0); } }, [isSubmitting]);
   const handleQuickAction = useCallback((action: QuickAction) => { if (action.startsWith("edit_")) setTranslatedError(null); }, []);

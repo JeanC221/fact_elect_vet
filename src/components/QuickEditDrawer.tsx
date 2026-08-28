@@ -29,7 +29,7 @@ function Field({ label, error, hint, children }: { label: string; error?: string
 }
 
 function initialValues(d: QuickEditDetail | null): QuickEditFormValues {
-  return { identificationType: d?.identificationType ?? "CC", identificationNumber: d?.identificationNumber ?? "", email: d?.email ?? "", address: d?.address ?? "", paymentMethod: d?.paymentMethod ?? "", paidAmount: d?.total ?? 0 };
+  return { name: d?.clientName ?? "", identificationType: d?.identificationType ?? "CC", identificationNumber: d?.identificationNumber ?? "", email: d?.email ?? "", phone: d?.phone ?? "", paymentMethod: d?.paymentMethod ?? "", paidAmount: d?.total ?? 0 };
 }
 
 export function QuickEditDrawer({ detail, isSubmitting, errorMessage, onClose, onSubmit }: QuickEditDrawerProps) {
@@ -67,6 +67,9 @@ export function QuickEditDrawer({ detail, isSubmitting, errorMessage, onClose, o
             <div className="mt-1 text-muted">Fecha</div>
             <div className="font-medium text-slate-text">{formatDate(detail.createdAt)}</div>
           </div>
+          <Field label="Nombre del Cliente" error={errors.name}>
+            <input value={values.name} onChange={(e) => update({ name: e.target.value })} className={INPUT} disabled={isSubmitting} />
+          </Field>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Tipo ID">
               <select value={values.identificationType} onChange={(e) => update({ identificationType: e.target.value as QuickEditFormValues["identificationType"] })} className={INPUT} disabled={isSubmitting}>
@@ -74,15 +77,17 @@ export function QuickEditDrawer({ detail, isSubmitting, errorMessage, onClose, o
               </select>
             </Field>
             <Field label="Número / NIT" error={errors.identificationNumber} hint={values.identificationType === "CC" ? "Cédula válida: 6–10 dígitos" : values.identificationType === "NIT" ? "NIT requiere dígito de verificación (ej. 900123456-1)" : undefined}>
-              <input value={values.identificationNumber} onChange={(e) => update({ identificationNumber: e.target.value.replace(/\s/g, "") })} className={INPUT} disabled={isSubmitting} />
+              <input value={values.identificationNumber} onChange={(e) => update({ identificationNumber: e.target.value.replace(/[.\s]/g, "") })} className={INPUT} disabled={isSubmitting} />
             </Field>
           </div>
-          <Field label="Correo electrónico" error={errors.email ? (values.email.trim() ? errors.email : "⚠️ Falta correo — Requerido para envío DIAN") : undefined}>
-            <input type="email" value={values.email} onChange={(e) => update({ email: e.target.value })} className={INPUT} disabled={isSubmitting} />
-          </Field>
-          <Field label="Dirección" error={errors.address}>
-            <input value={values.address} onChange={(e) => update({ address: e.target.value })} className={INPUT} disabled={isSubmitting} />
-          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Correo electrónico" error={errors.email ? (values.email.trim() ? errors.email : "Falta correo") : undefined}>
+              <input type="email" value={values.email} onChange={(e) => update({ email: e.target.value })} className={INPUT} disabled={isSubmitting} />
+            </Field>
+            <Field label="Teléfono" error={errors.phone ? (values.phone.length < 7 ? "Mínimo 7 dígitos" : errors.phone) : undefined}>
+              <input value={values.phone} onChange={(e) => update({ phone: e.target.value.replace(/\D/g, "").slice(0, 10) })} className={INPUT} disabled={isSubmitting} placeholder="Ej. 3105550101" />
+            </Field>
+          </div>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Método de pago">
               <select value={values.paymentMethod} onChange={(e) => update({ paymentMethod: e.target.value })} className={INPUT} disabled={isSubmitting}>
@@ -104,7 +109,7 @@ export function QuickEditDrawer({ detail, isSubmitting, errorMessage, onClose, o
           {errorMessage && <div className="flex items-start gap-2 rounded-md border border-status-rejected-border bg-status-rejected-bg px-2 py-2 text-xs text-status-rejected-text"><AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" /><span>{errorMessage}</span></div>}
         </div>
         <footer className="border-t border-grid-line p-3">
-          <button type="button" onClick={() => canSubmit && onSubmit(values)} disabled={!canSubmit} className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-clinical-blue px-3 py-2 text-sm font-semibold text-white hover:bg-clinical-blue-hover active:bg-clinical-blue-active disabled:cursor-not-allowed disabled:opacity-50">{isSubmitting ? (<><Loader2 className="h-4 w-4 animate-spin" /> Emitiendo a DIAN...</>) : "Emitir Factura"}</button>
+          <button type="button" onClick={() => canSubmit && onSubmit(values)} disabled={!canSubmit} className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-clinical-blue px-3 py-2 text-sm font-semibold text-white hover:bg-clinical-blue-hover active:bg-clinical-blue-active disabled:cursor-not-allowed disabled:opacity-50">{isSubmitting ? (<><Loader2 className="h-4 w-4 animate-spin" /> Emitiendo a DIAN...</>) : "⚡ Emitir Factura"}</button>
           <p className="mt-1 text-center text-2xs text-muted">Esc para cerrar · Ctrl+Enter para emitir</p>
         </footer>
       </aside>

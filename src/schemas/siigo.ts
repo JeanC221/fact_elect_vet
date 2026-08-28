@@ -27,10 +27,12 @@ export const siigoPaymentTypeSchema = z.object({
 
 export const siigoCustomerSchema = z.object({
   identification: identificationSchema,
-  name: z.string().trim().min(1).max(100).transform(sanitizeText),
-  email: z.string().trim().max(254).email(),
-  address: z.string().trim().min(1).max(200).transform(sanitizeText),
-  phone: z.string().trim().min(7).max(20),
+  name: z
+    .array(z.string().trim().min(1).max(100).transform(sanitizeText))
+    .min(1)
+    .max(2),
+  email: z.string().trim().max(254).email().transform((v) => v.toLowerCase()),
+  phone: z.string().trim().min(7).max(10),
 });
 
 export const siigoInvoiceItemSchema = z.object({
@@ -73,6 +75,7 @@ export const siigoInvoicePayloadSchema = z
 
 export const siigoInvoiceResponseSchema = z.object({
   id: z.string().trim().min(1),
+  number: z.string().trim().max(50).optional(),
   cufe: z.string().trim().min(1),
   status: z.enum(["Accepted", "Draft", "Rejected"]),
   observations: z.string().max(500).optional(),

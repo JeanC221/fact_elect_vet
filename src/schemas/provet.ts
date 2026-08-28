@@ -12,7 +12,7 @@ export const identificationSchema = z
   .superRefine(({ type, number }, ctx) => {
     const formats: Record<(typeof identificationTypes)[number], RegExp> = {
       CC: /^\d{6,10}$/,
-      NIT: /^\d{7,10}-\d{1}$/,
+      NIT: /^\d{7,10}-?\d{1}$/,
       CE: /^[A-Za-z0-9]{5,20}$/,
       PA: /^[A-Za-z0-9]{5,20}$/,
     };

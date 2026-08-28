@@ -61,7 +61,7 @@ export interface QuickEditDetail {
   id: string; clientName: string;
   identificationType: (typeof identificationTypes)[number];
   identificationNumber: string;
-  email: string; address: string; patientName: string;
+  email: string; phone: string; patientName: string;
   paymentMethod: string; paymentMethodOptions: string[];
   total: number; items: QuickEditItem[]; createdAt: Date;
 }
@@ -69,10 +69,11 @@ export interface QuickEditDetail {
 /** Zod schema for the Quick-Edit form (reuses identificationSchema for NIT/Cédula rules). */
 export const quickEditFormSchema = z
   .object({
+    name: z.string().trim().min(1, "Nombre del cliente requerido").max(100),
     identificationType: z.enum(identificationTypes),
     identificationNumber: z.string().trim().min(1, "Identificación requerida"),
     email: z.string().trim().email("Correo electrónico inválido"),
-    address: z.string().trim().min(1, "Dirección requerida"),
+    phone: z.string().trim().min(7, "Teléfono debe tener al menos 7 dígitos").max(20),
     paymentMethod: z.string().trim().min(1, "Método de pago requerido"),
     paidAmount: z.number().positive("El monto pagado debe ser positivo").refine((n) => hasMaxDecimals(n, 2), "Monto pagado max 2 decimales"),
   })
@@ -99,7 +100,7 @@ export function buildQuickEditDetail(
   const identificationType = client?.identification.type ?? "CC";
   const identificationNumber = client?.identification.number ?? "";
   const email = client?.email ?? "";
-  const address = client?.address ?? "";
+  const phone = client?.phone ?? "";
 
   const opts = Object.keys(PAYMENT_METHOD_MAP);
   const paymentMethodOptions = opts.includes(consultation.payment_method) ? opts : [consultation.payment_method, ...opts];
@@ -108,7 +109,8 @@ export function buildQuickEditDetail(
     id: consultation.id, clientName,
     identificationType,
     identificationNumber,
-    email, address,
+    email,
+    phone,
     patientName: patient?.name ?? "Paciente desconocido",
     paymentMethod: consultation.payment_method, paymentMethodOptions,
     total: consultation.total, createdAt: consultation.created_at,
@@ -133,9 +135,10 @@ export function buildInvoicePayloadFromQuickEdit(
 
   const overriddenClient: Client = {
     ...client,
+    name: values.name,
     identification: { type: values.identificationType, number: values.identificationNumber },
     email: values.email,
-    address: values.address,
+    phone: values.phone,
   };
   const overriddenConsultation: Consultation = { ...consultation, payment_method: values.paymentMethod };
   const fallbackPatient: Patient = { id: consultation.patient_id, name: "Paciente desconocido", species: "—", owner_id: client.id };

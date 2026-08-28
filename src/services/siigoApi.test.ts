@@ -42,7 +42,7 @@ describe("submitInvoice", () => {
     expect(headers.Authorization).toBe("Bearer tok-123");
     expect(headers["Content-Type"]).toBe("application/json");
     expect(headers["Idempotency-Key"]).toMatch(/^[A-Za-z0-9]{1,30}$/);
-    expect(JSON.parse(String(init.body)).customer.name).toBe(
+    expect(JSON.parse(String(init.body)).customer.name).toEqual(
       payload.customer.name,
     );
     expect(res).toEqual(okBody);

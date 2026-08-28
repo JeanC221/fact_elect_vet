@@ -2,6 +2,12 @@ import type { Consultation, Client, Patient } from "@/schemas/provet";
 import type { SiigoInvoicePayload, SiigoProduct } from "@/schemas/siigo";
 import type { CatalogMapping } from "@/mappers/catalogMapping";
 import { stampSendFor, type EnvironmentMode } from "@/mappers/credentials";
+import {
+  buildSiigoName,
+  cleanIdentification,
+  cleanPhone,
+  sanitizeEmail,
+} from "@/mappers/customerNormalizer";
 
 /** Round to 6 decimals (unit prices) — defeats float drift before reconciliation. */
 const round6 = (n: number): number => Math.round(n * 1e6) / 1e6;
@@ -49,9 +55,9 @@ export interface ProvetToSiigoOptions {
  * `ProvetToSiigoOptions` instead of relying on this constant.
  */
 export const PAYMENT_METHOD_MAP: Record<string, string> = {
-  Efectivo: "PT-001",
-  "Tarjeta Crédito": "PT-002",
-  Transferencia: "PT-003",
+  Bancolombia: "PT-001",
+  Davivienda: "PT-002",
+  Efectivo: "PT-003",
 };
 
 /** Sandbox-safe defaults reproducing the pre-Task-4.3 static behavior. */
@@ -79,8 +85,8 @@ const DEFAULT_OPTIONS: ProvetToSiigoOptions = {
  *     unmapped or stale-product items fall back to the rate-derived code.
  *   - Mapped items emit the Siigo product `code`; unmapped keep the Provet one.
  *
- * `stamp.send` / `mail.send` derive from `stampSendFor(mode)` — sandbox is
- * always false; production enables DIAN stamping and client mail dispatch.
+ * `stamp.send` derives from `stampSendFor(mode)` (sandbox stays false), while
+ * `mail.send` is always true to trigger Siigo client email dispatch.
  */
 export function provetToSiigoInvoice(
   consultation: Consultation,
@@ -102,18 +108,23 @@ export function provetToSiigoInvoice(
   const paymentTypeId =
     paymentByMethod.get(consultation.payment_method) ??
     PAYMENT_METHOD_MAP["Efectivo"] ??
-    "PT-001";
+    "PT-003";
 
-  const send = stampSendFor(mode);
+  const stampSend = stampSendFor(mode);
+  const fallbackItem = { name: "Consulta Veterinaria General", code: "FALLBACK-CVG-01", quantity: 1, unit_price: Math.max(consultation.total || 1, 1), tax_rate: 0, discount: 0 };
+  const sourceItems = consultation.items.length > 0 ? consultation.items : [fallbackItem];
+  const effectiveTotal = consultation.items.length > 0 ? consultation.total : fallbackItem.unit_price;
   return {
     customer: {
-      identification: client.identification,
-      name: client.name || "Cliente sin nombre",
-      email: client.email || "sin-correo@placeholder.local",
-      address: client.address || "Sin dirección registrada",
-      phone: client.phone || "0000000",
+      identification: cleanIdentification(
+        client.identification.type,
+        client.identification.number,
+      ),
+      name: buildSiigoName(client.name || "Cliente sin nombre"),
+      email: sanitizeEmail(client.email || "sin-correo@placeholder.local"),
+      phone: cleanPhone(client.phone || "0000000"),
     },
-    items: consultation.items.map((item) => {
+    items: sourceItems.map((item) => {
       const productId = productIdByItemCode.get(item.code);
       const product = productId ? productById.get(productId) : undefined;
       return {
@@ -129,12 +140,12 @@ export function provetToSiigoInvoice(
     payments: [
       {
         payment_type_id: paymentTypeId,
-        amount: round2(consultation.total),
+        amount: round2(effectiveTotal),
         paid_date: consultation.updated_at,
       },
     ],
-    total: round2(consultation.total),
-    stamp: { send },
-    mail: { send },
+    total: round2(effectiveTotal),
+    stamp: { send: stampSend },
+    mail: { send: true },
   };
 }
