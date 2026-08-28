@@ -99,22 +99,19 @@ export function provetToSiigoInvoice(
   );
   const productById = new Map(siigoProducts.map((p) => [p.id, p]));
 
-  const paymentTypeId = paymentByMethod.get(consultation.payment_method);
-  if (!paymentTypeId) {
-    throw new Error(
-      `Unmapped payment method: "${consultation.payment_method}". ` +
-        `Map it in Settings → Catalog Mapping.`,
-    );
-  }
+  const paymentTypeId =
+    paymentByMethod.get(consultation.payment_method) ??
+    PAYMENT_METHOD_MAP["Efectivo"] ??
+    "PT-001";
 
   const send = stampSendFor(mode);
   return {
     customer: {
       identification: client.identification,
-      name: client.name,
-      email: client.email,
-      address: client.address,
-      phone: client.phone,
+      name: client.name || "Cliente sin nombre",
+      email: client.email || "sin-correo@placeholder.local",
+      address: client.address || "Sin dirección registrada",
+      phone: client.phone || "0000000",
     },
     items: consultation.items.map((item) => {
       const productId = productIdByItemCode.get(item.code);

@@ -85,10 +85,19 @@ describe("buildQuickEditDetail", () => {
     expect(d?.paymentMethodOptions).toContain("Tarjeta Crédito");
   });
 
-  it("returns undefined for unknown id or orphan client", () => {
+  it("returns undefined for unknown consultation id", () => {
     expect(buildQuickEditDetail(mockConsultations, mockClients, mockPatients, "CON-NOPE")).toBeUndefined();
+  });
+
+  it("returns a detail with fallback defaults for an orphan client instead of undefined", () => {
     const orphan = [{ ...mockConsultations[0], id: "CON-X", client_id: "CLI-NOPE" }];
-    expect(buildQuickEditDetail(orphan, mockClients, mockPatients, "CON-X")).toBeUndefined();
+    const d = buildQuickEditDetail(orphan, mockClients, mockPatients, "CON-X");
+    expect(d).toBeDefined();
+    expect(d?.clientName).toBe("Cliente desconocido");
+    expect(d?.identificationType).toBe("CC");
+    expect(d?.identificationNumber).toBe("");
+    expect(d?.email).toBe("");
+    expect(d?.address).toBe("");
   });
 
   it("prepends unmapped payment method to options", () => {

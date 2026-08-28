@@ -11,6 +11,7 @@ import {
   buildInvoicePayloadFromQuickEdit,
   buildQuickEditDetail,
   type InvoiceStatus,
+  type QuickEditDetail,
   type QuickEditFormValues,
 } from "@/mappers/consultationQueue";
 import {
@@ -47,7 +48,31 @@ export default function HomePage() {
   const [busyInvoiceId, setBusyInvoiceId] = useState<string | null>(null);
   const options = useEmissionOptions();
 
-  const selectedDetail = useMemo(() => selectedId ? buildQuickEditDetail(mockConsultations, mockClients, mockPatients, selectedId) ?? null : null, [selectedId]);
+  const selectedDetail = useMemo(() => {
+    if (!selectedId) return null;
+    const detail = buildQuickEditDetail(mockConsultations, mockClients, mockPatients, selectedId);
+    if (detail) return detail;
+    // Live Provet consultation not in mocks → build minimal detail from queue row
+    const row = rows.find((r) => r.id === selectedId);
+    if (!row) return null;
+    const docParts = row.clientDoc.split(" ");
+    const knownTypes = new Set<string>(["CC", "CE", "NIT", "PA"]);
+    const fallback: QuickEditDetail = {
+      id: row.id,
+      clientName: row.clientName,
+      identificationType: knownTypes.has(docParts[0]) ? (docParts[0] as QuickEditDetail["identificationType"]) : "CC",
+      identificationNumber: docParts.slice(1).join(" ") || "",
+      email: "",
+      address: "",
+      patientName: row.patientName,
+      paymentMethod: row.paymentMethod,
+      paymentMethodOptions: ["Efectivo", "Tarjeta Crédito", "Transferencia"],
+      total: row.total,
+      items: [],
+      createdAt: row.createdAt,
+    };
+    return fallback;
+  }, [selectedId, rows]);
 
   const showToast = useCallback((msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3000); }, []);
 

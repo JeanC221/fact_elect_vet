@@ -104,18 +104,18 @@ describe("provetToSiigoInvoice", () => {
     expect(() => siigoInvoicePayloadSchema.parse(result)).not.toThrow();
   });
 
-  it("throws when the payment method is unmapped or mapped to null", () => {
+  it("falls back to default payment type when the payment method is unmapped", () => {
     const noMethod: CatalogMapping = { ...baseMapping, payments: [] };
-    expect(() => map(0, opts("sandbox", noMethod))).toThrow(
-      "Unmapped payment method",
-    );
+    const result0 = map(0, opts("sandbox", noMethod));
+    expect(result0.payments[0].payment_type_id).toBe("PT-001");
+    expect(() => siigoInvoicePayloadSchema.parse(result0)).not.toThrow();
     const nullMethod: CatalogMapping = {
       ...baseMapping,
       payments: [{ provetMethod: "Tarjeta Crédito", siigoPaymentTypeId: null }],
     };
-    expect(() => map(0, opts("sandbox", nullMethod))).toThrow(
-      "Unmapped payment method",
-    );
+    const result1 = map(0, opts("sandbox", nullMethod));
+    expect(result1.payments[0].payment_type_id).toBe("PT-001");
+    expect(() => siigoInvoicePayloadSchema.parse(result1)).not.toThrow();
   });
 
   it("defaults to the legacy static mapping when options are omitted", () => {

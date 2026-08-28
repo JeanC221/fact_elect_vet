@@ -93,17 +93,22 @@ export function buildQuickEditDetail(
   const consultation = consultations.find((c) => c.id === id);
   if (!consultation) return undefined;
   const client = clients.find((c) => c.id === consultation.client_id);
-  if (!client) return undefined;
   const patient = patients.find((p) => p.id === consultation.patient_id);
+
+  const clientName = client?.name ?? "Cliente desconocido";
+  const identificationType = client?.identification.type ?? "CC";
+  const identificationNumber = client?.identification.number ?? "";
+  const email = client?.email ?? "";
+  const address = client?.address ?? "";
 
   const opts = Object.keys(PAYMENT_METHOD_MAP);
   const paymentMethodOptions = opts.includes(consultation.payment_method) ? opts : [consultation.payment_method, ...opts];
 
   return {
-    id: consultation.id, clientName: client.name,
-    identificationType: client.identification.type,
-    identificationNumber: client.identification.number,
-    email: client.email, address: client.address,
+    id: consultation.id, clientName,
+    identificationType,
+    identificationNumber,
+    email, address,
     patientName: patient?.name ?? "Paciente desconocido",
     paymentMethod: consultation.payment_method, paymentMethodOptions,
     total: consultation.total, createdAt: consultation.created_at,
