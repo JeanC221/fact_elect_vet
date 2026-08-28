@@ -4,11 +4,15 @@ import { LoginForm } from "@/components/LoginForm";
 import { loginFormSchema, authErrorToSpanish, type LoginFormValues } from "@/mappers/auth";
 import {
   AuthError,
-  SESSION_COOKIE_NAME,
   authenticateEmployee,
-  createSessionCookie,
+  isAdminEmail,
   verifySessionToken,
 } from "@/services/auth";
+import {
+  SESSION_COOKIE_NAME,
+  createRoleCookie,
+  createSessionCookie,
+} from "@/services/sessionCookies";
 
 /**
  * Employee login route (server component).
@@ -35,6 +39,7 @@ export default async function LoginPage() {
     }
     // redirect() throws NEXT_REDIRECT — must stay outside the try/catch above.
     cookies().set(createSessionCookie(sessionToken));
+    cookies().set(createRoleCookie(isAdminEmail(parsed.data.email)));
     redirect("/");
   }
 

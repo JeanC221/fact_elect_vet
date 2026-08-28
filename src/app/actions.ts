@@ -2,7 +2,7 @@
 
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { clearSessionCookie } from "@/services/auth";
+import { clearRoleCookie, clearSessionCookie } from "@/services/sessionCookies";
 
 /**
  * Destroys the employee session cookie and redirects to the login screen.
@@ -10,5 +10,6 @@ import { clearSessionCookie } from "@/services/auth";
  */
 export async function logoutAction(): Promise<void> {
   cookies().set(clearSessionCookie());
+  cookies().set(clearRoleCookie());
   redirect("/login");
 }

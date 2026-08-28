@@ -1,4 +1,5 @@
 import { authErrorToSpanish } from "@/mappers/auth";
+import { SESSION_TTL_SECONDS } from "@/services/sessionCookies";
 
 /**
  * Employee JWT session service (side-effectful / crypto layer).
@@ -9,10 +10,8 @@ import { authErrorToSpanish } from "@/mappers/auth";
  *   - Token cookies: HttpOnly + SameSite=Strict + Secure(prod) + Path=/ + MaxAge=24h.
  *   - Signature compared in constant time to resist timing attacks.
  *   - Credentials sourced exclusively from environment variables.
+ *   - Admin role derived from ADMIN_EMAIL env var and embedded in the JWT.
  */
-
-export const SESSION_COOKIE_NAME = "vet_session";
-const SESSION_TTL_SECONDS = 60 * 60 * 24; // 24h
 const ALG = "HS256";
 
 /** Custom error class wrapping auth failures with a stable code. */
@@ -28,8 +27,16 @@ export class AuthError extends Error {
 /** Encoded session payload carried inside the JWT. */
 export interface SessionPayload {
   email: string;
+  admin: boolean;
   iat: number;
   exp: number;
+}
+
+/** True when the supplied email matches the ADMIN_EMAIL env var (case-insensitive). */
+export function isAdminEmail(email: string): boolean {
+  const adminEmail = process.env.ADMIN_EMAIL;
+  if (!adminEmail) return false;
+  return email.trim().toLowerCase() === adminEmail.trim().toLowerCase();
 }
 
 function getSecret(): string {
@@ -69,9 +76,16 @@ function base64urlDecode(str: string): Uint8Array<ArrayBuffer> {
 }
 
 /** Sign a session token for an authenticated employee (24h expiry). */
-export async function signSessionToken(payload: Pick<SessionPayload, "email">): Promise<string> {
+export async function signSessionToken(
+  payload: Pick<SessionPayload, "email"> & { admin?: boolean },
+): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
-  const body: SessionPayload = { email: payload.email, iat: now, exp: now + SESSION_TTL_SECONDS };
+  const body: SessionPayload = {
+    email: payload.email,
+    admin: payload.admin ?? false,
+    iat: now,
+    exp: now + SESSION_TTL_SECONDS,
+  };
   const headerB64 = base64url(new TextEncoder().encode(JSON.stringify({ alg: ALG, typ: "JWT" })));
   const payloadB64 = base64url(new TextEncoder().encode(JSON.stringify(body)));
   const data = `${headerB64}.${payloadB64}`;
@@ -95,36 +109,10 @@ export async function verifySessionToken(token: string): Promise<SessionPayload 
     if (!valid) return null;
     const body = JSON.parse(new TextDecoder().decode(base64urlDecode(payloadB64))) as SessionPayload;
     if (typeof body.exp !== "number" || Math.floor(Date.now() / 1000) >= body.exp) return null;
-    return body;
+    return { ...body, admin: Boolean(body.admin) };
   } catch {
     return null;
   }
-}
-
-/** Cookie descriptor for a freshly issued session token (secure flags applied). */
-export function createSessionCookie(token: string) {
-  return {
-    name: SESSION_COOKIE_NAME,
-    value: token,
-    httpOnly: true,
-    sameSite: "strict" as const,
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: SESSION_TTL_SECONDS,
-  };
-}
-
-/** Cookie descriptor that expires the session cookie immediately on logout. */
-export function clearSessionCookie() {
-  return {
-    name: SESSION_COOKIE_NAME,
-    value: "",
-    httpOnly: true,
-    sameSite: "strict" as const,
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: 0,
-  };
 }
 
 async function sha256(value: string): Promise<string> {
@@ -135,7 +123,7 @@ async function sha256(value: string): Promise<string> {
 /**
  * Authenticate an employee against environment credentials.
  * Compares a sha256 hash of the supplied password in constant time.
- * Sandbox fallback demo credential is env-gated (never hard-coded).
+ * The resulting token embeds the admin role derived from ADMIN_EMAIL.
  */
 export async function authenticateEmployee(email: string, password: string): Promise<string> {
   const expectedEmail = process.env.EMPLOYEE_EMAIL;
@@ -149,7 +137,7 @@ export async function authenticateEmployee(email: string, password: string): Pro
   if (!emailOk || !hashOk) {
     throw new AuthError("invalid_credentials");
   }
-  return signSessionToken({ email: expectedEmail });
+  return signSessionToken({ email: expectedEmail, admin: isAdminEmail(expectedEmail) });
 }
 
 /** Constant-time string comparison to mitigate timing attacks. */

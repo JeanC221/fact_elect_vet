@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import { CheckCircle2, LogOut } from "lucide-react";
-import { logoutAction } from "@/app/actions";
+import { CheckCircle2 } from "lucide-react";
+import { NavBar } from "@/components/NavBar";
 import { ConsultationQueue } from "@/components/ConsultationQueue";
 import { QuickEditDrawer } from "@/components/QuickEditDrawer";
 import { InvoiceHistory } from "@/components/InvoiceHistory";
@@ -129,37 +129,29 @@ export default function HomePage() {
   const handleQuickAction = useCallback((action: QuickAction) => { if (action.startsWith("edit_")) setTranslatedError(null); }, []);
 
   return (
-    <main className="flex h-full w-full flex-col gap-2 p-2">
-      <header className="flex items-center justify-between px-1">
-        <h1 className="text-base font-semibold text-clinical-blue">Facturación Electrónica</h1>
-        <div className="flex items-center gap-3">
-          <span className="text-xs text-muted">Modo Sandbox</span>
-          <form action={logoutAction}>
-            <button type="submit" className="inline-flex items-center gap-1 rounded-md border border-grid-line px-2 py-1 text-xs font-semibold text-muted hover:bg-cool-grey">
-              <LogOut className="h-3 w-3" /> Cerrar sesión
-            </button>
-          </form>
-        </div>
-      </header>
-      <nav className="flex gap-1 px-1">
-        {TABS.map((t) => (
-          <button key={t.id} type="button" onClick={() => setTab(t.id)} className={`rounded-md px-3 py-1 text-sm font-semibold ${tab === t.id ? "bg-clinical-blue text-white" : "border border-grid-line text-muted hover:bg-cool-grey"}`}>{t.label}</button>
-        ))}
-      </nav>
-      <ErrorBanner error={translatedError} retryAttempt={retryAttempt} maxRetries={5} onQuickAction={handleQuickAction} onDismiss={() => setTranslatedError(null)} />
-      {tab === "queue" ? (
-        <ConsultationQueue rows={rows} onInvoiceClick={(id) => setSelectedId(id)} />
-      ) : (
-        <InvoiceHistory entries={history} rows={rows} busyInvoiceId={busyInvoiceId} onDownload={handleDownload} onAnnul={handleAnnul} />
-      )}
-      <QuickEditDrawer detail={selectedDetail} isSubmitting={isSubmitting} errorMessage={translatedError?.message ?? null} onClose={handleClose} onSubmit={handleSubmit} />
-      <CreditNoteModal row={annulTarget} isSubmitting={isAnnulling} errorMessage={annulError} onClose={() => { if (!isAnnulling) setAnnulTarget(null); }} onConfirm={handleAnnulConfirm} />
-      {toast && (
-        <div className="fixed bottom-4 right-4 z-50 flex max-w-md items-center gap-2 rounded-md border border-status-accepted-border bg-status-accepted-bg px-3 py-2 text-sm font-semibold text-status-accepted-text">
-          <CheckCircle2 className="h-4 w-4 shrink-0" />
-          <span className="break-all">{toast}</span>
-        </div>
-      )}
+    <main className="flex h-full w-full flex-col bg-cool-grey">
+      <NavBar />
+      <div className="flex flex-1 flex-col gap-2 p-2">
+        <nav className="flex gap-1 px-1">
+          {TABS.map((t) => (
+            <button key={t.id} type="button" onClick={() => setTab(t.id)} className={`rounded-md px-3 py-1 text-sm font-semibold ${tab === t.id ? "bg-clinical-blue text-white" : "border border-grid-line text-muted hover:bg-cool-grey"}`}>{t.label}</button>
+          ))}
+        </nav>
+        <ErrorBanner error={translatedError} retryAttempt={retryAttempt} maxRetries={5} onQuickAction={handleQuickAction} onDismiss={() => setTranslatedError(null)} />
+        {tab === "queue" ? (
+          <ConsultationQueue rows={rows} onInvoiceClick={(id) => setSelectedId(id)} />
+        ) : (
+          <InvoiceHistory entries={history} rows={rows} busyInvoiceId={busyInvoiceId} onDownload={handleDownload} onAnnul={handleAnnul} />
+        )}
+        <QuickEditDrawer detail={selectedDetail} isSubmitting={isSubmitting} errorMessage={translatedError?.message ?? null} onClose={handleClose} onSubmit={handleSubmit} />
+        <CreditNoteModal row={annulTarget} isSubmitting={isAnnulling} errorMessage={annulError} onClose={() => { if (!isAnnulling) setAnnulTarget(null); }} onConfirm={handleAnnulConfirm} />
+        {toast && (
+          <div className="fixed bottom-4 right-4 z-50 flex max-w-md items-center gap-2 rounded-md border border-status-accepted-border bg-status-accepted-bg px-3 py-2 text-sm font-semibold text-status-accepted-text">
+            <CheckCircle2 className="h-4 w-4 shrink-0" />
+            <span className="break-all">{toast}</span>
+          </div>
+        )}
+      </div>
     </main>
   );
 }
