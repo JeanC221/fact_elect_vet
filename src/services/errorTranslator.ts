@@ -65,6 +65,13 @@ const ERROR_TRANSLATIONS: Record<string, TranslationEntry> = {
     quickAction: "save_draft",
     retryable: true,
   },
+  auth_failed: {
+    message:
+      "La autenticación con Siigo falló. Verifique las credenciales en Configuración e intente nuevamente.",
+    severity: "error",
+    quickAction: "none",
+    retryable: false,
+  },
 };
 
 const DEFAULT_TRANSLATION: TranslationEntry = {
