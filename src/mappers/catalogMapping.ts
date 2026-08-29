@@ -90,6 +90,23 @@ export function defaultPaymentMapping(methods: string[], siigoPaymentTypes: Siig
     return { provetMethod: method, siigoPaymentTypeId: ns.find((pt) => pt.n.includes(m) || m.includes(pt.n))?.id ?? null };
   });
 }
+
+/** Typed domain error: a consultation payment method has no valid Siigo Payment Type mapping. */
+export class UnmappedPaymentMethodError extends Error {
+  readonly paymentMethod: string;
+  constructor(paymentMethod: string) {
+    super(`Método de pago sin mapeo en el catálogo: "${paymentMethod}". Configúrelo en Ajustes → Mapeo de catálogos.`);
+    this.name = "UnmappedPaymentMethodError";
+    this.paymentMethod = paymentMethod;
+  }
+}
+
+/** Strict O(n) lookup: mapped Siigo Payment Type id or UnmappedPaymentMethodError — no silent fallback. */
+export function resolvePaymentTypeId(method: string, payments: PaymentMapping[]): number {
+  const id = payments.find((p) => p.provetMethod === method)?.siigoPaymentTypeId ?? null;
+  if (id === null) throw new UnmappedPaymentMethodError(method);
+  return id;
+}
 const fresh = <T extends string | number>(id: T | null, valid: Set<T>): T | null =>
   id !== null && valid.has(id) ? id : null;
 /** Reconcile persisted mapping vs current catalogs: drop gone provet entries, null stale siigo ids, add new. */

@@ -15,14 +15,15 @@ const IDENTIFICATION_TYPE_MAP: Record<Identification["type"], string> = {
 
 /**
  * Normalizes a raw identification number for Siigo as a flat string:
- * strips dots, dashes and spaces. The document type is mapped separately
- * via `mapIdentificationType`.
+ * strips dots, dashes and spaces. The cleaned string lands in the
+ * `customer.identification` field; the document type is mapped separately
+ * via `mapIdentificationType` into `customer.identification_type`.
  */
 export function cleanIdentification(raw: string): string {
   return cleanIdChars(raw);
 }
 
-/** Maps a Provet identification type to its Siigo numeric code. */
+/** Maps a Provet identification type to its Siigo numeric code for `identification_type`. */
 export function mapIdentificationType(type: Identification["type"]): string {
   return IDENTIFICATION_TYPE_MAP[type];
 }

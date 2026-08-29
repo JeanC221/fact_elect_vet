@@ -10,6 +10,9 @@ export const siigoTaxEnum = z.enum([
   "INC",
 ]);
 
+/** Siigo document type discriminator (Factura de Venta, Nota Crédito, ...). */
+export const siigoDocumentTypeSchema = z.object({ id: z.number().int().positive() });
+
 export const siigoProductSchema = z.object({
   id: z.string().trim().min(1),
   code: z.string().trim().min(1).max(50),
@@ -25,12 +28,17 @@ export const siigoPaymentTypeSchema = z.object({
   type: z.enum(["cash", "card", "transfer", "credit"]),
 });
 
-/** Official Siigo customer (Invoice + Customer - Create): flat id + numeric branch_office. */
+/** Official Siigo customer (Invoice + Customer - Create): flat identification + branch_office 0. */
 export const siigoCustomerSchema = z.object({
   person_type: z.enum(["Person", "Company"]),
-  id_type: z.string().trim().min(1).max(5),
-  identification: z.string().trim().min(1).max(30),
-  branch_office: z.number().int().nonnegative(),
+  identification_type: z.string().trim().min(1).max(5),
+  identification: z
+    .string()
+    .trim()
+    .min(1)
+    .max(30)
+    .regex(/^[A-Za-z0-9]+$/, "identification must be alphanumeric"),
+  branch_office: z.literal(0),
   name: z
     .array(z.string().trim().min(1).max(100).transform(sanitizeText))
     .min(1)
@@ -52,7 +60,7 @@ export const siigoPaymentSchema = z.object({
 
 /** Official Siigo POST /v1/invoices payload — no `total` key at the root. */
 export const siigoInvoicePayloadSchema = z.object({
-  document: z.object({ id: z.number().int().positive() }),
+  document: siigoDocumentTypeSchema,
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "date must be YYYY-MM-DD"),
   customer: siigoCustomerSchema,
   seller: z.number().int().positive(),
@@ -75,6 +83,7 @@ export const siigoErrorSchema = z.object({
   message: z.string().trim().min(1).max(500),
 });
 
+export type SiigoDocumentType = z.infer<typeof siigoDocumentTypeSchema>;
 export type SiigoProduct = z.infer<typeof siigoProductSchema>;
 export type SiigoPaymentType = z.infer<typeof siigoPaymentTypeSchema>;
 export type SiigoCustomer = z.infer<typeof siigoCustomerSchema>;
