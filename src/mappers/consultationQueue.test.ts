@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildConsultationQueue,
   buildInvoicePayloadFromQuickEdit,
+  buildPaymentMethodOptions,
   buildQuickEditDetail,
   formatCOP,
   formatDate,
@@ -93,6 +94,16 @@ describe("buildQuickEditDetail", () => {
   it("prepends unmapped payment method to options", () => {
     const custom = [{ ...mockConsultations[0], payment_method: "Nequi" }];
     expect(buildQuickEditDetail(custom, mockClients, mockPatients, "CON-001")?.paymentMethodOptions[0]).toBe("Nequi");
+  });
+
+  it("uses dynamic paymentMethodOptions when provided", () => {
+    const d = buildQuickEditDetail(mockConsultations, mockClients, mockPatients, "CON-001", ["Efectivo", "Davivienda", "Bancolombia"]);
+    expect(d?.paymentMethodOptions).toEqual(["Tarjeta Crédito", "Efectivo", "Davivienda", "Bancolombia"]);
+  });
+
+  it("buildPaymentMethodOptions returns mapped methods from catalog", () => {
+    const mapping = [{ provetMethod: "Efectivo", siigoPaymentTypeId: 10948 }, { provetMethod: "Davivienda", siigoPaymentTypeId: null }];
+    expect(buildPaymentMethodOptions(mapping, "Efectivo")).toEqual(["Efectivo"]);
   });
 });
 

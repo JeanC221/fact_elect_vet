@@ -33,6 +33,13 @@ export const formatDate = (value: Date): string => new Date(value).toISOString()
 /** Legacy display labels for the Quick-Edit drawer (ids come from the dynamic catalog at emission). */
 const LEGACY_PAYMENT_OPTIONS = ["Bancolombia", "Davivienda", "Efectivo"] as const;
 
+/** Build payment-method options from the dynamic catalog mapping (mapped methods first). */
+export function buildPaymentMethodOptions(mappingPayments: { provetMethod: string; siigoPaymentTypeId: number | null }[], consultationMethod: string): string[] {
+  const mapped = mappingPayments.filter((m) => m.siigoPaymentTypeId !== null).map((m) => m.provetMethod);
+  const opts = mapped.length > 0 ? mapped : [...LEGACY_PAYMENT_OPTIONS];
+  return opts.includes(consultationMethod) ? opts : [consultationMethod, ...opts];
+}
+
 /** Pure O(n) join into queue rows; invoiceStatus defaults to "Draft" until an invoice is linked. */
 export function buildConsultationQueue(consultations: Consultation[], clients: Client[], patients: Patient[]): ConsultationQueueRow[] {
   const clientMap = new Map(clients.map((c) => [c.id, c]));
@@ -83,7 +90,7 @@ export const quickEditFormSchema = z
 export type QuickEditFormValues = z.infer<typeof quickEditFormSchema>;
 
 /** Pure O(n) lookup building the Quick-Edit detail; `undefined` for unknown id or missing client. */
-export function buildQuickEditDetail(consultations: Consultation[], clients: Client[], patients: Patient[], id: string): QuickEditDetail | undefined {
+export function buildQuickEditDetail(consultations: Consultation[], clients: Client[], patients: Patient[], id: string, paymentMethodOptions?: string[]): QuickEditDetail | undefined {
   const consultation = consultations.find((c) => c.id === id);
   if (!consultation) return undefined;
   const client = clients.find((c) => c.id === consultation.client_id);
@@ -93,14 +100,14 @@ export function buildQuickEditDetail(consultations: Consultation[], clients: Cli
   const identificationNumber = client?.identification.number ?? "";
   const email = client?.email ?? "";
   const phone = client?.phone ?? "";
-  const opts: string[] = [...LEGACY_PAYMENT_OPTIONS];
-  const paymentMethodOptions = opts.includes(consultation.payment_method) ? opts : [consultation.payment_method, ...opts];
+  const opts = paymentMethodOptions ?? [...LEGACY_PAYMENT_OPTIONS];
+  const methodOptions = opts.includes(consultation.payment_method) ? opts : [consultation.payment_method, ...opts];
   return {
     id: consultation.id, clientName,
     identificationType, identificationNumber,
     email, phone,
     patientName: patient?.name ?? "Paciente desconocido",
-    paymentMethod: consultation.payment_method, paymentMethodOptions,
+    paymentMethod: consultation.payment_method, paymentMethodOptions: methodOptions,
     total: consultation.total, createdAt: consultation.created_at,
     items: consultation.items.map((i) => ({ code: i.code, name: i.name, quantity: i.quantity, lineTotal: i.unit_price * i.quantity * (1 + i.tax_rate) - i.discount })),
   };

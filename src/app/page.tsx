@@ -9,6 +9,7 @@ import { InvoiceHistory } from "@/components/InvoiceHistory";
 import { CreditNoteModal } from "@/components/CreditNoteModal";
 import {
   buildInvoicePayloadFromQuickEdit,
+  buildPaymentMethodOptions,
   buildQuickEditDetail,
   type InvoiceStatus,
   type QuickEditDetail,
@@ -51,7 +52,8 @@ export default function HomePage() {
 
   const selectedDetail = useMemo(() => {
     if (!selectedId) return null;
-    const detail = buildQuickEditDetail(mockConsultations, mockClients, mockPatients, selectedId);
+    const methodOptions = buildPaymentMethodOptions(options.mapping.payments, mockConsultations.find((c) => c.id === selectedId)?.payment_method ?? "");
+    const detail = buildQuickEditDetail(mockConsultations, mockClients, mockPatients, selectedId, methodOptions);
     if (detail) return detail;
     // Live Provet consultation not in mocks → build minimal detail from queue row
     const row = rows.find((r) => r.id === selectedId);
@@ -67,13 +69,13 @@ export default function HomePage() {
       phone: "",
       patientName: row.patientName,
       paymentMethod: row.paymentMethod,
-      paymentMethodOptions: ["Bancolombia", "Davivienda", "Efectivo"],
+      paymentMethodOptions: buildPaymentMethodOptions(options.mapping.payments, row.paymentMethod),
       total: row.total,
       items: [],
       createdAt: row.createdAt,
     };
     return fallback;
-  }, [selectedId, rows]);
+  }, [selectedId, rows, options.mapping.payments]);
 
   const showToast = useCallback((msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3000); }, []);
 

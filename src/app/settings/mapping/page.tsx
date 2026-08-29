@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowLeft, CheckCircle2, LogOut, Save } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Info, LogOut, Save } from "lucide-react";
 import Link from "next/link";
 import { logoutAction } from "@/app/actions";
 import { CatalogMapping } from "@/components/CatalogMapping";
@@ -20,6 +20,7 @@ import {
 } from "@/mappers/catalogMapping";
 import { mockConsultations } from "@/mocks/provet";
 import { mockSiigoPaymentTypes, mockSiigoProducts } from "@/mocks/siigo";
+import type { SiigoProduct, SiigoPaymentType } from "@/schemas/siigo";
 
 const STORAGE_KEY = "fact_vet.catalogMapping";
 
@@ -27,6 +28,8 @@ export default function MappingPage() {
   const provetItems = useMemo(() => extractProvetItems(mockConsultations), []);
   const provetMethods = useMemo(() => extractProvetPaymentMethods(mockConsultations), []);
 
+  const [siigoProducts, setSiigoProducts] = useState<SiigoProduct[]>(mockSiigoProducts);
+  const [siigoPaymentTypes, setSiigoPaymentTypes] = useState<SiigoPaymentType[]>(mockSiigoPaymentTypes);
   const [mapping, setMapping] = useState<CatalogMappingState>(() => ({ items: defaultItemMapping(provetItems, mockSiigoProducts), payments: defaultPaymentMapping(provetMethods, mockSiigoPaymentTypes), version: 0, updatedAt: new Date().toISOString() }));
   const [dirty, setDirty] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -50,14 +53,8 @@ export default function MappingPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const itemRows = useMemo(
-    () => buildItemMappingRows(provetItems, mockSiigoProducts, mapping.items),
-    [provetItems, mapping.items],
-  );
-  const paymentRows = useMemo(
-    () => buildPaymentMappingRows(provetMethods, mockSiigoPaymentTypes, mapping.payments),
-    [provetMethods, mapping.payments],
-  );
+  const itemRows = useMemo(() => buildItemMappingRows(provetItems, siigoProducts, mapping.items), [provetItems, siigoProducts, mapping.items]);
+  const paymentRows = useMemo(() => buildPaymentMappingRows(provetMethods, siigoPaymentTypes, mapping.payments), [provetMethods, siigoPaymentTypes, mapping.payments]);
 
   const handleItemSelect = useCallback((provetCode: string, siigoProductId: string | null) => {
     setMapping((prev) => ({
@@ -88,15 +85,22 @@ export default function MappingPage() {
     setTimeout(() => setToast(null), 2500);
   }, [mapping]);
 
-  // Re-sync catalogs: re-reconcile mapping against current Siigo catalogs (mock now; swap for `await fetchProducts()`/`fetchPaymentTypes()` when live).
   const handleSyncCatalogs = useCallback(async () => {
     setIsSyncing(true);
     try {
-      setMapping((prev) => reconcileMapping(prev, provetItems, mockSiigoProducts, provetMethods, mockSiigoPaymentTypes));
+      const [ptRes, prodRes] = await Promise.all([fetch("/api/payment-types"), fetch("/api/products")]);
+      const ptData: SiigoPaymentType[] = ptRes.ok ? await ptRes.json() : mockSiigoPaymentTypes;
+      const prodData: SiigoProduct[] = prodRes.ok ? await prodRes.json() : mockSiigoProducts;
+      setSiigoPaymentTypes(ptData);
+      setSiigoProducts(prodData);
+      const reconciled = reconcileMapping(mapping, provetItems, prodData, provetMethods, ptData);
+      window.localStorage.setItem(STORAGE_KEY, serializeCatalogMapping(reconciled));
+      setMapping(reconciled);
+      setDirty(false);
       setToast("Catálogos sincronizados");
       setTimeout(() => setToast(null), 2500);
     } finally { setIsSyncing(false); }
-  }, [provetItems, provetMethods]);
+  }, [mapping, provetItems, provetMethods]);
 
   return (
     <main className="flex h-screen w-screen flex-col gap-2 overflow-hidden bg-cool-grey p-2">
@@ -135,9 +139,13 @@ export default function MappingPage() {
           </form>
         </div>
       </header>
-      <div className="scrollbar-thin flex h-[calc(100vh-64px)] flex-col gap-2 overflow-y-auto">
-        <CatalogMapping rows={itemRows} siigoProducts={mockSiigoProducts} onSelect={handleItemSelect} isRefreshing={isSyncing} onSync={handleSyncCatalogs} />
-        <PaymentMapping rows={paymentRows} siigoPaymentTypes={mockSiigoPaymentTypes} onSelect={handlePaymentSelect} />
+      <div className="flex items-start gap-2 rounded-md border border-grid-line bg-pure-white px-3 py-2 text-xs text-muted">
+        <Info className="mt-0.5 h-3 w-3 shrink-0" />
+        <span>Mappee los métodos de pago de Provet (<strong className="text-slate-text">Efectivo, Davivienda, Bancolombia</strong>) a sus tipos de pago activos en Siigo. Use 🔄 Sincronizar Catálogos para consultar Siigo en vivo y actualizar las opciones.</span>
+      </div>
+      <div className="scrollbar-thin flex h-[calc(100vh-100px)] flex-col gap-2 overflow-y-auto">
+        <CatalogMapping rows={itemRows} siigoProducts={siigoProducts} onSelect={handleItemSelect} isRefreshing={isSyncing} onSync={handleSyncCatalogs} />
+        <PaymentMapping rows={paymentRows} siigoPaymentTypes={siigoPaymentTypes} onSelect={handlePaymentSelect} />
       </div>
       {toast && (
         <div className="fixed bottom-4 right-4 z-50 flex items-center gap-2 rounded-md border border-status-accepted-border bg-status-accepted-bg px-3 py-2 text-sm font-semibold text-status-accepted-text">
