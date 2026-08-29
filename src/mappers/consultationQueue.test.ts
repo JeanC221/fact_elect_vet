@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildConsultationQueue,
   buildInvoicePayloadFromQuickEdit,
+  buildPaymentOptions,
   buildQuickEditDetail,
   formatCOP,
   formatDate,
@@ -9,14 +10,19 @@ import {
   type QuickEditFormValues,
 } from "./consultationQueue";
 import { siigoInvoicePayloadSchema } from "@/schemas/siigo";
+import { toCents } from "@/schemas/provet";
 import { mockClients, mockConsultations, mockPatients } from "@/mocks/provet";
 import type { ProvetToSiigoOptions } from "@/mappers/provetToSiigo";
+import type { CatalogMapping } from "@/mappers/catalogMapping";
 import { mockSiigoProducts } from "@/mocks/siigo";
 
 const validFormValues: QuickEditFormValues = { name: "María García López", identificationType: "CC", identificationNumber: "1234567890", email: "nueva@mail.co", phone: "3105550101", paymentMethod: "Efectivo", paidAmount: 95200 };
 
 /** Dynamic catalog for emission — Task 4: payment ids resolve ONLY from options.mapping.payments. */
 const emitOpts: ProvetToSiigoOptions = { mapping: { items: [], payments: [{ provetMethod: "Tarjeta Crédito", siigoPaymentTypeId: 5636 }, { provetMethod: "Efectivo", siigoPaymentTypeId: 10948 }], version: 1, updatedAt: "2026-08-26T00:00:00.000Z" }, siigoProducts: mockSiigoProducts, mode: "sandbox" };
+
+/** Mapped catalog for Quick-Edit detail — only active mapped payments appear in the dropdown. */
+const testMapping: CatalogMapping = emitOpts.mapping;
 
 describe("buildConsultationQueue", () => {
   it("returns one row per consultation", () => {
@@ -70,13 +76,17 @@ describe("formatDate", () => {
 });
 
 describe("buildQuickEditDetail", () => {
-  it("builds pre-filled detail for a known consultation", () => {
-    const d = buildQuickEditDetail(mockConsultations, mockClients, mockPatients, "CON-001");
+  it("builds pre-filled detail for a known consultation with mapped payment options and empty paymentMethod", () => {
+    const d = buildQuickEditDetail(mockConsultations, mockClients, mockPatients, "CON-001", testMapping);
     expect(d?.clientName).toBe("María García López");
     expect(d?.identificationNumber).toBe("1234567890");
     expect(d?.phone).toBe("3105550101");
     expect([d?.patientName, d?.total]).toEqual(["Max", 95200]);
-    expect(d?.paymentMethodOptions).toContain("Tarjeta Crédito");
+    expect(d?.paymentMethod).toBe("");
+    expect(d?.paymentMethodOptions).toEqual([
+      { provetMethod: "Tarjeta Crédito", siigoPaymentTypeId: 5636 },
+      { provetMethod: "Efectivo", siigoPaymentTypeId: 10948 },
+    ]);
   });
 
   it("returns undefined for unknown consultation id", () => {
@@ -90,9 +100,21 @@ describe("buildQuickEditDetail", () => {
     expect([d?.clientName, d?.identificationType, d?.identificationNumber, d?.email]).toEqual(["Cliente desconocido", "CC", "", ""]);
   });
 
-  it("prepends unmapped payment method to options", () => {
+  it("only includes active mapped payments — unmapped methods like Nequi are excluded", () => {
     const custom = [{ ...mockConsultations[0], payment_method: "Nequi" }];
-    expect(buildQuickEditDetail(custom, mockClients, mockPatients, "CON-001")?.paymentMethodOptions[0]).toBe("Nequi");
+    const d = buildQuickEditDetail(custom, mockClients, mockPatients, "CON-001", testMapping);
+    expect(d?.paymentMethodOptions.map((o) => o.provetMethod)).not.toContain("Nequi");
+    expect(d?.paymentMethodOptions.map((o) => o.provetMethod)).toEqual(["Tarjeta Crédito", "Efectivo"]);
+  });
+});
+
+describe("buildPaymentOptions", () => {
+  it("returns only non-null mapped payments", () => {
+    const mapping: CatalogMapping = { items: [], payments: [{ provetMethod: "Efectivo", siigoPaymentTypeId: 10948 }, { provetMethod: "Nequi", siigoPaymentTypeId: null }], version: 1, updatedAt: "2026-08-26T00:00:00.000Z" };
+    expect(buildPaymentOptions(mapping)).toEqual([{ provetMethod: "Efectivo", siigoPaymentTypeId: 10948 }]);
+  });
+  it("returns empty array when no mapping provided", () => {
+    expect(buildPaymentOptions(undefined)).toEqual([]);
   });
 });
 
@@ -120,6 +142,21 @@ describe("quickEditFormSchema", () => {
     expect(quickEditFormSchema.safeParse({ ...validFormValues, name: "" }).success).toBe(false);
     expect(quickEditFormSchema.safeParse({ ...validFormValues, phone: "123456" }).success).toBe(false);
   });
+
+  it("rejects a negative paidAmount", () => {
+    expect(quickEditFormSchema.safeParse({ ...validFormValues, paidAmount: -100 }).success).toBe(false);
+  });
+
+  it("accepts a paidAmount with exactly 2 decimal places", () => {
+    expect(quickEditFormSchema.safeParse({ ...validFormValues, paidAmount: 95200.10 }).success).toBe(true);
+  });
+
+  it("balances a fractional paidAmount against an equal fractional total via cent-integer comparison", () => {
+    const fractional = [{ ...mockConsultations[0], total: 80.10 }];
+    const d = buildQuickEditDetail(fractional, mockClients, mockPatients, "CON-001");
+    expect(d?.total).toBe(80.10);
+    expect(toCents(d?.total ?? 0) - toCents(80.10) === 0).toBe(true);
+  });
 });
 
 describe("buildInvoicePayloadFromQuickEdit", () => {
@@ -142,5 +179,13 @@ describe("buildInvoicePayloadFromQuickEdit", () => {
     expect(buildInvoicePayloadFromQuickEdit(mockConsultations, mockClients, mockPatients, "CON-NOPE", validFormValues)).toBeUndefined();
     const orphan = [{ ...mockConsultations[0], id: "CON-X", client_id: "CLI-NOPE" }];
     expect(buildInvoicePayloadFromQuickEdit(orphan, mockClients, mockPatients, "CON-X", validFormValues)).toBeUndefined();
+  });
+
+  it("keeps sum(payments.value) == sum(items.price*quantity) to prevent invalid_total_payments", () => {
+    const p = buildInvoicePayloadFromQuickEdit(mockConsultations, mockClients, mockPatients, "CON-001", validFormValues, emitOpts);
+    expect(p).toBeDefined();
+    const itemsTotal = p!.items.reduce((s, it) => s + it.price * it.quantity, 0);
+    const paymentsTotal = p!.payments.reduce((s, pay) => s + pay.value, 0);
+    expect(toCents(paymentsTotal)).toBe(toCents(itemsTotal));
   });
 });

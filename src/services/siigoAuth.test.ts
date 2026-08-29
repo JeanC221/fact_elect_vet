@@ -102,3 +102,30 @@ describe("getSiigoAccessToken", () => {
     });
   });
 });
+
+describe("getSiigoAccessToken (explicit credentials)", () => {
+  it("uses explicit credentials instead of env vars", async () => {
+    fetchMock.mockResolvedValue(fakeRes({ access_token: "tok-explicit" }));
+    const result = await getSiigoAccessToken({
+      username: "ui-user@vet.com", accessKey: "ui-key", partnerId: "UI-PARTNER",
+    });
+    expect(result.accessToken).toBe("tok-explicit");
+    expect(result.partnerId).toBe("UI-PARTNER");
+    const [, init] = callAt(0);
+    expect(JSON.parse(String(init.body))).toEqual({
+      username: "ui-user@vet.com", access_key: "ui-key",
+    });
+  });
+
+  it("caches tokens per partnerId (no collision between credential sets)", async () => {
+    fetchMock.mockResolvedValue(fakeRes({ access_token: "tok-a" }));
+    await getSiigoAccessToken({ username: "a", accessKey: "k", partnerId: "PARTNER-A" });
+    fetchMock.mockResolvedValue(fakeRes({ access_token: "tok-b" }));
+    await getSiigoAccessToken({ username: "b", accessKey: "k", partnerId: "PARTNER-B" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // Reuse cached token for PARTNER-A (no third fetch)
+    const r = await getSiigoAccessToken({ username: "a", accessKey: "k", partnerId: "PARTNER-A" });
+    expect(r.accessToken).toBe("tok-a");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});

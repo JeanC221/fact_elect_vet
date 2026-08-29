@@ -9,6 +9,7 @@ import {
 } from "@/schemas/provet";
 import type { SiigoInvoicePayload } from "@/schemas/siigo";
 import { provetToSiigoInvoice, type ProvetToSiigoOptions } from "@/mappers/provetToSiigo";
+import type { CatalogMapping } from "@/mappers/catalogMapping";
 
 /** DIAN invoice lifecycle status, surfaced per consultation row. */
 export type InvoiceStatus = "Accepted" | "Draft" | "Rejected" | "Annulled";
@@ -30,8 +31,11 @@ export const formatCOP = (value: number): string =>
 /** Deterministic short ISO date (YYYY-MM-DD), locale-independent. */
 export const formatDate = (value: Date): string => new Date(value).toISOString().slice(0, 10);
 
-/** Legacy display labels for the Quick-Edit drawer (ids come from the dynamic catalog at emission). */
-const LEGACY_PAYMENT_OPTIONS = ["Bancolombia", "Davivienda", "Efectivo"] as const;
+/** Active mapped payment option for the Quick-Edit drawer dropdown. */
+export interface PaymentOption {
+  provetMethod: string;
+  siigoPaymentTypeId: number;
+}
 
 /** Pure O(n) join into queue rows; invoiceStatus defaults to "Draft" until an invoice is linked. */
 export function buildConsultationQueue(consultations: Consultation[], clients: Client[], patients: Patient[]): ConsultationQueueRow[] {
@@ -60,7 +64,7 @@ export interface QuickEditDetail {
   identificationType: (typeof identificationTypes)[number];
   identificationNumber: string;
   email: string; phone: string; patientName: string;
-  paymentMethod: string; paymentMethodOptions: string[];
+  paymentMethod: string; paymentMethodOptions: PaymentOption[];
   total: number; items: QuickEditItem[]; createdAt: Date;
 }
 
@@ -82,25 +86,29 @@ export const quickEditFormSchema = z
 
 export type QuickEditFormValues = z.infer<typeof quickEditFormSchema>;
 
+/** Build active mapped payment options from the catalog mapping (non-null ids only). */
+export function buildPaymentOptions(mapping?: CatalogMapping): PaymentOption[] {
+  if (!mapping) return [];
+  return mapping.payments
+    .filter((p): p is { provetMethod: string; siigoPaymentTypeId: number } => p.siigoPaymentTypeId !== null);
+}
+
 /** Pure O(n) lookup building the Quick-Edit detail; `undefined` for unknown id or missing client. */
-export function buildQuickEditDetail(consultations: Consultation[], clients: Client[], patients: Patient[], id: string): QuickEditDetail | undefined {
+export function buildQuickEditDetail(consultations: Consultation[], clients: Client[], patients: Patient[], id: string, mapping?: CatalogMapping): QuickEditDetail | undefined {
   const consultation = consultations.find((c) => c.id === id);
   if (!consultation) return undefined;
   const client = clients.find((c) => c.id === consultation.client_id);
   const patient = patients.find((p) => p.id === consultation.patient_id);
-  const clientName = client?.name ?? "Cliente desconocido";
-  const identificationType = client?.identification.type ?? "CC";
-  const identificationNumber = client?.identification.number ?? "";
-  const email = client?.email ?? "";
-  const phone = client?.phone ?? "";
-  const opts: string[] = [...LEGACY_PAYMENT_OPTIONS];
-  const paymentMethodOptions = opts.includes(consultation.payment_method) ? opts : [consultation.payment_method, ...opts];
+  const paymentMethodOptions = buildPaymentOptions(mapping);
   return {
-    id: consultation.id, clientName,
-    identificationType, identificationNumber,
-    email, phone,
+    id: consultation.id,
+    clientName: client?.name ?? "Cliente desconocido",
+    identificationType: client?.identification.type ?? "CC",
+    identificationNumber: client?.identification.number ?? "",
+    email: client?.email ?? "",
+    phone: client?.phone ?? "",
     patientName: patient?.name ?? "Paciente desconocido",
-    paymentMethod: consultation.payment_method, paymentMethodOptions,
+    paymentMethod: "", paymentMethodOptions,
     total: consultation.total, createdAt: consultation.created_at,
     items: consultation.items.map((i) => ({ code: i.code, name: i.name, quantity: i.quantity, lineTotal: i.unit_price * i.quantity * (1 + i.tax_rate) - i.discount })),
   };

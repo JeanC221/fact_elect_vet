@@ -42,7 +42,7 @@ export function QuickEditDrawer({ detail, isSubmitting, errorMessage, errorDetai
   const parsed = quickEditFormSchema.safeParse(values);
   const errors: Record<string, string> = parsed.success ? {} : Object.fromEntries(parsed.error.issues.map((i) => [String(i.path[0]), i.message]));
   const balanced = toCents(detail?.total ?? 0) - toCents(values.paidAmount) === 0;
-  const canSubmit = parsed.success && balanced && !isSubmitting && detail !== null;
+  const canSubmit = parsed.success && balanced && !isSubmitting && detail !== null && values.paymentMethod !== "";
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
@@ -93,7 +93,8 @@ export function QuickEditDrawer({ detail, isSubmitting, errorMessage, errorDetai
           <div className="grid grid-cols-2 gap-3">
             <Field label="Método de pago">
               <select value={values.paymentMethod} onChange={(e) => update({ paymentMethod: e.target.value })} className={INPUT} disabled={isSubmitting}>
-                {detail.paymentMethodOptions.map((m) => (<option key={m} value={m}>{m}</option>))}
+                <option value="">Seleccionar Medio de Pago</option>
+                {detail.paymentMethodOptions.map((m) => (<option key={m.provetMethod} value={m.provetMethod}>{m.provetMethod}</option>))}
               </select>
             </Field>
             <Field label="Monto pagado (COP)">

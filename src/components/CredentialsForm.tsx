@@ -3,20 +3,16 @@
 import { useState, type KeyboardEvent } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { AlertTriangle, Loader2, Save } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Loader2, Save } from "lucide-react";
 import {
-  credentialsSchema,
-  CREDENTIAL_LABELS,
-  SECRET_FIELDS,
-  type Credentials,
-  type EnvironmentMode,
+  credentialsSchema, CREDENTIAL_LABELS, SECRET_FIELDS, type Credentials, type EnvironmentMode,
 } from "@/mappers/credentials";
 
 interface CredentialsFormProps {
   initialMode: EnvironmentMode;
   configuredMap: Record<string, boolean>;
-  /** Receives validated values + chosen mode. Component never persists secrets. */
   onSave: (values: Credentials, mode: EnvironmentMode) => void;
+  onTestConnection: (values: Credentials) => Promise<boolean>;
 }
 
 const INPUT = "w-full rounded-md border border-grid-line bg-pure-white px-2 py-1 text-sm text-slate-text focus:border-clinical-blue focus:outline-none disabled:opacity-50";
@@ -32,32 +28,23 @@ const MODE_OFF = "border-grid-line bg-pure-white text-muted hover:bg-cool-grey";
 
 /** Presentational credentials form (client): Zod validation, secret masking, inline
  * Sandbox/Producción toggle. Delegates persistence to onSave. rounded-md, Ctrl/Cmd+Enter. */
-export function CredentialsForm({ initialMode, configuredMap, onSave }: CredentialsFormProps) {
+export function CredentialsForm({ initialMode, configuredMap, onSave, onTestConnection }: CredentialsFormProps) {
   const [mode, setMode] = useState<EnvironmentMode>(initialMode);
   const [showSecret, setShowSecret] = useState<Record<string, boolean>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  const { register, handleSubmit, formState: { errors } } = useForm<Credentials>({
+  const [isTesting, setIsTesting] = useState(false);
+  const [testResult, setTestResult] = useState<boolean | null>(null);
+  const { register, handleSubmit, formState: { errors }, getValues } = useForm<Credentials>({
     resolver: zodResolver(credentialsSchema),
     defaultValues: { partnerId: "", username: "", accessKey: "", clientId: "", clientSecret: "" },
   });
-
-  const onSubmit = (values: Credentials) => {
-    setIsSubmitting(true);
-    try {
-      onSave(values, mode);
-    } finally {
-      setIsSubmitting(false);
-    }
+  const onSubmit = (values: Credentials) => { setIsSubmitting(true); try { onSave(values, mode); } finally { setIsSubmitting(false); } };
+  const handleTest = async () => {
+    setIsTesting(true); setTestResult(null);
+    try { setTestResult(await onTestConnection(getValues())); } catch { setTestResult(false); } finally { setIsTesting(false); }
   };
-
   const toggleSecret = (id: string) => setShowSecret((s) => ({ ...s, [id]: !s[id] }));
-  const onKey = (e: KeyboardEvent) => {
-    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-      e.preventDefault();
-      handleSubmit(onSubmit)();
-    }
-  };
+  const onKey = (e: KeyboardEvent) => { if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); handleSubmit(onSubmit)(); } };
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-3" onKeyDown={onKey}>
@@ -141,6 +128,20 @@ export function CredentialsForm({ initialMode, configuredMap, onSave }: Credenti
           </>
         )}
       </button>
+      <button
+        type="button"
+        onClick={handleTest}
+        disabled={isTesting || isSubmitting}
+        className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-grid-line px-3 py-2 text-sm font-semibold text-muted hover:bg-cool-grey disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {isTesting ? (<><Loader2 className="h-4 w-4 animate-spin" /> Probando...</>) : "Probar conexion"}
+      </button>
+      {testResult !== null && (
+        <div className={`flex items-center gap-2 rounded-md border px-3 py-2 text-xs font-semibold ${testResult ? "border-status-accepted-border bg-status-accepted-bg text-status-accepted-text" : "border-status-rejected-border bg-status-rejected-bg text-status-rejected-text"}`}>
+          {testResult ? <CheckCircle2 className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
+          {testResult ? "Credenciales validas — Siigo en linea" : "Credenciales invalidas o Siigo no disponible"}
+        </div>
+      )}
       <p className="text-center text-2xs text-muted">Ctrl+Enter para guardar</p>
     </form>
   );

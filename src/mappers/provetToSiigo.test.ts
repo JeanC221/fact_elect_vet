@@ -40,13 +40,13 @@ describe("provetToSiigoInvoice", () => {
     expect(result.date).toBe("2026-08-15");
     expect(result.seller).toBe(62);
     expect(result.customer.identification).toBe("1234567890");
-    expect(result.customer.identification_type).toBe("13");
+    expect(result.customer.id_type).toBe("13");
     expect(result.customer.person_type).toBe("Person");
     expect(result.customer.branch_office).toBe(0);
     expect(result.customer.name).toEqual(["María García", "López"]);
     expect(result.customer).not.toHaveProperty("email");
     expect(result.customer).not.toHaveProperty("phone");
-    expect(result.customer).not.toHaveProperty("id_type");
+    expect(result.customer).not.toHaveProperty("identification_type");
     expect(result).not.toHaveProperty("total");
     expect(result.items).toHaveLength(2);
     expect(result.items[0]).toMatchObject({ code: "SERV-CG-01", price: 59500 });
@@ -81,8 +81,8 @@ describe("provetToSiigoInvoice", () => {
     expect(result.items[0].price).toBe(52500);
     expect(result.payments[0].id).toBe(10948);
     expect(result.payments[0].value).toBe(52500);
-    expect(result.customer.name).toEqual(["Veterinaria Los Andes", "S.A.S."]);
-    expect(result.customer).toMatchObject({ identification: "9001234561", identification_type: "31", person_type: "Company", branch_office: 0 });
+    expect(result.customer.name).toEqual(["Veterinaria Los Andes S.A.S."]);
+    expect(result.customer).toMatchObject({ identification: "900123456", check_digit: "1", id_type: "31", person_type: "Company", branch_office: 0 });
     expect(() => siigoInvoicePayloadSchema.parse(result)).not.toThrow();
   });
 
@@ -93,7 +93,7 @@ describe("provetToSiigoInvoice", () => {
     expect(result.payments[0].id).toBe(8466);
     expect(result.payments[0].value).toBe(120000);
     expect(result.customer.name).toEqual(["John", "Smith"]);
-    expect(result.customer).toMatchObject({ identification: "CE9876543", identification_type: "22", person_type: "Person" });
+    expect(result.customer).toMatchObject({ identification: "CE9876543", id_type: "22", person_type: "Person" });
     expect(() => siigoInvoicePayloadSchema.parse(result)).not.toThrow();
   });
 
@@ -116,9 +116,10 @@ describe("provetToSiigoInvoice", () => {
     ).toThrow(UnmappedPaymentMethodError);
   });
 
-  it("overrides the document type id via options.documentTypeId", () => {
-    const result = map(0, { ...opts(), documentTypeId: 3001 });
+  it("overrides the document type id and seller via options", () => {
+    const result = map(0, { ...opts(), documentTypeId: 3001, sellerId: 99 });
     expect(result.document).toEqual({ id: 3001 });
+    expect(result.seller).toBe(99);
     expect(() => siigoInvoicePayloadSchema.parse(result)).not.toThrow();
   });
 

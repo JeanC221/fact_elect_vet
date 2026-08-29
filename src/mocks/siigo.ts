@@ -53,10 +53,11 @@ export const mockSiigoInvoicePayloads: SiigoInvoicePayload[] = [
     date: "2026-08-15",
     customer: {
       person_type: "Person",
-      identification_type: "13",
+      id_type: "13",
       identification: "1234567890",
       branch_office: 0,
       name: ["María García", "López"],
+      contacts: [{ first_name: "María García", last_name: "López", email: "maria.garcia@email.com", phone: "3105550101" }],
     },
     seller: 62,
     items: [
@@ -76,10 +77,12 @@ export const mockSiigoInvoicePayloads: SiigoInvoicePayload[] = [
     date: "2026-08-16",
     customer: {
       person_type: "Company",
-      identification_type: "31",
-      identification: "9001234561",
+      id_type: "31",
+      identification: "900123456",
+      check_digit: "1",
       branch_office: 0,
-      name: ["Veterinaria Los Andes", "S.A.S."],
+      name: ["Veterinaria Los Andes S.A.S."],
+      contacts: [{ first_name: "Veterinaria Los Andes", last_name: "S.A.S.", email: "factura@losandes.co", phone: "6045550102" }],
     },
     seller: 62,
     items: [

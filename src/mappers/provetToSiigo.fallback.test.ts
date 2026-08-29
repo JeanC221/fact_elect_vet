@@ -25,7 +25,7 @@ const opts = (): ProvetToSiigoOptions => ({
 });
 
 describe("provetToSiigoInvoice — zero-drift rounding", () => {
-  it("rounds the unit price to 6 decimals and stays schema-valid", () => {
+  it("rounds the unit price to 2 decimals and stays schema-valid", () => {
     const consultation = {
       ...mockConsultations[0],
       items: [{ name: "Svc", code: "SERV-CG-01", quantity: 1, unit_price: 100.123456, tax_rate: 0.19, discount: 0 }],
@@ -35,7 +35,8 @@ describe("provetToSiigoInvoice — zero-drift rounding", () => {
     };
     const result = provetToSiigoInvoice(consultation, mockClients[0], mockPatients[0], opts());
     const frac = String(result.items[0].price).split(".")[1] ?? "";
-    expect(frac.length).toBeLessThanOrEqual(6);
+    expect(frac.length).toBeLessThanOrEqual(2);
+    expect(result.items[0].price).toBe(119.15);
     expect(() => siigoInvoicePayloadSchema.parse(result)).not.toThrow();
   });
 });

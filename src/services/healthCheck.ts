@@ -1,4 +1,4 @@
-import { getSiigoAccessToken, SiigoAuthError } from "./siigoAuth";
+import { getSiigoAccessToken, SiigoAuthError, type SiigoCredentials } from "./siigoAuth";
 import type { ServiceState, ServiceName, ServiceHealth, HealthReport } from "@/schemas/health";
 
 /** Re-export client-safe schema + types (server callers keep one import). */
@@ -93,12 +93,12 @@ function mockHealthReport(): HealthReport {
 }
 
 /** Siigo health via real OAuth token request. Never throws: online or offline with error message. */
-export async function checkSiigoHealth(): Promise<ServiceHealth> {
+export async function checkSiigoHealth(credentials?: SiigoCredentials): Promise<ServiceHealth> {
   const name: ServiceName = "siigo";
   const checkedAt = new Date().toISOString();
   const start = Date.now();
   try {
-    await getSiigoAccessToken();
+    await getSiigoAccessToken(credentials);
     const latencyMs = Date.now() - start;
     return {
       name, label: LABELS.siigo, state: "online",
@@ -120,14 +120,14 @@ export async function checkSiigoHealth(): Promise<ServiceHealth> {
  * Ping Provet (x-api-key) and Siigo (OAuth) in parallel, derive DIAN from Siigo.
  * In sandbox mode returns mock data instead of hitting external APIs.
  */
-export async function checkHealth(): Promise<HealthReport> {
+export async function checkHealth(credentials?: SiigoCredentials): Promise<HealthReport> {
   if (isSandbox()) return mockHealthReport();
 
   const provetApiKey = process.env.PROVET_API_KEY;
   const provetHeaders = provetApiKey ? { "x-api-key": provetApiKey } : undefined;
   const [provet, siigo] = await Promise.all([
     checkService("provet", PROVET_BASE_URL, fetch, provetHeaders),
-    checkSiigoHealth(),
+    checkSiigoHealth(credentials),
   ]);
   const dian = deriveDian(siigo);
   const services = [provet, siigo, dian];

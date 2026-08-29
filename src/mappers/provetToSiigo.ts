@@ -2,17 +2,10 @@ import type { Consultation, Client, Patient } from "@/schemas/provet";
 import type { SiigoInvoicePayload, SiigoProduct } from "@/schemas/siigo";
 import { resolvePaymentTypeId, type CatalogMapping } from "@/mappers/catalogMapping";
 import { stampSendFor, type EnvironmentMode } from "@/mappers/credentials";
-import {
-  buildSiigoName,
-  cleanIdentification,
-  mapIdentificationType,
-  mapPersonType,
-} from "@/mappers/customerNormalizer";
+import { buildSiigoCustomer } from "@/mappers/customerNormalizer";
 
-/** Round to 6 decimals (unit prices) — defeats float drift before reconciliation. */
-const round6 = (n: number): number => Math.round(n * 1e6) / 1e6;
-/** Round to 2 decimals (totals/payments) — DIAN cent precision. */
-const round2 = (n: number): number => Math.round(n * 100) / 100;
+/** Round strictly to 2 decimals (DIAN cent precision) — defeats float drift (e.g. 7763.980000000001). */
+const round2 = (n: number): number => Number(Math.round(Number(`${n}e2`)) + "e-2");
 
 /** Dynamic emission context supplied by the caller (Settings UI state). */
 export interface ProvetToSiigoOptions {
@@ -24,12 +17,14 @@ export interface ProvetToSiigoOptions {
   mode: EnvironmentMode;
   /** Active Siigo invoice document type id (default: DEFAULT_DOCUMENT_TYPE_ID). */
   documentTypeId?: number;
+  /** Active Siigo seller id (default: DEFAULT_SELLER_ID). */
+  sellerId?: number;
 }
 
-/** Default Siigo invoice document type (Factura de Venta — sandbox). */
+/** Default Siigo invoice document type (Factura de Venta — explicit sandbox default, override via options.documentTypeId). */
 export const DEFAULT_DOCUMENT_TYPE_ID = 2372;
 
-/** Default Siigo seller id (sandbox fallback). */
+/** Default Siigo seller id (explicit sandbox default — override via options.sellerId, never a credential). */
 export const DEFAULT_SELLER_ID = 62;
 
 /** Empty-catalog default — emission REQUIRES an explicit dynamic payment mapping. */
@@ -39,9 +34,13 @@ const DEFAULT_OPTIONS: ProvetToSiigoOptions = {
   mode: "sandbox",
 };
 
-/** Sum of emitted line totals (unit prices pre-rounded to 6 dp), rounded to 2 dp — equals Siigo's server-side total. */
+/** Per-item rounded unit price (tax-inclusive, discount-adjusted) at 2 dp. */
+const lineUnitPrice = (it: Consultation["items"][number]): number =>
+  round2(it.unit_price * (1 + it.tax_rate) - it.discount / it.quantity);
+
+/** Payment total = exact sum of rounded `price * quantity` so sum(payments) == sum(items) with zero divergence. */
 const sumLineTotals = (items: Consultation["items"]): number =>
-  round2(items.reduce((sum, it) => sum + round6(it.unit_price * (1 + it.tax_rate) - it.discount / it.quantity) * it.quantity, 0));
+  round2(items.reduce((sum, it) => sum + lineUnitPrice(it) * it.quantity, 0));
 
 /**
  * Pure, side-effect-free transformation:
@@ -50,9 +49,11 @@ const sumLineTotals = (items: Consultation["items"]): number =>
  * collection: root `document`, `date`, `customer`, `seller`, `items`,
  * `payments`, `stamp`, `mail` — with NO `total` key. `payments[].id` resolves
  * exclusively from `options.mapping.payments` (unmapped methods throw
- * UnmappedPaymentMethodError). Customer emits flat
- * `identification`, `identification_type`, `person_type` and `branch_office: 0`;
- * items emit only `code`/`description`/`quantity`/`price`.
+ * UnmappedPaymentMethodError). Customer composition (flat `identification`,
+ * `check_digit`, single-element Company `name`, `contacts`) is delegated to
+ * `buildSiigoCustomer`; items emit only `code`/`description`/`quantity`/`price`.
+ * Item `price` and `payments[0].value` are rounded to 2 decimals so the
+ * cent-integer reconciliation `sum(payments) == sum(items)` holds exactly.
  */
 export function provetToSiigoInvoice(
   consultation: Consultation,
@@ -61,7 +62,7 @@ export function provetToSiigoInvoice(
   options: ProvetToSiigoOptions = DEFAULT_OPTIONS,
 ): SiigoInvoicePayload {
   void patient; // reserved for future audit/logging
-  const { mapping, siigoProducts, mode, documentTypeId } = options;
+  const { mapping, siigoProducts, mode, documentTypeId, sellerId } = options;
 
   const productIdByItemCode = new Map(
     mapping.items.map((m) => [m.provetCode, m.siigoProductId]),
@@ -79,14 +80,8 @@ export function provetToSiigoInvoice(
   return {
     document: { id: documentTypeId ?? DEFAULT_DOCUMENT_TYPE_ID },
     date,
-    customer: {
-      person_type: mapPersonType(client.client_type),
-      identification_type: mapIdentificationType(client.identification.type),
-      identification: cleanIdentification(client.identification.number),
-      branch_office: 0,
-      name: buildSiigoName(client.name || "Cliente sin nombre"),
-    },
-    seller: DEFAULT_SELLER_ID,
+    customer: buildSiigoCustomer(client),
+    seller: sellerId ?? DEFAULT_SELLER_ID,
     items: sourceItems.map((item) => {
       const productId = productIdByItemCode.get(item.code);
       const product = productId ? productById.get(productId) : undefined;
@@ -94,7 +89,7 @@ export function provetToSiigoInvoice(
         code: product?.code ?? item.code,
         description: item.name,
         quantity: item.quantity,
-        price: round6(item.unit_price * (1 + item.tax_rate) - item.discount / item.quantity),
+        price: lineUnitPrice(item),
       };
     }),
     payments: [{ id: paymentTypeId, value: paymentValue }],

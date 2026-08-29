@@ -59,6 +59,15 @@ describe("submitInvoice", () => {
     expect(headersAt(2)["Idempotency-Key"]).toBe("RETRY-KEY-99");
   });
 
+  it("never serializes a root `total` key, even if a rogue caller injects one", async () => {
+    fetchMock.mockResolvedValue(fakeRes(okBody));
+    const rogue = { ...payload, total: 999 } as unknown as typeof payload;
+    await submitInvoice(rogue, "tok-123", "PARTNER1");
+    const body = JSON.parse(String(callAt(0)[1].body)) as Record<string, unknown>;
+    expect(body).not.toHaveProperty("total");
+    expect(body.payments).toEqual(payload.payments);
+  });
+
   it("throws SiigoApiError with the parsed Siigo error code on 4xx", async () => {
     fetchMock.mockResolvedValue(
       fakeRes({ code: "invalid_identification", message: "NIT inválido" }, 400),

@@ -25,11 +25,11 @@ interface AuthCache {
   expiresAt: number;
 }
 
-let cache: AuthCache | null = null;
+const tokenCache = new Map<string, AuthCache>();
 
 /** Reset the in-memory token cache (test hook). */
 export function resetSiigoAuthCache(): void {
-  cache = null;
+  tokenCache.clear();
 }
 
 function siigoBaseUrl(): string {
@@ -57,19 +57,44 @@ export interface SiigoAuthResult {
   partnerId: string;
 }
 
+/** Explicit Siigo credentials (UI-supplied; never persisted to localStorage). */
+export interface SiigoCredentials {
+  username: string;
+  accessKey: string;
+  partnerId: string;
+}
+
+/** Resolve credentials from an explicit override or fall back to env vars. */
+function resolveCreds(creds?: SiigoCredentials): SiigoCredentials {
+  if (creds) return creds;
+  return {
+    username: requireEnv("SIIGO_USERNAME"),
+    accessKey: requireEnv("SIIGO_ACCESS_KEY"),
+    partnerId: requireEnv("SIIGO_PARTNER_ID"),
+  };
+}
+
+/** Cache key derived from partnerId so per-credential tokens don't collide. */
+function cacheKeyFor(partnerId: string): string {
+  return `siigo:${partnerId}`;
+}
+
 /**
  * Retrieve a valid Siigo access token using the Client Credentials Grant
  * against POST /auth. Tokens are cached in memory and renewed before expiry.
+ * Pass explicit `credentials` to bypass env vars (UI health/catalog checks).
  */
-export async function getSiigoAccessToken(): Promise<SiigoAuthResult> {
+export async function getSiigoAccessToken(
+  credentials?: SiigoCredentials,
+): Promise<SiigoAuthResult> {
   const baseUrl = siigoBaseUrl();
-  const username = requireEnv("SIIGO_USERNAME");
-  const accessKey = requireEnv("SIIGO_ACCESS_KEY");
-  const partnerId = requireEnv("SIIGO_PARTNER_ID");
+  const { username, accessKey, partnerId } = resolveCreds(credentials);
+  const key = cacheKeyFor(partnerId);
 
   const now = Date.now();
-  if (cache && now < cache.expiresAt - 60_000) {
-    return { accessToken: cache.accessToken, partnerId };
+  const cached = tokenCache.get(key);
+  if (cached && now < cached.expiresAt - 60_000) {
+    return { accessToken: cached.accessToken, partnerId };
   }
 
   let res: Response;
@@ -82,17 +107,17 @@ export async function getSiigoAccessToken(): Promise<SiigoAuthResult> {
   } catch {
     throw new SiigoAuthError(
       "service_unavailable",
-      "No se pudo contactar el servicio de autenticación de Siigo.",
+      "No se pudo contactar el servicio de autenticacion de Siigo.",
     );
   }
 
   if (!res.ok) {
-    let message = `Autenticación con Siigo falló (HTTP ${res.status}).`;
+    let message = `Autenticacion con Siigo fallo (HTTP ${res.status}).`;
     try {
       const parsed = siigoErrorSchema.safeParse(await res.json());
       if (parsed.success) message = parsed.data.message;
     } catch {
-      // Non-JSON error body — keep status-derived message.
+      // Non-JSON error body - keep status-derived message.
     }
     throw new SiigoAuthError("auth_failed", message);
   }
@@ -103,7 +128,7 @@ export async function getSiigoAccessToken(): Promise<SiigoAuthResult> {
   } catch {
     throw new SiigoAuthError(
       "auth_failed",
-      "Respuesta de autenticación de Siigo no es JSON válido.",
+      "Respuesta de autenticacion de Siigo no es JSON valido.",
     );
   }
 
@@ -111,15 +136,15 @@ export async function getSiigoAccessToken(): Promise<SiigoAuthResult> {
   if (!parsed.success) {
     throw new SiigoAuthError(
       "auth_failed",
-      "Respuesta de autenticación de Siigo tiene formato inesperado.",
+      "Respuesta de autenticacion de Siigo tiene formato inesperado.",
     );
   }
 
   const ttlSeconds = Math.max(parsed.data.expires_in - 60, 60);
-  cache = {
+  tokenCache.set(key, {
     accessToken: parsed.data.access_token,
     expiresAt: now + ttlSeconds * 1000,
-  };
+  });
 
   return { accessToken: parsed.data.access_token, partnerId };
 }

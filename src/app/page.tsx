@@ -9,6 +9,7 @@ import { InvoiceHistory } from "@/components/InvoiceHistory";
 import { CreditNoteModal } from "@/components/CreditNoteModal";
 import {
   buildInvoicePayloadFromQuickEdit,
+  buildPaymentOptions,
   buildQuickEditDetail,
   type InvoiceStatus,
   type QuickEditDetail,
@@ -51,7 +52,7 @@ export default function HomePage() {
 
   const selectedDetail = useMemo(() => {
     if (!selectedId) return null;
-    const detail = buildQuickEditDetail(mockConsultations, mockClients, mockPatients, selectedId);
+    const detail = buildQuickEditDetail(mockConsultations, mockClients, mockPatients, selectedId, options.mapping);
     if (detail) return detail;
     // Live Provet consultation not in mocks → build minimal detail from queue row
     const row = rows.find((r) => r.id === selectedId);
@@ -66,14 +67,14 @@ export default function HomePage() {
       email: "",
       phone: "",
       patientName: row.patientName,
-      paymentMethod: row.paymentMethod,
-      paymentMethodOptions: ["Bancolombia", "Davivienda", "Efectivo"],
+      paymentMethod: "",
+      paymentMethodOptions: buildPaymentOptions(options.mapping),
       total: row.total,
       items: [],
       createdAt: row.createdAt,
     };
     return fallback;
-  }, [selectedId, rows]);
+  }, [selectedId, rows, options.mapping]);
 
   const showToast = useCallback((msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3000); }, []);
 
@@ -117,9 +118,10 @@ export default function HomePage() {
     if (!annulTarget) return;
     setIsAnnulling(true); setAnnulError(null);
     try {
-      const d = buildQuickEditDetail(mockConsultations, mockClients, mockPatients, annulTarget.consultationId);
+      const d = buildQuickEditDetail(mockConsultations, mockClients, mockPatients, annulTarget.consultationId, options.mapping);
       if (!d) throw new Error("missing_source_data");
-      const original = buildInvoicePayloadFromQuickEdit(mockConsultations, mockClients, mockPatients, annulTarget.consultationId, { name: d.clientName, phone: d.phone, identificationType: d.identificationType, identificationNumber: d.identificationNumber, email: d.email, paymentMethod: d.paymentMethod, paidAmount: d.total });
+      const srcCon = mockConsultations.find((c) => c.id === annulTarget.consultationId);
+      const original = buildInvoicePayloadFromQuickEdit(mockConsultations, mockClients, mockPatients, annulTarget.consultationId, { name: d.clientName, phone: d.phone, identificationType: d.identificationType, identificationNumber: d.identificationNumber, email: d.email, paymentMethod: srcCon?.payment_method ?? d.paymentMethodOptions[0]?.provetMethod ?? "", paidAmount: d.total }, options);
       if (!original) throw new Error("missing_source_data");
       const cn = toCreditNotePayload(original, { id: annulTarget.invoiceId, cufe: annulTarget.cufe }, reason);
       siigoCreditNoteSchema.parse(cn);

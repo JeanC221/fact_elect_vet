@@ -17,7 +17,7 @@ export const siigoProductSchema = z.object({
   id: z.string().trim().min(1),
   code: z.string().trim().min(1).max(50),
   name: z.string().trim().min(1).max(100).transform(sanitizeText),
-  price: z.number().nonnegative().max(1e9).refine((n) => hasMaxDecimals(n, 6), "Price max 6 decimals"),
+  price: z.number().nonnegative().max(1e9).refine((n) => hasMaxDecimals(n, 2), "Price max 2 decimals"),
   tax_classification: siigoTaxEnum,
   unit_of_measure: z.string().trim().min(1).max(10).default("UND"),
 });
@@ -28,28 +28,52 @@ export const siigoPaymentTypeSchema = z.object({
   type: z.enum(["cash", "card", "transfer", "credit"]),
 });
 
-/** Official Siigo customer (Invoice + Customer - Create): flat identification + branch_office 0. */
-export const siigoCustomerSchema = z.object({
-  person_type: z.enum(["Person", "Company"]),
-  identification_type: z.string().trim().min(1).max(5),
-  identification: z
-    .string()
-    .trim()
-    .min(1)
-    .max(30)
-    .regex(/^[A-Za-z0-9]+$/, "identification must be alphanumeric"),
-  branch_office: z.literal(0),
-  name: z
-    .array(z.string().trim().min(1).max(100).transform(sanitizeText))
-    .min(1)
-    .max(2),
+/** Siigo customer contact (invoice mail dispatch target when mail.send is true). */
+export const siigoContactSchema = z.object({
+  first_name: z.string().trim().min(1).max(100).transform(sanitizeText),
+  last_name: z.string().trim().min(1).max(100).transform(sanitizeText),
+  email: z.string().trim().max(254).email("Invalid contact email"),
+  phone: z.string().trim().max(20).optional(),
 });
+
+/** Official Siigo customer (Invoice + Customer - Create): flat identification + branch_office 0. */
+export const siigoCustomerSchema = z
+  .object({
+    person_type: z.enum(["Person", "Company"]),
+    id_type: z.string().trim().min(1).max(5),
+    identification: z
+      .string()
+      .trim()
+      .min(1)
+      .max(30)
+      .regex(/^[A-Za-z0-9]+$/, "identification must be alphanumeric"),
+    check_digit: z
+      .string()
+      .trim()
+      .regex(/^\d$/, "check_digit must be a single digit")
+      .optional(),
+    branch_office: z.literal(0),
+    name: z
+      .array(z.string().trim().min(1).max(100).transform(sanitizeText))
+      .min(1)
+      .max(2),
+    contacts: z.array(siigoContactSchema).min(1).optional(),
+  })
+  .superRefine((customer, ctx) => {
+    if (customer.person_type === "Company" && customer.name.length !== 1) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["name"],
+        message: "Company customers must emit a single business-name element",
+      });
+    }
+  });
 
 export const siigoInvoiceItemSchema = z.object({
   code: z.string().trim().min(1).max(50),
   description: z.string().trim().min(1).max(200).transform(sanitizeText),
   quantity: z.number().positive().max(1e6),
-  price: z.number().nonnegative().max(1e9).refine((n) => hasMaxDecimals(n, 6), "Price max 6 decimals"),
+  price: z.number().positive().max(1e9).refine((n) => hasMaxDecimals(n, 2), "Price max 2 decimals"),
 });
 
 /** Official Siigo invoice payment: numeric payment-type id + COP value. */
@@ -86,6 +110,7 @@ export const siigoErrorSchema = z.object({
 export type SiigoDocumentType = z.infer<typeof siigoDocumentTypeSchema>;
 export type SiigoProduct = z.infer<typeof siigoProductSchema>;
 export type SiigoPaymentType = z.infer<typeof siigoPaymentTypeSchema>;
+export type SiigoContact = z.infer<typeof siigoContactSchema>;
 export type SiigoCustomer = z.infer<typeof siigoCustomerSchema>;
 export type SiigoInvoiceItem = z.infer<typeof siigoInvoiceItemSchema>;
 export type SiigoPayment = z.infer<typeof siigoPaymentSchema>;

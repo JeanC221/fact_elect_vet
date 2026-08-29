@@ -35,9 +35,16 @@ export const hasMaxDecimals = (n: number, max: number): boolean => {
   return frac.length <= max;
 };
 
-/** Strip single quotes and ASCII control chars (XSS hardening, Siigo ^[^']+$). */
+/**
+ * Strip single quotes, typographic/smart quotes, unescaped double quotes and
+ * ASCII control chars (XSS hardening, Siigo ^[^']+$). Smart quotes are replaced
+ * with a clean space to avoid merging adjacent words, then collapsed.
+ */
 export const sanitizeText = (s: string): string =>
-  s.replace(/['\u0000-\u001F]/g, "");
+  s
+    .replace(/[\u201C\u201D\u201E\u201F\u2018\u2019\u201A\u201B\u00AB\u00BB"'\u0000-\u001F]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
 export const clientSchema = z.object({
   id: z.string().trim().min(1),
