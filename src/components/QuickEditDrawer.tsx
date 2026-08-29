@@ -1,7 +1,7 @@
 "use client";
 
 import { type ReactNode, useEffect, useState } from "react";
-import { AlertTriangle, Loader2, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Loader2, Pencil, X } from "lucide-react";
 import {
   formatCOP,
   formatDate,
@@ -34,7 +34,8 @@ function initialValues(d: QuickEditDetail | null): QuickEditFormValues {
 
 export function QuickEditDrawer({ detail, isSubmitting, errorMessage, onClose, onSubmit }: QuickEditDrawerProps) {
   const [values, setValues] = useState<QuickEditFormValues>(() => initialValues(detail));
-  useEffect(() => { setValues(initialValues(detail)); }, [detail?.id]);
+  const [isEditingAmount, setIsEditingAmount] = useState(false);
+  useEffect(() => { setValues(initialValues(detail)); setIsEditingAmount(false); }, [detail?.id]);
   const update = (patch: Partial<QuickEditFormValues>) => setValues((prev) => ({ ...prev, ...patch }));
 
   const parsed = quickEditFormSchema.safeParse(values);
@@ -95,11 +96,27 @@ export function QuickEditDrawer({ detail, isSubmitting, errorMessage, onClose, o
               </select>
             </Field>
             <Field label="Monto pagado (COP)">
-              <input type="number" min={0} step="0.01" value={values.paidAmount} onChange={(e) => update({ paidAmount: Math.round(Number(e.target.value) * 100) / 100 })} className={INPUT} disabled={isSubmitting} />
+              {isEditingAmount ? (
+                <div className="flex items-center gap-1">
+                  <input type="number" min={0} step="0.01" value={values.paidAmount} onChange={(e) => update({ paidAmount: Math.round(Number(e.target.value) * 100) / 100 })} className={INPUT} disabled={isSubmitting} />
+                  <button type="button" onClick={() => setIsEditingAmount(false)} disabled={isSubmitting} className="shrink-0 rounded p-0.5 text-status-accepted-text hover:bg-cool-grey disabled:opacity-40" aria-label="Confirmar monto pagado">
+                    <CheckCircle2 className="h-4 w-4" />
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <span className={`text-sm font-semibold ${balanced ? "text-slate-text" : "text-status-rejected-text"}`}>
+                    {formatCOP(values.paidAmount)} COP
+                  </span>
+                  <button type="button" onClick={() => setIsEditingAmount((prev) => !prev)} disabled={isSubmitting} className="rounded p-0.5 text-muted hover:bg-cool-grey hover:text-clinical-blue disabled:opacity-40" aria-label="Editar monto pagado">
+                    <Pencil className="h-4 w-4" />
+                  </button>
+                </div>
+              )}
             </Field>
           </div>
-          <ReconciliationBar consultationTotal={detail.total} paidAmount={values.paidAmount} />
-          {!balanced && <p className={ERROR}>El total pagado no coincide con el total de la consulta.</p>}
+          {isEditingAmount && <ReconciliationBar consultationTotal={detail.total} paidAmount={values.paidAmount} />}
+          {isEditingAmount && !balanced && <p className={ERROR}>El total pagado no coincide con el total de la consulta.</p>}
           <div className="rounded-md border border-grid-line">
             <div className="border-b border-grid-line px-2 py-1 text-xs font-semibold text-muted">Ítems</div>
             <table className="w-full text-xs"><tbody>

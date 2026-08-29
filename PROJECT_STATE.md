@@ -281,3 +281,11 @@ Internal web application (Middleware API + Operational Dashboard) designed to au
 - **Verification:** `npx tsc --noEmit` ✅ | `npx vitest run` ✅ 223/223 (20 files, all pass) | `npm run lint` ✅ | `npx next build` ✅ | all capped files <150 LOC (provetToSiigo.ts 138, customerNormalizer.ts 38, consultationQueue.ts 123, QuickEditDrawer.tsx 100, route.ts 32); `page.tsx` remains 178 LOC (existing `/src/app` file, not under the `/services`/`/mappers`/`/components` 150-line cap).
 - **Notes / Tradeoffs:** The `NIT` regex in `identificationSchema` was relaxed to allow the optional verification-digit hyphen (`^\d{7,10}-?\d{1}$`) so the mapper can strip dashes per the strict-minimal-data requirement while still accepting hyphenated input in the drawer. Payment-method resolution keeps the existing catalog-mapping mechanism: the drawer hardcodes `Bancolombia`/`Davivienda`/`Efectivo`, and the mapper resolves each to its active Siigo `payment_type_id` from `ProvetToSiigoOptions.mapping` (fallback `Efectivo` → `PT-003`).
 - **Next Pending Task:** None — awaiting next directive.
+## Paid Amount Read-Only with Pencil Toggle (Task — UX Refactor)
+- **Date:** 2026-08-28
+- **Agent:** Cline
+- **Completed Task:** Paid Amount read-only + green check toggle. (1) `src/components/QuickEditDrawer.tsx` (modified, 136 lines): added `CheckCircle2` import; edit-mode now wraps the `<input>` in a `flex` row with a green `CheckCircle2` button (`text-status-accepted-text`) that sets `isEditingAmount = false` on click, closing the editor and hiding the reconciliation bar. Read-only mode unchanged: formatted COP text + Pencil toggle.
+- **Modified Files:** `src/components/QuickEditDrawer.tsx`, `PROJECT_STATE.md`
+- **Verification:** `npx tsc --noEmit` ✅ | `npx vitest run` ✅ 227/227 (20 files) | `npm run lint` ✅ | QuickEditDrawer.tsx 131 lines (<150 cap)
+- **Next Pending Task:** None — awaiting next directive.
+---
