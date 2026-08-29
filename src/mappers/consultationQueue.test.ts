@@ -10,16 +10,13 @@ import {
 } from "./consultationQueue";
 import { siigoInvoicePayloadSchema } from "@/schemas/siigo";
 import { mockClients, mockConsultations, mockPatients } from "@/mocks/provet";
+import type { ProvetToSiigoOptions } from "@/mappers/provetToSiigo";
+import { mockSiigoProducts } from "@/mocks/siigo";
 
-const validFormValues: QuickEditFormValues = {
-  name: "María García López",
-  identificationType: "CC",
-  identificationNumber: "1234567890",
-  email: "nueva@mail.co",
-  phone: "3105550101",
-  paymentMethod: "Efectivo",
-  paidAmount: 95200,
-};
+const validFormValues: QuickEditFormValues = { name: "María García López", identificationType: "CC", identificationNumber: "1234567890", email: "nueva@mail.co", phone: "3105550101", paymentMethod: "Efectivo", paidAmount: 95200 };
+
+/** Dynamic catalog for emission — Task 4: payment ids resolve ONLY from options.mapping.payments. */
+const emitOpts: ProvetToSiigoOptions = { mapping: { items: [], payments: [{ provetMethod: "Tarjeta Crédito", siigoPaymentTypeId: 5636 }, { provetMethod: "Efectivo", siigoPaymentTypeId: 10948 }], version: 1, updatedAt: "2026-08-26T00:00:00.000Z" }, siigoProducts: mockSiigoProducts, mode: "sandbox" };
 
 describe("buildConsultationQueue", () => {
   it("returns one row per consultation", () => {
@@ -28,21 +25,17 @@ describe("buildConsultationQueue", () => {
   });
 
   it("enriches each row with client name and document", () => {
-    const rows = buildConsultationQueue(mockConsultations, mockClients, mockPatients);
-    const con1 = rows.find((r) => r.id === "CON-001");
+    const con1 = buildConsultationQueue(mockConsultations, mockClients, mockPatients).find((r) => r.id === "CON-001");
     expect(con1?.clientName).toBe("María García López");
     expect(con1?.clientDoc).toBe("CC 1234567890");
   });
 
   it("enriches each row with patient name", () => {
-    const rows = buildConsultationQueue(mockConsultations, mockClients, mockPatients);
-    const con2 = rows.find((r) => r.id === "CON-002");
-    expect(con2?.patientName).toBe("Rocky");
+    expect(buildConsultationQueue(mockConsultations, mockClients, mockPatients).find((r) => r.id === "CON-002")?.patientName).toBe("Rocky");
   });
 
   it("carries consultation total and payment method", () => {
-    const rows = buildConsultationQueue(mockConsultations, mockClients, mockPatients);
-    const con3 = rows.find((r) => r.id === "CON-003");
+    const con3 = buildConsultationQueue(mockConsultations, mockClients, mockPatients).find((r) => r.id === "CON-003");
     expect(con3?.total).toBe(120000);
     expect(con3?.paymentMethod).toBe("Transferencia");
   });
@@ -82,8 +75,7 @@ describe("buildQuickEditDetail", () => {
     expect(d?.clientName).toBe("María García López");
     expect(d?.identificationNumber).toBe("1234567890");
     expect(d?.phone).toBe("3105550101");
-    expect(d?.patientName).toBe("Max");
-    expect(d?.total).toBe(95200);
+    expect([d?.patientName, d?.total]).toEqual(["Max", 95200]);
     expect(d?.paymentMethodOptions).toContain("Tarjeta Crédito");
   });
 
@@ -95,16 +87,12 @@ describe("buildQuickEditDetail", () => {
     const orphan = [{ ...mockConsultations[0], id: "CON-X", client_id: "CLI-NOPE" }];
     const d = buildQuickEditDetail(orphan, mockClients, mockPatients, "CON-X");
     expect(d).toBeDefined();
-    expect(d?.clientName).toBe("Cliente desconocido");
-    expect(d?.identificationType).toBe("CC");
-    expect(d?.identificationNumber).toBe("");
-    expect(d?.email).toBe("");
+    expect([d?.clientName, d?.identificationType, d?.identificationNumber, d?.email]).toEqual(["Cliente desconocido", "CC", "", ""]);
   });
 
   it("prepends unmapped payment method to options", () => {
     const custom = [{ ...mockConsultations[0], payment_method: "Nequi" }];
-    const d = buildQuickEditDetail(custom, mockClients, mockPatients, "CON-001");
-    expect(d?.paymentMethodOptions[0]).toBe("Nequi");
+    expect(buildQuickEditDetail(custom, mockClients, mockPatients, "CON-001")?.paymentMethodOptions[0]).toBe("Nequi");
   });
 });
 
@@ -120,12 +108,8 @@ describe("quickEditFormSchema", () => {
   });
 
   it("accepts a NIT with or without the verification-digit hyphen", () => {
-    expect(
-      quickEditFormSchema.safeParse({ ...validFormValues, identificationType: "NIT", identificationNumber: "900123456-1" }).success,
-    ).toBe(true);
-    expect(
-      quickEditFormSchema.safeParse({ ...validFormValues, identificationType: "NIT", identificationNumber: "9001234561" }).success,
-    ).toBe(true);
+    expect(quickEditFormSchema.safeParse({ ...validFormValues, identificationType: "NIT", identificationNumber: "900123456-1" }).success).toBe(true);
+    expect(quickEditFormSchema.safeParse({ ...validFormValues, identificationType: "NIT", identificationNumber: "9001234561" }).success).toBe(true);
   });
 
   it("rejects a paidAmount with more than 2 decimals", () => {
@@ -139,8 +123,8 @@ describe("quickEditFormSchema", () => {
 });
 
 describe("buildInvoicePayloadFromQuickEdit", () => {
-  it("applies form overrides and keeps stamp.send=false", () => {
-    const p = buildInvoicePayloadFromQuickEdit(mockConsultations, mockClients, mockPatients, "CON-001", validFormValues);
+  it("applies form overrides, dynamic payment mapping and keeps stamp.send=false", () => {
+    const p = buildInvoicePayloadFromQuickEdit(mockConsultations, mockClients, mockPatients, "CON-001", validFormValues, emitOpts);
     expect(p?.customer.branch_office).toBe(0);
     expect(p?.customer.name).toEqual(["María García", "López"]);
     expect(p?.customer.person_type).toBe("Person");
@@ -150,7 +134,7 @@ describe("buildInvoicePayloadFromQuickEdit", () => {
   });
 
   it("produces a payload passing siigoInvoicePayloadSchema", () => {
-    const p = buildInvoicePayloadFromQuickEdit(mockConsultations, mockClients, mockPatients, "CON-001", validFormValues);
+    const p = buildInvoicePayloadFromQuickEdit(mockConsultations, mockClients, mockPatients, "CON-001", validFormValues, emitOpts);
     expect(siigoInvoicePayloadSchema.safeParse(p).success).toBe(true);
   });
 

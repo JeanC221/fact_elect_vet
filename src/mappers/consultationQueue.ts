@@ -8,7 +8,7 @@ import {
   type Patient,
 } from "@/schemas/provet";
 import type { SiigoInvoicePayload } from "@/schemas/siigo";
-import { PAYMENT_METHOD_MAP, provetToSiigoInvoice, type ProvetToSiigoOptions } from "@/mappers/provetToSiigo";
+import { provetToSiigoInvoice, type ProvetToSiigoOptions } from "@/mappers/provetToSiigo";
 
 /** DIAN invoice lifecycle status, surfaced per consultation row. */
 export type InvoiceStatus = "Accepted" | "Draft" | "Rejected" | "Annulled";
@@ -30,15 +30,13 @@ export const formatCOP = (value: number): string =>
 /** Deterministic short ISO date (YYYY-MM-DD), locale-independent. */
 export const formatDate = (value: Date): string => new Date(value).toISOString().slice(0, 10);
 
+/** Legacy display labels for the Quick-Edit drawer (ids come from the dynamic catalog at emission). */
+const LEGACY_PAYMENT_OPTIONS = ["Bancolombia", "Davivienda", "Efectivo"] as const;
+
 /** Pure O(n) join into queue rows; invoiceStatus defaults to "Draft" until an invoice is linked. */
-export function buildConsultationQueue(
-  consultations: Consultation[],
-  clients: Client[],
-  patients: Patient[],
-): ConsultationQueueRow[] {
+export function buildConsultationQueue(consultations: Consultation[], clients: Client[], patients: Patient[]): ConsultationQueueRow[] {
   const clientMap = new Map(clients.map((c) => [c.id, c]));
   const patientMap = new Map(patients.map((p) => [p.id, p]));
-
   return consultations.map((c) => {
     const client = clientMap.get(c.client_id);
     const patient = patientMap.get(c.patient_id);
@@ -85,32 +83,22 @@ export const quickEditFormSchema = z
 export type QuickEditFormValues = z.infer<typeof quickEditFormSchema>;
 
 /** Pure O(n) lookup building the Quick-Edit detail; `undefined` for unknown id or missing client. */
-export function buildQuickEditDetail(
-  consultations: Consultation[],
-  clients: Client[],
-  patients: Patient[],
-  id: string,
-): QuickEditDetail | undefined {
+export function buildQuickEditDetail(consultations: Consultation[], clients: Client[], patients: Patient[], id: string): QuickEditDetail | undefined {
   const consultation = consultations.find((c) => c.id === id);
   if (!consultation) return undefined;
   const client = clients.find((c) => c.id === consultation.client_id);
   const patient = patients.find((p) => p.id === consultation.patient_id);
-
   const clientName = client?.name ?? "Cliente desconocido";
   const identificationType = client?.identification.type ?? "CC";
   const identificationNumber = client?.identification.number ?? "";
   const email = client?.email ?? "";
   const phone = client?.phone ?? "";
-
-  const opts = Object.keys(PAYMENT_METHOD_MAP);
+  const opts: string[] = [...LEGACY_PAYMENT_OPTIONS];
   const paymentMethodOptions = opts.includes(consultation.payment_method) ? opts : [consultation.payment_method, ...opts];
-
   return {
     id: consultation.id, clientName,
-    identificationType,
-    identificationNumber,
-    email,
-    phone,
+    identificationType, identificationNumber,
+    email, phone,
     patientName: patient?.name ?? "Paciente desconocido",
     paymentMethod: consultation.payment_method, paymentMethodOptions,
     total: consultation.total, createdAt: consultation.created_at,
@@ -123,69 +111,28 @@ export function buildQuickEditDetail(
  *  `fallbackDetail` (e.g. from a live Provet row) is used to synthesise the
  *  minimal Provet objects required by `provetToSiigoInvoice`. */
 export function buildInvoicePayloadFromQuickEdit(
-  consultations: Consultation[],
-  clients: Client[],
-  patients: Patient[],
-  id: string,
-  values: QuickEditFormValues,
-  options?: ProvetToSiigoOptions,
-  fallbackDetail?: QuickEditDetail,
+  consultations: Consultation[], clients: Client[], patients: Patient[],
+  id: string, values: QuickEditFormValues, options?: ProvetToSiigoOptions, fallbackDetail?: QuickEditDetail,
 ): SiigoInvoicePayload | undefined {
   const consultation = consultations.find((c) => c.id === id);
   const client = consultation ? clients.find((c) => c.id === consultation.client_id) : undefined;
   const patient = consultation ? patients.find((p) => p.id === consultation.patient_id) : undefined;
 
   if (consultation && client) {
-    const overriddenClient: Client = {
-      ...client,
-      name: values.name,
-      identification: { type: values.identificationType, number: values.identificationNumber },
-      email: values.email,
-      phone: values.phone,
-    };
+    const overriddenClient: Client = { ...client, name: values.name, identification: { type: values.identificationType, number: values.identificationNumber }, email: values.email, phone: values.phone };
     const overriddenConsultation: Consultation = { ...consultation, payment_method: values.paymentMethod };
-    const fallbackPatient: Patient = { id: consultation.patient_id, name: "Paciente desconocido", species: "—", owner_id: client.id };
-    return provetToSiigoInvoice(overriddenConsultation, overriddenClient, patient ?? fallbackPatient, options);
+    return provetToSiigoInvoice(overriddenConsultation, overriddenClient, patient ?? { id: consultation.patient_id, name: "Paciente desconocido", species: "—", owner_id: client.id }, options);
   }
-
   if (!fallbackDetail) return undefined;
 
   const syntheticConsultation: Consultation = {
-    id: fallbackDetail.id,
-    client_id: `CLI-${fallbackDetail.id}`,
-    patient_id: `PAT-${fallbackDetail.id}`,
-    items: fallbackDetail.items.length > 0
-      ? fallbackDetail.items.map((it) => ({
-          code: it.code,
-          name: it.name,
-          quantity: it.quantity,
-          unit_price: it.lineTotal / it.quantity,
-          tax_rate: 0,
-          discount: 0,
-        }))
-      : [],
-    subtotal: fallbackDetail.total,
-    tax_total: 0,
-    total: fallbackDetail.total,
-    payment_method: values.paymentMethod,
-    status: "closed",
-    created_at: fallbackDetail.createdAt,
-    updated_at: fallbackDetail.createdAt,
+    id: fallbackDetail.id, client_id: `CLI-${fallbackDetail.id}`, patient_id: `PAT-${fallbackDetail.id}`,
+    items: fallbackDetail.items.length > 0 ? fallbackDetail.items.map((it) => ({ code: it.code, name: it.name, quantity: it.quantity, unit_price: it.lineTotal / it.quantity, tax_rate: 0, discount: 0 })) : [],
+    subtotal: fallbackDetail.total, tax_total: 0, total: fallbackDetail.total,
+    payment_method: values.paymentMethod, status: "closed",
+    created_at: fallbackDetail.createdAt, updated_at: fallbackDetail.createdAt,
   };
-  const syntheticClient: Client = {
-    id: `CLI-${fallbackDetail.id}`,
-    name: values.name,
-    identification: { type: values.identificationType, number: values.identificationNumber },
-    email: values.email,
-    address: "—",
-    phone: values.phone,
-    client_type: "natural",
-  };
-  const syntheticPatient: Patient = {
-    id: `PAT-${fallbackDetail.id}`,
-    name: fallbackDetail.patientName,
-    species: "Canino",
-    owner_id: `CLI-${fallbackDetail.id}`,
-  };
+  const syntheticClient: Client = { id: `CLI-${fallbackDetail.id}`, name: values.name, identification: { type: values.identificationType, number: values.identificationNumber }, email: values.email, address: "—", phone: values.phone, client_type: "natural" };
+  const syntheticPatient: Patient = { id: `PAT-${fallbackDetail.id}`, name: fallbackDetail.patientName, species: "Canino", owner_id: `CLI-${fallbackDetail.id}` };
   return provetToSiigoInvoice(syntheticConsultation, syntheticClient, syntheticPatient, options);
 }

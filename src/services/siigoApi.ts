@@ -92,8 +92,8 @@ export function submitInvoice(
 }
 
 /**
- * Submit a Zod-validated credit note to Siigo Nube (live POST /v1/credit-notes),
- * annulling the base invoice before the DIAN (Resolution 948).
+ * Submit a Zod-validated credit note (live POST /v1/credit-notes) annulling the
+ * base invoice (Resolution 948). V1-aligned: document, base_document, payments.
  */
 export function submitCreditNote(
   payload: SiigoCreditNotePayload, accessToken: string, partnerId: string,

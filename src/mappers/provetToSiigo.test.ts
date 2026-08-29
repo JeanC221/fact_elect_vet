@@ -3,7 +3,7 @@ import {
   provetToSiigoInvoice,
   type ProvetToSiigoOptions,
 } from "./provetToSiigo";
-import type { CatalogMapping } from "@/mappers/catalogMapping";
+import { UnmappedPaymentMethodError, type CatalogMapping } from "@/mappers/catalogMapping";
 import type { EnvironmentMode } from "@/mappers/credentials";
 import { siigoInvoicePayloadSchema } from "@/schemas/siigo";
 import { mockConsultations, mockClients, mockPatients } from "@/mocks/provet";
@@ -40,23 +40,20 @@ describe("provetToSiigoInvoice", () => {
     expect(result.date).toBe("2026-08-15");
     expect(result.seller).toBe(62);
     expect(result.customer.identification).toBe("1234567890");
-    expect(result.customer.id_type).toBe("13");
+    expect(result.customer.identification_type).toBe("13");
     expect(result.customer.person_type).toBe("Person");
     expect(result.customer.branch_office).toBe(0);
     expect(result.customer.name).toEqual(["María García", "López"]);
     expect(result.customer).not.toHaveProperty("email");
     expect(result.customer).not.toHaveProperty("phone");
+    expect(result.customer).not.toHaveProperty("id_type");
     expect(result).not.toHaveProperty("total");
     expect(result.items).toHaveLength(2);
     expect(result.items[0]).toMatchObject({ code: "SERV-CG-01", price: 59500 });
     expect(result.items[0]).not.toHaveProperty("taxes");
     expect(result.items[1].code).toBe("LAB-HEM-01");
     expect(result.document).toEqual({ id: 2372 });
-    expect(result.payments).toHaveLength(1);
-    expect(result.payments[0].id).toBe(5636);
-    expect(result.payments[0].value).toBe(95200);
-    expect(result.payments[0]).not.toHaveProperty("payment_type_id");
-    expect(result.payments[0]).not.toHaveProperty("amount");
+    expect(result.payments).toEqual([{ id: 5636, value: 95200 }]);
     expect(() => siigoInvoicePayloadSchema.parse(result)).not.toThrow();
   });
 
@@ -85,7 +82,7 @@ describe("provetToSiigoInvoice", () => {
     expect(result.payments[0].id).toBe(10948);
     expect(result.payments[0].value).toBe(52500);
     expect(result.customer.name).toEqual(["Veterinaria Los Andes", "S.A.S."]);
-    expect(result.customer).toMatchObject({ identification: "9001234561", id_type: "31", person_type: "Company", branch_office: 0 });
+    expect(result.customer).toMatchObject({ identification: "9001234561", identification_type: "31", person_type: "Company", branch_office: 0 });
     expect(() => siigoInvoicePayloadSchema.parse(result)).not.toThrow();
   });
 
@@ -96,35 +93,27 @@ describe("provetToSiigoInvoice", () => {
     expect(result.payments[0].id).toBe(8466);
     expect(result.payments[0].value).toBe(120000);
     expect(result.customer.name).toEqual(["John", "Smith"]);
-    expect(result.customer).toMatchObject({ identification: "CE9876543", id_type: "22", person_type: "Person" });
+    expect(result.customer).toMatchObject({ identification: "CE9876543", identification_type: "22", person_type: "Person" });
     expect(() => siigoInvoicePayloadSchema.parse(result)).not.toThrow();
   });
 
-  it("falls back to default payment type when the payment method is unmapped", () => {
+  it("throws UnmappedPaymentMethodError when the payment catalog has no matching entry", () => {
     const noMethod: CatalogMapping = { ...baseMapping, payments: [] };
-    const result0 = map(0, opts("sandbox", noMethod));
-    expect(result0.payments[0].id).toBe(10948);
-    expect(() => siigoInvoicePayloadSchema.parse(result0)).not.toThrow();
+    expect(() => map(0, opts("sandbox", noMethod))).toThrow(UnmappedPaymentMethodError);
     const nullMethod: CatalogMapping = {
       ...baseMapping,
-      payments: [{ provetMethod: "Tarjeta Crédito", siigoPaymentTypeId: null }],
+      payments: [
+        { provetMethod: "Tarjeta Crédito", siigoPaymentTypeId: null },
+        { provetMethod: "Efectivo", siigoPaymentTypeId: 10948 },
+      ],
     };
-    const result1 = map(0, opts("sandbox", nullMethod));
-    expect(result1.payments[0].id).toBe(10948);
-    expect(() => siigoInvoicePayloadSchema.parse(result1)).not.toThrow();
+    expect(() => map(0, opts("sandbox", nullMethod))).toThrow(/método de pago sin mapeo/i);
   });
 
-  it("defaults to the legacy static mapping when options are omitted", () => {
-    const result = provetToSiigoInvoice(
-      mockConsultations[0],
-      mockClients[0],
-      mockPatients[0],
-    );
-    expect(result.document).toEqual({ id: 2372 });
-    expect(result.seller).toBe(62);
-    expect(result.payments[0].id).toBe(10948);
-    expect(result.stamp.send).toBe(false);
-    expect(result.mail.send).toBe(true);
+  it("throws UnmappedPaymentMethodError when options are omitted (empty default catalog)", () => {
+    expect(() =>
+      provetToSiigoInvoice(mockConsultations[0], mockClients[0], mockPatients[0]),
+    ).toThrow(UnmappedPaymentMethodError);
   });
 
   it("overrides the document type id via options.documentTypeId", () => {

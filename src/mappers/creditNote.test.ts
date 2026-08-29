@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mockSiigoInvoicePayloads } from "@/mocks/siigo";
 import {
   ANNULMENT_REASONS,
+  DEFAULT_CREDIT_NOTE_DOCUMENT_TYPE_ID,
   siigoCreditNoteResponseSchema,
   siigoCreditNoteSchema,
   toCreditNotePayload,
@@ -33,6 +34,29 @@ describe("creditNote mapper", () => {
       expect(cn.mail.send).toBe(false);
       expect(cn.reason).toBe("customer_request");
     });
+
+    it("emits document: { id } with the default credit-note document type", () => {
+      const cn = toCreditNotePayload(original, base, "billing_error");
+      expect(cn.document).toEqual({ id: DEFAULT_CREDIT_NOTE_DOCUMENT_TYPE_ID });
+    });
+
+    it("overrides the document type via options.documentTypeId", () => {
+      const cn = toCreditNotePayload(original, base, "billing_error", { documentTypeId: 3001 });
+      expect(cn.document).toEqual({ id: 3001 });
+      expect(() => siigoCreditNoteSchema.parse(cn)).not.toThrow();
+    });
+
+    it("keeps customer flat identification (identification_type + string identification)", () => {
+      const cn = toCreditNotePayload(original, base, "billing_error");
+      expect(cn.customer.identification_type).toBe(original.customer.identification_type);
+      expect(typeof cn.customer.identification).toBe("string");
+      expect(cn.customer.identification).toBe(original.customer.identification);
+    });
+
+    it("reverses payments into { id, value } pairs", () => {
+      const cn = toCreditNotePayload(original, base, "billing_error");
+      expect(cn.payments).toEqual(original.payments.map((p) => ({ id: p.id, value: -p.value })));
+    });
   });
 
   describe("siigoCreditNoteSchema", () => {
@@ -63,6 +87,13 @@ describe("creditNote mapper", () => {
     it("rejects a missing base_document CUFE", () => {
       const cn = toCreditNotePayload(original, base, "billing_error");
       const bad = { ...cn, base_document: { id: "INV-1", cufe: "" } };
+      expect(() => siigoCreditNoteSchema.parse(bad)).toThrow();
+    });
+
+    it("rejects a payload without the credit-note document type", () => {
+      const cn = toCreditNotePayload(original, base, "billing_error");
+      const bad: Record<string, unknown> = { ...cn };
+      delete bad.document;
       expect(() => siigoCreditNoteSchema.parse(bad)).toThrow();
     });
   });

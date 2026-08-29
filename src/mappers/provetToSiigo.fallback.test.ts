@@ -10,7 +10,10 @@ import { mockSiigoProducts } from "@/mocks/siigo";
 
 const baseMapping: CatalogMapping = {
   items: [{ provetCode: "SERV-CG-01", siigoProductId: "PROD-001" }],
-  payments: [{ provetMethod: "Efectivo", siigoPaymentTypeId: 10948 }],
+  payments: [
+    { provetMethod: "Tarjeta Crédito", siigoPaymentTypeId: 5636 },
+    { provetMethod: "Efectivo", siigoPaymentTypeId: 10948 },
+  ],
   version: 1,
   updatedAt: "2026-08-26T00:00:00.000Z",
 };

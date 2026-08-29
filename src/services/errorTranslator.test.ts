@@ -22,20 +22,12 @@ describe("translateSiigoError", () => {
 
   it("maps parameter_required to error/edit_email/non-retryable", () => {
     const r = translateSiigoError(new SiigoApiError("parameter_required", "x"));
-    expect(r).toMatchObject({
-      severity: "error",
-      quickAction: "edit_email",
-      retryable: false,
-    });
+    expect(r).toMatchObject({ severity: "error", quickAction: "edit_email", retryable: false });
   });
 
   it("maps requests_limit to warning/auto_retry/retryable", () => {
     const r = translateSiigoError(new SiigoApiError("requests_limit", "x"));
-    expect(r).toMatchObject({
-      severity: "warning",
-      quickAction: "auto_retry",
-      retryable: true,
-    });
+    expect(r).toMatchObject({ severity: "warning", quickAction: "auto_retry", retryable: true });
   });
 
   it("maps service_unavailable to warning/save_draft/retryable", () => {
@@ -43,22 +35,21 @@ describe("translateSiigoError", () => {
     expect(r).toMatchObject({ severity: "warning", quickAction: "save_draft", retryable: true });
   });
 
+  it("maps auth_failed to error/none/non-retryable", () => {
+    const r = translateSiigoError(new SiigoApiError("auth_failed", "Credenciales inválidas"));
+    expect(r).toMatchObject({ code: "auth_failed", severity: "error", quickAction: "none", retryable: false });
+    expect(r.message).toContain("autenticación");
+    expect(r.detail).toBe("Credenciales inválidas");
+  });
+
   it("falls back to default for unknown SiigoApiError codes", () => {
     const r = translateSiigoError(new SiigoApiError("unknown_code", "raw unknown"));
-    expect(r).toMatchObject({
-      code: "unknown_code",
-      severity: "error",
-      quickAction: "none",
-      retryable: false,
-    });
+    expect(r).toMatchObject({ code: "unknown_code", severity: "error", quickAction: "none", retryable: false });
     expect(r.detail).toBe("raw unknown");
   });
 
   it("falls back to default for non-SiigoApiError exceptions", () => {
-    expect(translateSiigoError(new Error("raw"))).toMatchObject({
-      code: "default",
-      severity: "error",
-    });
+    expect(translateSiigoError(new Error("raw"))).toMatchObject({ code: "default", severity: "error" });
     expect(translateSiigoError(new Error("raw")).detail).toBe("raw");
   });
 

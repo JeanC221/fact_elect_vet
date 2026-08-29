@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   siigoCustomerSchema,
+  siigoDocumentTypeSchema,
   type SiigoInvoicePayload,
 } from "@/schemas/siigo";
 import { hasMaxDecimals, toCents } from "@/schemas/provet";
@@ -21,6 +22,15 @@ export const ANNULMENT_REASONS: { value: AnnulmentReason; label: string }[] = [
   { value: "customer_request", label: "Solicitud del cliente" },
   { value: "other", label: "Otro" },
 ];
+
+/** Default Siigo credit-note document type id (Nota Crédito — sandbox placeholder, configurable). */
+export const DEFAULT_CREDIT_NOTE_DOCUMENT_TYPE_ID = 162;
+
+/** Optional emission overrides for credit notes (mirrors ProvetToSiigoOptions). */
+export interface CreditNoteOptions {
+  /** Active Siigo credit-note document type id (default: DEFAULT_CREDIT_NOTE_DOCUMENT_TYPE_ID). */
+  documentTypeId?: number;
+}
 
 /** Reversal line item — price is negated relative to the original invoice. */
 export const siigoCreditNoteItemSchema = z.object({
@@ -47,6 +57,7 @@ export const siigoCreditNoteReasonSchema = z.enum([
 /** Siigo POST /v1/credit-notes payload (Resolution 948). Total must equal negated items subtotal and payments. */
 export const siigoCreditNoteSchema = z
   .object({
+    document: siigoDocumentTypeSchema,
     base_document: z.object({
       id: z.string().trim().min(1),
       cufe: z.string().trim().min(1),
@@ -91,9 +102,11 @@ export function toCreditNotePayload(
   original: SiigoInvoicePayload,
   base: { id: string; cufe: string },
   reason: AnnulmentReason,
+  options: CreditNoteOptions = {},
 ): SiigoCreditNotePayload {
   const itemsTotal = original.items.reduce((s, i) => s + i.price * i.quantity, 0);
   return {
+    document: { id: options.documentTypeId ?? DEFAULT_CREDIT_NOTE_DOCUMENT_TYPE_ID },
     base_document: base,
     customer: original.customer,
     items: original.items.map((i) => ({
