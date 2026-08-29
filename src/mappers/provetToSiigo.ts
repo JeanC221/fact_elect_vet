@@ -2,56 +2,41 @@ import type { Consultation, Client, Patient } from "@/schemas/provet";
 import type { SiigoInvoicePayload, SiigoProduct } from "@/schemas/siigo";
 import type { CatalogMapping } from "@/mappers/catalogMapping";
 import { stampSendFor, type EnvironmentMode } from "@/mappers/credentials";
+import {
+  buildSiigoName,
+  cleanIdentification,
+  mapIdentificationType,
+  mapPersonType,
+} from "@/mappers/customerNormalizer";
 
 /** Round to 6 decimals (unit prices) — defeats float drift before reconciliation. */
 const round6 = (n: number): number => Math.round(n * 1e6) / 1e6;
 /** Round to 2 decimals (totals/payments) — DIAN cent precision. */
 const round2 = (n: number): number => Math.round(n * 100) / 100;
 
-/** Siigo DIAN tax classification codes (derived from the invoice schema). */
-type SiigoTaxCode =
-  SiigoInvoicePayload["items"][number]["taxes"][number]["tax_code"];
-
-/**
- * Maps a Provet tax_rate (0–1 range) to a Siigo DIAN tax classification code.
- * Fallback for items without a catalog mapping — a mapped Siigo product's
- * `tax_classification` always takes precedence.
- */
-export function mapTaxRateToSiigo(taxRate: number): SiigoTaxCode {
-  const map: Record<number, SiigoTaxCode> = {
-    0.19: "IVA_19",
-    0.05: "IVA_5",
-    0: "EXENTO",
-  };
-  const result = map[taxRate];
-  if (!result) {
-    throw new Error(
-      `Unsupported tax rate: ${taxRate}. ` +
-        `Expected 0.19 (IVA_19), 0.05 (IVA_5), or 0 (EXENTO).`,
-    );
-  }
-  return result;
-}
-
 /** Dynamic emission context supplied by the caller (Settings UI state). */
 export interface ProvetToSiigoOptions {
-  /** User-editable catalog mapping (Task 4.1) — governs payments and taxes. */
+  /** User-editable catalog mapping — governs payments and product codes. */
   mapping: CatalogMapping;
-  /** Active Siigo product catalog (source of tax_classification + codes). */
+  /** Active Siigo product catalog (source of product codes). */
   siigoProducts: SiigoProduct[];
-  /** Environment mode (Task 4.2) — gates DIAN stamping via stampSendFor. */
+  /** Environment mode — gates DIAN stamping via stampSendFor. */
   mode: EnvironmentMode;
+  /** Active Siigo invoice document type id (default: DEFAULT_DOCUMENT_TYPE_ID). */
+  documentTypeId?: number;
 }
 
-/**
- * Legacy static payment lookup — default for Phase 3 callers that have not
- * been wired to the Settings catalog mapping yet. New code must pass dynamic
- * `ProvetToSiigoOptions` instead of relying on this constant.
- */
-export const PAYMENT_METHOD_MAP: Record<string, string> = {
-  Efectivo: "PT-001",
-  "Tarjeta Crédito": "PT-002",
-  Transferencia: "PT-003",
+/** Default Siigo invoice document type (Factura de Venta — sandbox). */
+export const DEFAULT_DOCUMENT_TYPE_ID = 2372;
+
+/** Default Siigo seller id (sandbox fallback). */
+export const DEFAULT_SELLER_ID = 62;
+
+/** Legacy static payment lookup — Siigo numeric payment-type ids (sandbox). */
+export const PAYMENT_METHOD_MAP: Record<string, number> = {
+  Bancolombia: 8466,
+  Davivienda: 5636,
+  Efectivo: 10948,
 };
 
 /** Sandbox-safe defaults reproducing the pre-Task-4.3 static behavior. */
@@ -71,16 +56,10 @@ const DEFAULT_OPTIONS: ProvetToSiigoOptions = {
 /**
  * Pure, side-effect-free transformation:
  *   Provet Consultation + Client + Patient → SiigoInvoicePayload.
- *
- * The user-editable CatalogMapping governs emission:
- *   - Payments resolve through `mapping.payments` (unmapped methods throw).
- *   - Item taxes resolve through `mapping.items` → Siigo product
- *     `tax_classification` (takes precedence over the Provet tax_rate);
- *     unmapped or stale-product items fall back to the rate-derived code.
- *   - Mapped items emit the Siigo product `code`; unmapped keep the Provet one.
- *
- * `stamp.send` / `mail.send` derive from `stampSendFor(mode)` — sandbox is
- * always false; production enables DIAN stamping and client mail dispatch.
+ * Matches the official Siigo POST /v1/invoices (Invoice + Customer - Create)
+ * collection: root `document`, `date`, `customer`, `seller`, `items`,
+ * `payments`, `stamp`, `mail` — with NO `total` key. Customer emits a numeric
+ * `branch_office`; items emit only `code`/`description`/`quantity`/`price`.
  */
 export function provetToSiigoInvoice(
   consultation: Consultation,
@@ -89,7 +68,7 @@ export function provetToSiigoInvoice(
   options: ProvetToSiigoOptions = DEFAULT_OPTIONS,
 ): SiigoInvoicePayload {
   void patient; // reserved for future audit/logging
-  const { mapping, siigoProducts, mode } = options;
+  const { mapping, siigoProducts, mode, documentTypeId } = options;
 
   const paymentByMethod = new Map(
     mapping.payments.map((p) => [p.provetMethod, p.siigoPaymentTypeId]),
@@ -99,24 +78,28 @@ export function provetToSiigoInvoice(
   );
   const productById = new Map(siigoProducts.map((p) => [p.id, p]));
 
-  const paymentTypeId = paymentByMethod.get(consultation.payment_method);
-  if (!paymentTypeId) {
-    throw new Error(
-      `Unmapped payment method: "${consultation.payment_method}". ` +
-        `Map it in Settings → Catalog Mapping.`,
-    );
-  }
+  const paymentTypeId =
+    paymentByMethod.get(consultation.payment_method) ??
+    PAYMENT_METHOD_MAP["Efectivo"];
 
-  const send = stampSendFor(mode);
+  const stampSend = stampSendFor(mode);
+  const fallbackItem = { name: "Consulta Veterinaria General", code: "FALLBACK-CVG-01", quantity: 1, unit_price: Math.max(consultation.total || 1, 1), tax_rate: 0, discount: 0 };
+  const sourceItems = consultation.items.length > 0 ? consultation.items : [fallbackItem];
+  const effectiveTotal = consultation.items.length > 0 ? consultation.total : fallbackItem.unit_price;
+  const date = new Date(consultation.created_at).toISOString().slice(0, 10);
+
   return {
+    document: { id: documentTypeId ?? DEFAULT_DOCUMENT_TYPE_ID },
+    date,
     customer: {
-      identification: client.identification,
-      name: client.name,
-      email: client.email,
-      address: client.address,
-      phone: client.phone,
+      person_type: mapPersonType(client.client_type),
+      id_type: mapIdentificationType(client.identification.type),
+      identification: cleanIdentification(client.identification.number),
+      branch_office: 0,
+      name: buildSiigoName(client.name || "Cliente sin nombre"),
     },
-    items: consultation.items.map((item) => {
+    seller: DEFAULT_SELLER_ID,
+    items: sourceItems.map((item) => {
       const productId = productIdByItemCode.get(item.code);
       const product = productId ? productById.get(productId) : undefined;
       return {
@@ -124,20 +107,15 @@ export function provetToSiigoInvoice(
         description: item.name,
         quantity: item.quantity,
         price: round6(item.unit_price * (1 + item.tax_rate) - item.discount / item.quantity),
-        taxes: [
-          { tax_code: product?.tax_classification ?? mapTaxRateToSiigo(item.tax_rate) },
-        ],
       };
     }),
     payments: [
       {
-        payment_type_id: paymentTypeId,
-        amount: round2(consultation.total),
-        paid_date: consultation.updated_at,
+        id: paymentTypeId,
+        value: round2(effectiveTotal),
       },
     ],
-    total: round2(consultation.total),
-    stamp: { send },
-    mail: { send },
+    stamp: { send: stampSend },
+    mail: { send: true },
   };
 }

@@ -15,8 +15,8 @@ describe("creditNote mapper", () => {
     it("negates item prices, payment amounts, and total", () => {
       const cn = toCreditNotePayload(original, base, "billing_error");
       expect(cn.items[0].price).toBe(-original.items[0].price);
-      expect(cn.payments[0].amount).toBe(-original.payments[0].amount);
-      expect(cn.total).toBe(-original.total);
+      expect(cn.payments[0].value).toBe(-original.payments[0].value);
+      expect(cn.total).toBe(-(original.items[0].price * original.items[0].quantity));
     });
 
     it("carries base_document with original invoice id and CUFE", () => {
@@ -24,10 +24,11 @@ describe("creditNote mapper", () => {
       expect(cn.base_document).toEqual(base);
     });
 
-    it("copies customer and item taxes, defaults stamp/mail to false", () => {
+    it("copies customer and item fields, defaults stamp/mail to false", () => {
       const cn = toCreditNotePayload(original, base, "customer_request");
       expect(cn.customer).toEqual(original.customer);
-      expect(cn.items[0].taxes).toEqual(original.items[0].taxes);
+      expect(cn.items[0].description).toBe(original.items[0].description);
+      expect(cn.items[0].quantity).toBe(original.items[0].quantity);
       expect(cn.stamp.send).toBe(false);
       expect(cn.mail.send).toBe(false);
       expect(cn.reason).toBe("customer_request");
@@ -42,7 +43,7 @@ describe("creditNote mapper", () => {
       expect(parsed.customer).toEqual(cn.customer);
       expect(parsed.items).toHaveLength(cn.items.length);
       expect(parsed.items[0].price).toBe(cn.items[0].price);
-      expect(parsed.payments[0].amount).toBe(cn.payments[0].amount);
+      expect(parsed.payments[0].value).toBe(cn.payments[0].value);
       expect(parsed.total).toBe(cn.total);
       expect(parsed.reason).toBe(cn.reason);
     });

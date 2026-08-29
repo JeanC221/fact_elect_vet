@@ -117,7 +117,10 @@ export function ConsultationQueue({ rows, onInvoiceClick, isRefreshing, isInitia
                   <td className="border-l border-grid-line px-3 py-2 text-right">
                     <button
                       type="button"
-                      onClick={() => onInvoiceClick?.(row.id)}
+                      onClick={() => {
+                        try { onInvoiceClick?.(row.id); }
+                        catch (err) { console.error("[ConsultationQueue] Failed to open Quick-Edit drawer for", row.id, err); }
+                      }}
                       disabled={disableActions}
                       className="inline-flex items-center gap-1 rounded-md bg-clinical-blue px-2 py-1 text-xs font-semibold text-white hover:bg-clinical-blue-hover active:bg-clinical-blue-active disabled:cursor-not-allowed disabled:opacity-40"
                     >

@@ -12,10 +12,11 @@ import { siigoInvoicePayloadSchema } from "@/schemas/siigo";
 import { mockClients, mockConsultations, mockPatients } from "@/mocks/provet";
 
 const validFormValues: QuickEditFormValues = {
+  name: "María García López",
   identificationType: "CC",
   identificationNumber: "1234567890",
   email: "nueva@mail.co",
-  address: "Cra 7 #10-20",
+  phone: "3105550101",
   paymentMethod: "Efectivo",
   paidAmount: 95200,
 };
@@ -80,15 +81,24 @@ describe("buildQuickEditDetail", () => {
     const d = buildQuickEditDetail(mockConsultations, mockClients, mockPatients, "CON-001");
     expect(d?.clientName).toBe("María García López");
     expect(d?.identificationNumber).toBe("1234567890");
+    expect(d?.phone).toBe("3105550101");
     expect(d?.patientName).toBe("Max");
     expect(d?.total).toBe(95200);
     expect(d?.paymentMethodOptions).toContain("Tarjeta Crédito");
   });
 
-  it("returns undefined for unknown id or orphan client", () => {
+  it("returns undefined for unknown consultation id", () => {
     expect(buildQuickEditDetail(mockConsultations, mockClients, mockPatients, "CON-NOPE")).toBeUndefined();
+  });
+
+  it("returns a detail with fallback defaults for an orphan client instead of undefined", () => {
     const orphan = [{ ...mockConsultations[0], id: "CON-X", client_id: "CLI-NOPE" }];
-    expect(buildQuickEditDetail(orphan, mockClients, mockPatients, "CON-X")).toBeUndefined();
+    const d = buildQuickEditDetail(orphan, mockClients, mockPatients, "CON-X");
+    expect(d).toBeDefined();
+    expect(d?.clientName).toBe("Cliente desconocido");
+    expect(d?.identificationType).toBe("CC");
+    expect(d?.identificationNumber).toBe("");
+    expect(d?.email).toBe("");
   });
 
   it("prepends unmapped payment method to options", () => {
@@ -105,35 +115,38 @@ describe("quickEditFormSchema", () => {
 
   it("rejects invalid email, wrong NIT format and non-positive paidAmount", () => {
     expect(quickEditFormSchema.safeParse({ ...validFormValues, email: "nope" }).success).toBe(false);
-    expect(quickEditFormSchema.safeParse({ ...validFormValues, identificationType: "NIT" }).success).toBe(false);
+    expect(quickEditFormSchema.safeParse({ ...validFormValues, identificationType: "NIT", identificationNumber: "ABC" }).success).toBe(false);
     expect(quickEditFormSchema.safeParse({ ...validFormValues, paidAmount: 0 }).success).toBe(false);
   });
 
-  it("accepts a NIT with the verification-digit hyphen (900123456-1)", () => {
+  it("accepts a NIT with or without the verification-digit hyphen", () => {
     expect(
       quickEditFormSchema.safeParse({ ...validFormValues, identificationType: "NIT", identificationNumber: "900123456-1" }).success,
     ).toBe(true);
-  });
-
-  it("rejects a NIT missing the hyphen verification digit (9001234561)", () => {
     expect(
       quickEditFormSchema.safeParse({ ...validFormValues, identificationType: "NIT", identificationNumber: "9001234561" }).success,
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it("rejects a paidAmount with more than 2 decimals", () => {
     expect(quickEditFormSchema.safeParse({ ...validFormValues, paidAmount: 95200.001 }).success).toBe(false);
+  });
+
+  it("rejects empty name and too-short phone", () => {
+    expect(quickEditFormSchema.safeParse({ ...validFormValues, name: "" }).success).toBe(false);
+    expect(quickEditFormSchema.safeParse({ ...validFormValues, phone: "123456" }).success).toBe(false);
   });
 });
 
 describe("buildInvoicePayloadFromQuickEdit", () => {
   it("applies form overrides and keeps stamp.send=false", () => {
     const p = buildInvoicePayloadFromQuickEdit(mockConsultations, mockClients, mockPatients, "CON-001", validFormValues);
-    expect(p?.customer.email).toBe("nueva@mail.co");
-    expect(p?.customer.address).toBe("Cra 7 #10-20");
-    expect(p?.payments[0].payment_type_id).toBe("PT-001");
+    expect(p?.customer.branch_office).toBe(0);
+    expect(p?.customer.name).toEqual(["María García", "López"]);
+    expect(p?.customer.person_type).toBe("Person");
+    expect(p?.payments[0].id).toBe(10948);
     expect(p?.stamp.send).toBe(false);
-    expect(p?.mail.send).toBe(false);
+    expect(p?.mail.send).toBe(true);
   });
 
   it("produces a payload passing siigoInvoicePayloadSchema", () => {

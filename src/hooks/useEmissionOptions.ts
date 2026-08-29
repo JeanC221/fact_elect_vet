@@ -1,9 +1,4 @@
-/**
- * Custom hook: reads Settings localStorage (catalogMapping + credentialsConfig)
- * and builds ProvetToSiigoOptions for the dashboard emission path.
- * SSR-safe: localStorage only accessed in useEffect (after mount).
- */
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { parseCatalogMapping, type CatalogMapping } from "@/mappers/catalogMapping";
 import { parseCredentialsConfig, type EnvironmentMode } from "@/mappers/credentials";
 import { mockSiigoProducts } from "@/mocks/siigo";
@@ -16,24 +11,27 @@ const DEFAULT_MAPPING: CatalogMapping = {
   updatedAt: "1970-01-01T00:00:00.000Z",
 };
 
-export function useEmissionOptions(): ProvetToSiigoOptions {
-  const [mode, setMode] = useState<EnvironmentMode>("sandbox");
-  const [mapping, setMapping] = useState<CatalogMapping>(DEFAULT_MAPPING);
+function readInitialMode(): EnvironmentMode {
+  if (typeof window === "undefined") return "sandbox";
+  try {
+    const raw = localStorage.getItem("fact_vet.credentialsConfig");
+    if (raw) return parseCredentialsConfig(raw).mode;
+  } catch { /* missing/corrupt -> sandbox */ }
+  return "sandbox";
+}
 
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem("fact_vet.credentialsConfig");
-      if (raw) setMode(parseCredentialsConfig(raw).mode);
-    } catch {
-      // Corrupt/missing → keep sandbox default
-    }
-    try {
-      const raw = localStorage.getItem("fact_vet.catalogMapping");
-      if (raw) setMapping(parseCatalogMapping(raw));
-    } catch {
-      // Corrupt/missing → keep empty mapping
-    }
-  }, []);
+function readInitialMapping(): CatalogMapping {
+  if (typeof window === "undefined") return DEFAULT_MAPPING;
+  try {
+    const raw = localStorage.getItem("fact_vet.catalogMapping");
+    if (raw) return parseCatalogMapping(raw);
+  } catch { /* missing/corrupt -> empty */ }
+  return DEFAULT_MAPPING;
+}
+
+export function useEmissionOptions(): ProvetToSiigoOptions {
+  const [mode] = useState<EnvironmentMode>(readInitialMode);
+  const [mapping] = useState<CatalogMapping>(readInitialMapping);
 
   return { mapping, siigoProducts: mockSiigoProducts, mode };
 }

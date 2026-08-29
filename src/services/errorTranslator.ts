@@ -16,6 +16,7 @@ export type ErrorSeverity = "error" | "warning";
 export interface TranslatedError {
   code: string;
   message: string;
+  detail?: string;
   severity: ErrorSeverity;
   quickAction: QuickAction;
   retryable: boolean;
@@ -77,9 +78,10 @@ const DEFAULT_TRANSLATION: TranslationEntry = {
 export function translateSiigoError(error: unknown): TranslatedError {
   if (error instanceof SiigoApiError) {
     const entry = ERROR_TRANSLATIONS[error.code] ?? DEFAULT_TRANSLATION;
-    return { code: error.code, ...entry };
+    return { code: error.code, detail: error.message, ...entry };
   }
-  return { code: "default", ...DEFAULT_TRANSLATION };
+  const detail = error instanceof Error ? error.message : undefined;
+  return { code: "default", detail, ...DEFAULT_TRANSLATION };
 }
 
 /** Whether the error code is transient and supports automatic retry. */

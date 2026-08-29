@@ -11,6 +11,7 @@ import {
   buildInvoicePayloadFromQuickEdit,
   buildQuickEditDetail,
   type InvoiceStatus,
+  type QuickEditDetail,
   type QuickEditFormValues,
 } from "@/mappers/consultationQueue";
 import {
@@ -20,7 +21,8 @@ import {
   type InvoiceHistoryRow,
 } from "@/mappers/invoiceHistory";
 import { toCreditNotePayload, siigoCreditNoteSchema, type AnnulmentReason } from "@/mappers/creditNote";
-import { fetchInvoicePdf, fetchInvoiceXml, generateIdempotencyKey, submitCreditNote, submitInvoice } from "@/services/siigoApi";
+import { fetchInvoicePdf, fetchInvoiceXml, generateIdempotencyKey, SiigoApiError, submitCreditNote } from "@/services/siigoApi";
+import { siigoInvoiceResponseSchema } from "@/schemas/siigo";
 import { translateSiigoError, retryWithBackoff, type TranslatedError, type QuickAction } from "@/services/errorTranslator";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { mockClients, mockConsultations, mockPatients } from "@/mocks/provet";
@@ -47,7 +49,31 @@ export default function HomePage() {
   const [busyInvoiceId, setBusyInvoiceId] = useState<string | null>(null);
   const options = useEmissionOptions();
 
-  const selectedDetail = useMemo(() => selectedId ? buildQuickEditDetail(mockConsultations, mockClients, mockPatients, selectedId) ?? null : null, [selectedId]);
+  const selectedDetail = useMemo(() => {
+    if (!selectedId) return null;
+    const detail = buildQuickEditDetail(mockConsultations, mockClients, mockPatients, selectedId);
+    if (detail) return detail;
+    // Live Provet consultation not in mocks → build minimal detail from queue row
+    const row = rows.find((r) => r.id === selectedId);
+    if (!row) return null;
+    const docParts = row.clientDoc.split(" ");
+    const knownTypes = new Set<string>(["CC", "CE", "NIT", "PA"]);
+    const fallback: QuickEditDetail = {
+      id: row.id,
+      clientName: row.clientName,
+      identificationType: knownTypes.has(docParts[0]) ? (docParts[0] as QuickEditDetail["identificationType"]) : "CC",
+      identificationNumber: docParts.slice(1).join(" ") || "",
+      email: "",
+      phone: "",
+      patientName: row.patientName,
+      paymentMethod: row.paymentMethod,
+      paymentMethodOptions: ["Bancolombia", "Davivienda", "Efectivo"],
+      total: row.total,
+      items: [],
+      createdAt: row.createdAt,
+    };
+    return fallback;
+  }, [selectedId, rows]);
 
   const showToast = useCallback((msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3000); }, []);
 
@@ -93,7 +119,7 @@ export default function HomePage() {
     try {
       const d = buildQuickEditDetail(mockConsultations, mockClients, mockPatients, annulTarget.consultationId);
       if (!d) throw new Error("missing_source_data");
-      const original = buildInvoicePayloadFromQuickEdit(mockConsultations, mockClients, mockPatients, annulTarget.consultationId, { identificationType: d.identificationType, identificationNumber: d.identificationNumber, email: d.email, address: d.address, paymentMethod: d.paymentMethod, paidAmount: d.total });
+      const original = buildInvoicePayloadFromQuickEdit(mockConsultations, mockClients, mockPatients, annulTarget.consultationId, { name: d.clientName, phone: d.phone, identificationType: d.identificationType, identificationNumber: d.identificationNumber, email: d.email, paymentMethod: d.paymentMethod, paidAmount: d.total });
       if (!original) throw new Error("missing_source_data");
       const cn = toCreditNotePayload(original, { id: annulTarget.invoiceId, cufe: annulTarget.cufe }, reason);
       siigoCreditNoteSchema.parse(cn);
@@ -109,21 +135,32 @@ export default function HomePage() {
     if (!selectedId) return;
     setIsSubmitting(true); setTranslatedError(null); setRetryAttempt(0);
     try {
-      const payload = buildInvoicePayloadFromQuickEdit(mockConsultations, mockClients, mockPatients, selectedId, values, options);
-      if (!payload) throw new Error("missing_source_data");
+      const payload = buildInvoicePayloadFromQuickEdit(mockConsultations, mockClients, mockPatients, selectedId, values, options, selectedDetail ?? undefined);
+      if (!payload) throw new Error("No se pudo construir el payload de factura.");
       const idemKey = generateIdempotencyKey();
-      const response = await retryWithBackoff(() => submitInvoice(payload, "", "", idemKey), { maxRetries: 5, onRetry: (n) => setRetryAttempt(n) });
+      const response = await retryWithBackoff(async () => {
+        const res = await fetch("/api/invoices", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Idempotency-Key": idemKey },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new SiigoApiError(data.error?.code ?? "default", data.error?.message ?? "Error al emitir la factura.");
+        return siigoInvoiceResponseSchema.parse(data);
+      }, { maxRetries: 5, onRetry: (n) => setRetryAttempt(n) });
       setRowStatus(selectedId, response.status);
       setHistory((prev) => [...prev, toInvoiceHistoryEntry(response, selectedId, new Date())]);
-      if (response.status === "Accepted") { setSelectedId(null); showToast(`Factura ${response.id} generada con éxito · CUFE: ${response.cufe}`); }
+      const number = response.number ?? response.id;
+      if (response.status === "Accepted") { setSelectedId(null); showToast(`Factura ${number} generada con éxito · CUFE: ${response.cufe}`); }
       else if (response.status === "Rejected") { setTranslatedError({ code: "rejected", message: "La DIAN rechazó la factura. Corrija los datos y reintente.", severity: "error", quickAction: "none", retryable: false }); }
       else { setTranslatedError({ code: "draft", message: "Factura guardada como borrador.", severity: "warning", quickAction: "save_draft", retryable: false }); }
     } catch (error) {
+      console.error("Invoice emission failed:", error);
       const te = translateSiigoError(error);
       setTranslatedError(te);
       if (te.quickAction === "save_draft") setRowStatus(selectedId, "Draft");
     } finally { setIsSubmitting(false); setRetryAttempt(0); }
-  }, [selectedId, setRowStatus, showToast]);
+  }, [selectedId, selectedDetail, options, setRowStatus, showToast]);
 
   const handleClose = useCallback(() => { if (!isSubmitting) { setSelectedId(null); setTranslatedError(null); setRetryAttempt(0); } }, [isSubmitting]);
   const handleQuickAction = useCallback((action: QuickAction) => { if (action.startsWith("edit_")) setTranslatedError(null); }, []);
@@ -143,7 +180,7 @@ export default function HomePage() {
         ) : (
           <InvoiceHistory entries={history} rows={rows} busyInvoiceId={busyInvoiceId} onDownload={handleDownload} onAnnul={handleAnnul} />
         )}
-        <QuickEditDrawer detail={selectedDetail} isSubmitting={isSubmitting} errorMessage={translatedError?.message ?? null} onClose={handleClose} onSubmit={handleSubmit} />
+        <QuickEditDrawer detail={selectedDetail} isSubmitting={isSubmitting} errorMessage={translatedError?.message ?? null} errorDetail={translatedError?.detail ?? null} onClose={handleClose} onSubmit={handleSubmit} />
         <CreditNoteModal row={annulTarget} isSubmitting={isAnnulling} errorMessage={annulError} onClose={() => { if (!isAnnulling) setAnnulTarget(null); }} onConfirm={handleAnnulConfirm} />
         {toast && (
           <div className="fixed bottom-4 right-4 z-50 flex max-w-md items-center gap-2 rounded-md border border-status-accepted-border bg-status-accepted-bg px-3 py-2 text-sm font-semibold text-status-accepted-text">

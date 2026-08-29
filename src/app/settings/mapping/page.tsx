@@ -69,7 +69,7 @@ export default function MappingPage() {
     setDirty(true);
   }, []);
 
-  const handlePaymentSelect = useCallback((provetMethod: string, siigoPaymentTypeId: string | null) => {
+  const handlePaymentSelect = useCallback((provetMethod: string, siigoPaymentTypeId: number | null) => {
     setMapping((prev) => ({
       ...prev,
       payments: prev.payments.map((m) =>

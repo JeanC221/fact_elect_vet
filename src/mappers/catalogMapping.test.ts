@@ -60,7 +60,7 @@ describe("buildPaymentMappingRows", () => {
     const rows = buildPaymentMappingRows(methods, mockSiigoPaymentTypes, defaultPaymentMapping(methods, mockSiigoPaymentTypes));
     const ef = rows.find((r) => r.provetMethod === "Efectivo");
     expect(ef?.mapped).toBe(true);
-    expect(ef?.siigoPaymentTypeId).toBe("PT-001");
+    expect(ef?.siigoPaymentTypeId).toBe(10948);
     expect(ef?.siigoPaymentTypeName).toBe("Efectivo");
     expect(ef?.siigoPaymentCategory).toBe("cash");
   });
@@ -84,9 +84,9 @@ describe("defaultPaymentMapping", () => {
   it("matches by normalized name containment (accents/case-insensitive)", () => {
     const byMethod = new Map(defaultPaymentMapping(extractProvetPaymentMethods(mockConsultations), mockSiigoPaymentTypes)
       .map((m) => [m.provetMethod, m.siigoPaymentTypeId]));
-    expect(byMethod.get("Efectivo")).toBe("PT-001");
-    expect(byMethod.get("Tarjeta Crédito")).toBe("PT-002");
-    expect(byMethod.get("Transferencia")).toBe("PT-003");
+    expect(byMethod.get("Efectivo")).toBe(10948);
+    expect(byMethod.get("Tarjeta Crédito")).toBe(5636);
+    expect(byMethod.get("Transferencia")).toBe(8466);
   });
   it("leaves unknown methods unmapped", () => {
     expect(defaultPaymentMapping(["Criptomonedas"], mockSiigoPaymentTypes)[0].siigoPaymentTypeId).toBeNull();
@@ -98,7 +98,7 @@ describe("reconcileMapping", () => {
     const items = extractProvetItems(mockConsultations);
     const methods = extractProvetPaymentMethods(mockConsultations);
     const stale = { items: [{ provetCode: "GONE-CODE", siigoProductId: "PROD-001" }],
-      payments: [{ provetMethod: "GONE-METHOD", siigoPaymentTypeId: "PT-X" }], version: 1, updatedAt: "2026-01-01T00:00:00.000Z" };
+      payments: [{ provetMethod: "GONE-METHOD", siigoPaymentTypeId: 99999 }], version: 1, updatedAt: "2026-01-01T00:00:00.000Z" };
     const r = reconcileMapping(stale, items, mockSiigoProducts, methods, mockSiigoPaymentTypes);
     expect(r.items.map((m) => m.provetCode)).not.toContain("GONE-CODE");
     expect(r.items).toHaveLength(items.length);

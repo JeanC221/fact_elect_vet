@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { hasMaxDecimals, identificationSchema, sanitizeText, toCents } from "./provet";
+import { hasMaxDecimals, sanitizeText } from "./provet";
 
 /** DIAN tax classifications (Resolution 948). */
 export const siigoTaxEnum = z.enum([
@@ -20,17 +20,21 @@ export const siigoProductSchema = z.object({
 });
 
 export const siigoPaymentTypeSchema = z.object({
-  id: z.string().trim().min(1),
+  id: z.number().int().positive(),
   name: z.string().trim().min(1).max(50),
   type: z.enum(["cash", "card", "transfer", "credit"]),
 });
 
+/** Official Siigo customer (Invoice + Customer - Create): flat id + numeric branch_office. */
 export const siigoCustomerSchema = z.object({
-  identification: identificationSchema,
-  name: z.string().trim().min(1).max(100).transform(sanitizeText),
-  email: z.string().trim().max(254).email(),
-  address: z.string().trim().min(1).max(200).transform(sanitizeText),
-  phone: z.string().trim().min(7).max(20),
+  person_type: z.enum(["Person", "Company"]),
+  id_type: z.string().trim().min(1).max(5),
+  identification: z.string().trim().min(1).max(30),
+  branch_office: z.number().int().nonnegative(),
+  name: z
+    .array(z.string().trim().min(1).max(100).transform(sanitizeText))
+    .min(1)
+    .max(2),
 });
 
 export const siigoInvoiceItemSchema = z.object({
@@ -38,41 +42,29 @@ export const siigoInvoiceItemSchema = z.object({
   description: z.string().trim().min(1).max(200).transform(sanitizeText),
   quantity: z.number().positive().max(1e6),
   price: z.number().nonnegative().max(1e9).refine((n) => hasMaxDecimals(n, 6), "Price max 6 decimals"),
-  taxes: z.array(z.object({ tax_code: siigoTaxEnum })).min(1),
 });
 
+/** Official Siigo invoice payment: numeric payment-type id + COP value. */
 export const siigoPaymentSchema = z.object({
-  payment_type_id: z.string().trim().min(1).max(50),
-  amount: z.number().positive().max(1e12).refine((n) => hasMaxDecimals(n, 2), "Amount max 2 decimals"),
-  paid_date: z.coerce.date(),
+  id: z.number().int().positive(),
+  value: z.number().positive().max(1e12).refine((n) => hasMaxDecimals(n, 2), "Value max 2 decimals"),
 });
 
-export const siigoInvoicePayloadSchema = z
-  .object({
-    customer: siigoCustomerSchema,
-    items: z.array(siigoInvoiceItemSchema).min(1),
-    payments: z.array(siigoPaymentSchema).min(1),
-    total: z.number().positive().max(1e12).refine((n) => hasMaxDecimals(n, 2), "Total max 2 decimals"),
-    stamp: z.object({ send: z.boolean().default(false) }),
-    mail: z.object({ send: z.boolean().default(false) }),
-  })
-  .refine(
-    (inv) => {
-      const itemsTotal = inv.items.reduce(
-        (sum, item) => sum + item.price * item.quantity,
-        0,
-      );
-      const paymentsTotal = inv.payments.reduce((sum, p) => sum + p.amount, 0);
-      return toCents(itemsTotal) === toCents(inv.total) && toCents(paymentsTotal) === toCents(inv.total);
-    },
-    {
-      message: "Invoice total must match items subtotal and payments total",
-      path: ["total"],
-    },
-  );
+/** Official Siigo POST /v1/invoices payload — no `total` key at the root. */
+export const siigoInvoicePayloadSchema = z.object({
+  document: z.object({ id: z.number().int().positive() }),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "date must be YYYY-MM-DD"),
+  customer: siigoCustomerSchema,
+  seller: z.number().int().positive(),
+  items: z.array(siigoInvoiceItemSchema).min(1),
+  payments: z.array(siigoPaymentSchema).min(1),
+  stamp: z.object({ send: z.boolean().default(false) }),
+  mail: z.object({ send: z.boolean().default(false) }),
+});
 
 export const siigoInvoiceResponseSchema = z.object({
   id: z.string().trim().min(1),
+  number: z.string().trim().max(50).optional(),
   cufe: z.string().trim().min(1),
   status: z.enum(["Accepted", "Draft", "Rejected"]),
   observations: z.string().max(500).optional(),

@@ -61,7 +61,7 @@ export interface QuickEditDetail {
   id: string; clientName: string;
   identificationType: (typeof identificationTypes)[number];
   identificationNumber: string;
-  email: string; address: string; patientName: string;
+  email: string; phone: string; patientName: string;
   paymentMethod: string; paymentMethodOptions: string[];
   total: number; items: QuickEditItem[]; createdAt: Date;
 }
@@ -69,10 +69,11 @@ export interface QuickEditDetail {
 /** Zod schema for the Quick-Edit form (reuses identificationSchema for NIT/Cédula rules). */
 export const quickEditFormSchema = z
   .object({
+    name: z.string().trim().min(1, "Nombre del cliente requerido").max(100),
     identificationType: z.enum(identificationTypes),
     identificationNumber: z.string().trim().min(1, "Identificación requerida"),
     email: z.string().trim().email("Correo electrónico inválido"),
-    address: z.string().trim().min(1, "Dirección requerida"),
+    phone: z.string().trim().min(7, "Teléfono debe tener al menos 7 dígitos").max(20),
     paymentMethod: z.string().trim().min(1, "Método de pago requerido"),
     paidAmount: z.number().positive("El monto pagado debe ser positivo").refine((n) => hasMaxDecimals(n, 2), "Monto pagado max 2 decimales"),
   })
@@ -93,17 +94,23 @@ export function buildQuickEditDetail(
   const consultation = consultations.find((c) => c.id === id);
   if (!consultation) return undefined;
   const client = clients.find((c) => c.id === consultation.client_id);
-  if (!client) return undefined;
   const patient = patients.find((p) => p.id === consultation.patient_id);
+
+  const clientName = client?.name ?? "Cliente desconocido";
+  const identificationType = client?.identification.type ?? "CC";
+  const identificationNumber = client?.identification.number ?? "";
+  const email = client?.email ?? "";
+  const phone = client?.phone ?? "";
 
   const opts = Object.keys(PAYMENT_METHOD_MAP);
   const paymentMethodOptions = opts.includes(consultation.payment_method) ? opts : [consultation.payment_method, ...opts];
 
   return {
-    id: consultation.id, clientName: client.name,
-    identificationType: client.identification.type,
-    identificationNumber: client.identification.number,
-    email: client.email, address: client.address,
+    id: consultation.id, clientName,
+    identificationType,
+    identificationNumber,
+    email,
+    phone,
     patientName: patient?.name ?? "Paciente desconocido",
     paymentMethod: consultation.payment_method, paymentMethodOptions,
     total: consultation.total, createdAt: consultation.created_at,
@@ -111,7 +118,10 @@ export function buildQuickEditDetail(
   };
 }
 
-/** Pure O(n) composition: form overrides + Provet trio → Siigo payload. */
+/** Pure O(n) composition: form overrides + Provet trio → Siigo payload.
+ *  When the consultation is not found in the provided arrays, an optional
+ *  `fallbackDetail` (e.g. from a live Provet row) is used to synthesise the
+ *  minimal Provet objects required by `provetToSiigoInvoice`. */
 export function buildInvoicePayloadFromQuickEdit(
   consultations: Consultation[],
   clients: Client[],
@@ -119,21 +129,63 @@ export function buildInvoicePayloadFromQuickEdit(
   id: string,
   values: QuickEditFormValues,
   options?: ProvetToSiigoOptions,
+  fallbackDetail?: QuickEditDetail,
 ): SiigoInvoicePayload | undefined {
   const consultation = consultations.find((c) => c.id === id);
-  if (!consultation) return undefined;
-  const client = clients.find((c) => c.id === consultation.client_id);
-  if (!client) return undefined;
-  const patient = patients.find((p) => p.id === consultation.patient_id);
+  const client = consultation ? clients.find((c) => c.id === consultation.client_id) : undefined;
+  const patient = consultation ? patients.find((p) => p.id === consultation.patient_id) : undefined;
 
-  const overriddenClient: Client = {
-    ...client,
+  if (consultation && client) {
+    const overriddenClient: Client = {
+      ...client,
+      name: values.name,
+      identification: { type: values.identificationType, number: values.identificationNumber },
+      email: values.email,
+      phone: values.phone,
+    };
+    const overriddenConsultation: Consultation = { ...consultation, payment_method: values.paymentMethod };
+    const fallbackPatient: Patient = { id: consultation.patient_id, name: "Paciente desconocido", species: "—", owner_id: client.id };
+    return provetToSiigoInvoice(overriddenConsultation, overriddenClient, patient ?? fallbackPatient, options);
+  }
+
+  if (!fallbackDetail) return undefined;
+
+  const syntheticConsultation: Consultation = {
+    id: fallbackDetail.id,
+    client_id: `CLI-${fallbackDetail.id}`,
+    patient_id: `PAT-${fallbackDetail.id}`,
+    items: fallbackDetail.items.length > 0
+      ? fallbackDetail.items.map((it) => ({
+          code: it.code,
+          name: it.name,
+          quantity: it.quantity,
+          unit_price: it.lineTotal / it.quantity,
+          tax_rate: 0,
+          discount: 0,
+        }))
+      : [],
+    subtotal: fallbackDetail.total,
+    tax_total: 0,
+    total: fallbackDetail.total,
+    payment_method: values.paymentMethod,
+    status: "closed",
+    created_at: fallbackDetail.createdAt,
+    updated_at: fallbackDetail.createdAt,
+  };
+  const syntheticClient: Client = {
+    id: `CLI-${fallbackDetail.id}`,
+    name: values.name,
     identification: { type: values.identificationType, number: values.identificationNumber },
     email: values.email,
-    address: values.address,
+    address: "—",
+    phone: values.phone,
+    client_type: "natural",
   };
-  const overriddenConsultation: Consultation = { ...consultation, payment_method: values.paymentMethod };
-  const fallbackPatient: Patient = { id: consultation.patient_id, name: "Paciente desconocido", species: "—", owner_id: client.id };
-
-  return provetToSiigoInvoice(overriddenConsultation, overriddenClient, patient ?? fallbackPatient, options);
+  const syntheticPatient: Patient = {
+    id: `PAT-${fallbackDetail.id}`,
+    name: fallbackDetail.patientName,
+    species: "Canino",
+    owner_id: `CLI-${fallbackDetail.id}`,
+  };
+  return provetToSiigoInvoice(syntheticConsultation, syntheticClient, syntheticPatient, options);
 }

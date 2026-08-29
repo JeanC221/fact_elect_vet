@@ -8,7 +8,7 @@ import {
 
 /** Custom error class wrapping Siigo/DIAN error responses. */
 export class SiigoApiError extends Error {
-  constructor(public code: string, message: string) {
+  constructor(public code: string, message: string, public status?: number) {
     super(message);
     this.name = "SiigoApiError";
   }
@@ -38,12 +38,12 @@ async function toSiigoError(res: Response): Promise<SiigoApiError> {
   try {
     const parsed = siigoErrorSchema.safeParse(await res.json());
     if (parsed.success) {
-      return new SiigoApiError(parsed.data.code, parsed.data.message);
+      return new SiigoApiError(parsed.data.code, parsed.data.message, res.status);
     }
   } catch {
     // Non-JSON error body — fall through to the status-derived code.
   }
-  return new SiigoApiError(fallback, `Siigo request failed with HTTP ${res.status}.`);
+  return new SiigoApiError(fallback, `Siigo request failed with HTTP ${res.status}.`, res.status);
 }
 
 /**
