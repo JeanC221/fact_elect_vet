@@ -8,7 +8,7 @@ export const itemMappingSchema = z.object({
 });
 export const paymentMappingSchema = z.object({
   provetMethod: z.string().trim().min(1),
-  siigoPaymentTypeId: z.string().trim().min(1).nullable(),
+  siigoPaymentTypeId: z.number().int().positive().nullable(),
 });
 export const catalogMappingSchema = z.object({
   items: z.array(itemMappingSchema),
@@ -30,7 +30,7 @@ export interface ItemMappingRow {
 }
 export interface PaymentMappingRow {
   provetMethod: string;
-  siigoPaymentTypeId: string | null;
+  siigoPaymentTypeId: number | null;
   siigoPaymentTypeName: string | null;
   siigoPaymentCategory: SiigoPaymentType["type"] | null;
   mapped: boolean;
@@ -90,7 +90,8 @@ export function defaultPaymentMapping(methods: string[], siigoPaymentTypes: Siig
     return { provetMethod: method, siigoPaymentTypeId: ns.find((pt) => pt.n.includes(m) || m.includes(pt.n))?.id ?? null };
   });
 }
-const fresh = (id: string | null, valid: Set<string>): string | null => (id && valid.has(id) ? id : null);
+const fresh = <T extends string | number>(id: T | null, valid: Set<T>): T | null =>
+  id !== null && valid.has(id) ? id : null;
 /** Reconcile persisted mapping vs current catalogs: drop gone provet entries, null stale siigo ids, add new. */
 export function reconcileMapping(mapping: CatalogMapping, provetItems: ProvetItemRef[], siigoProducts: SiigoProduct[], provetMethods: string[], siigoPaymentTypes: SiigoPaymentType[]): CatalogMapping {
   const prodIds = new Set(siigoProducts.map((p) => p.id));

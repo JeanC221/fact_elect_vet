@@ -1,13 +1,14 @@
 import { z } from "zod";
 import { siigoErrorSchema } from "@/schemas/siigo";
+import { SiigoApiError } from "./siigoApi";
 
 /** Custom error class for Siigo OAuth failures. */
-export class SiigoAuthError extends Error {
+export class SiigoAuthError extends SiigoApiError {
   constructor(
     public code: string,
     message: string,
   ) {
-    super(message);
+    super(code, message);
     this.name = "SiigoAuthError";
   }
 }

@@ -42,72 +42,63 @@ export const mockSiigoProducts: SiigoProduct[] = [
 ];
 
 export const mockSiigoPaymentTypes: SiigoPaymentType[] = [
-  { id: "PT-001", name: "Efectivo", type: "cash" },
-  { id: "PT-002", name: "Tarjeta Crédito", type: "card" },
-  { id: "PT-003", name: "Transferencia Bancaria", type: "transfer" },
+  { id: 10948, name: "Efectivo", type: "cash" },
+  { id: 5636, name: "Tarjeta Crédito", type: "card" },
+  { id: 8466, name: "Transferencia Bancaria", type: "transfer" },
 ];
 
 export const mockSiigoInvoicePayloads: SiigoInvoicePayload[] = [
   {
+    document: { id: 2372 },
+    date: "2026-08-15",
     customer: {
-      identification: { type: "CC", number: "1234567890" },
+      person_type: "Person",
+      id_type: "13",
+      identification: "1234567890",
+      branch_office: 0,
       name: ["María García", "López"],
-      email: "maria.garcia@email.com",
-      phone: "3105550101",
     },
+    seller: 62,
     items: [
       {
         code: "SERV-CG-01",
         description: "Consulta General Veterinaria",
         quantity: 1,
         price: 80000,
-        taxes: [{ tax_code: "IVA_19" }],
       },
     ],
-    payments: [
-      {
-        payment_type_id: "PT-002",
-        amount: 80000,
-        paid_date: new Date("2026-08-15T00:00:00.000Z"),
-      },
-    ],
-    total: 80000,
+    payments: [{ id: 5636, value: 80000 }],
     stamp: { send: false },
-    mail: { send: false },
+    mail: { send: true },
   },
   {
+    document: { id: 2372 },
+    date: "2026-08-16",
     customer: {
-      identification: { type: "NIT", number: "900123456-1" },
+      person_type: "Company",
+      id_type: "31",
+      identification: "9001234561",
+      branch_office: 0,
       name: ["Veterinaria Los Andes", "S.A.S."],
-      email: "factura@losandes.co",
-      phone: "6045550102",
     },
+    seller: 62,
     items: [
       {
         code: "PROD-DES-05",
         description: "Desparasitante Oral Canino x2",
         quantity: 2,
         price: 25000,
-        taxes: [{ tax_code: "EXENTO" }],
       },
       {
         code: "SERV-CIR-01",
         description: "Cirugía de Esterilización",
         quantity: 1,
         price: 180000,
-        taxes: [{ tax_code: "EXCLUIDO" }],
       },
     ],
-    payments: [
-      {
-        payment_type_id: "PT-003",
-        amount: 230000,
-        paid_date: new Date("2026-08-16T00:00:00.000Z"),
-      },
-    ],
-    total: 230000,
+    payments: [{ id: 8466, value: 230000 }],
     stamp: { send: false },
-    mail: { send: false },
+    mail: { send: true },
   },
 ];
 

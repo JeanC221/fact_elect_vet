@@ -9,9 +9,10 @@ import { SiigoApiError } from "./siigoApi";
 
 describe("translateSiigoError", () => {
   it("maps invalid_identification to error/edit_identification/non-retryable", () => {
-    const r = translateSiigoError(new SiigoApiError("invalid_identification", "x"));
+    const r = translateSiigoError(new SiigoApiError("invalid_identification", "raw id msg"));
     expect(r).toMatchObject({ code: "invalid_identification", severity: "error", quickAction: "edit_identification", retryable: false });
     expect(r.message).toContain("cédula");
+    expect(r.detail).toBe("raw id msg");
   });
 
   it("maps invalid_total_payments to error/edit_payments/non-retryable", () => {
@@ -43,13 +44,14 @@ describe("translateSiigoError", () => {
   });
 
   it("falls back to default for unknown SiigoApiError codes", () => {
-    const r = translateSiigoError(new SiigoApiError("unknown_code", "x"));
+    const r = translateSiigoError(new SiigoApiError("unknown_code", "raw unknown"));
     expect(r).toMatchObject({
       code: "unknown_code",
       severity: "error",
       quickAction: "none",
       retryable: false,
     });
+    expect(r.detail).toBe("raw unknown");
   });
 
   it("falls back to default for non-SiigoApiError exceptions", () => {
@@ -57,6 +59,7 @@ describe("translateSiigoError", () => {
       code: "default",
       severity: "error",
     });
+    expect(translateSiigoError(new Error("raw")).detail).toBe("raw");
   });
 
   it("falls back to default for null/undefined", () => {

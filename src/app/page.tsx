@@ -135,8 +135,8 @@ export default function HomePage() {
     if (!selectedId) return;
     setIsSubmitting(true); setTranslatedError(null); setRetryAttempt(0);
     try {
-      const payload = buildInvoicePayloadFromQuickEdit(mockConsultations, mockClients, mockPatients, selectedId, values, options);
-      if (!payload) throw new Error("missing_source_data");
+      const payload = buildInvoicePayloadFromQuickEdit(mockConsultations, mockClients, mockPatients, selectedId, values, options, selectedDetail ?? undefined);
+      if (!payload) throw new Error("No se pudo construir el payload de factura.");
       const idemKey = generateIdempotencyKey();
       const response = await retryWithBackoff(async () => {
         const res = await fetch("/api/invoices", {
@@ -155,11 +155,12 @@ export default function HomePage() {
       else if (response.status === "Rejected") { setTranslatedError({ code: "rejected", message: "La DIAN rechazó la factura. Corrija los datos y reintente.", severity: "error", quickAction: "none", retryable: false }); }
       else { setTranslatedError({ code: "draft", message: "Factura guardada como borrador.", severity: "warning", quickAction: "save_draft", retryable: false }); }
     } catch (error) {
+      console.error("Invoice emission failed:", error);
       const te = translateSiigoError(error);
       setTranslatedError(te);
       if (te.quickAction === "save_draft") setRowStatus(selectedId, "Draft");
     } finally { setIsSubmitting(false); setRetryAttempt(0); }
-  }, [selectedId, options, setRowStatus, showToast]);
+  }, [selectedId, selectedDetail, options, setRowStatus, showToast]);
 
   const handleClose = useCallback(() => { if (!isSubmitting) { setSelectedId(null); setTranslatedError(null); setRetryAttempt(0); } }, [isSubmitting]);
   const handleQuickAction = useCallback((action: QuickAction) => { if (action.startsWith("edit_")) setTranslatedError(null); }, []);
@@ -179,7 +180,7 @@ export default function HomePage() {
         ) : (
           <InvoiceHistory entries={history} rows={rows} busyInvoiceId={busyInvoiceId} onDownload={handleDownload} onAnnul={handleAnnul} />
         )}
-        <QuickEditDrawer detail={selectedDetail} isSubmitting={isSubmitting} errorMessage={translatedError?.message ?? null} onClose={handleClose} onSubmit={handleSubmit} />
+        <QuickEditDrawer detail={selectedDetail} isSubmitting={isSubmitting} errorMessage={translatedError?.message ?? null} errorDetail={translatedError?.detail ?? null} onClose={handleClose} onSubmit={handleSubmit} />
         <CreditNoteModal row={annulTarget} isSubmitting={isAnnulling} errorMessage={annulError} onClose={() => { if (!isAnnulling) setAnnulTarget(null); }} onConfirm={handleAnnulConfirm} />
         {toast && (
           <div className="fixed bottom-4 right-4 z-50 flex max-w-md items-center gap-2 rounded-md border border-status-accepted-border bg-status-accepted-bg px-3 py-2 text-sm font-semibold text-status-accepted-text">

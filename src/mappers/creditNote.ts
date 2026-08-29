@@ -1,7 +1,6 @@
 import { z } from "zod";
 import {
   siigoCustomerSchema,
-  siigoTaxEnum,
   type SiigoInvoicePayload,
 } from "@/schemas/siigo";
 import { hasMaxDecimals, toCents } from "@/schemas/provet";
@@ -29,14 +28,12 @@ export const siigoCreditNoteItemSchema = z.object({
   description: z.string().trim().min(1).max(200),
   quantity: z.number().positive().max(1e6),
   price: z.number().max(1e9).refine((n) => hasMaxDecimals(n, 6), "Price max 6 decimals"),
-  taxes: z.array(z.object({ tax_code: siigoTaxEnum })).min(1),
 });
 
-/** Reversal payment — amount is negated relative to the original invoice. */
+/** Reversal payment — value is negated relative to the original invoice. */
 export const siigoCreditNotePaymentSchema = z.object({
-  payment_type_id: z.string().trim().min(1).max(50),
-  amount: z.number().max(1e12).refine((n) => hasMaxDecimals(n, 2), "Amount max 2 decimals"),
-  paid_date: z.coerce.date(),
+  id: z.number().int().positive(),
+  value: z.number().max(1e12).refine((n) => hasMaxDecimals(n, 2), "Value max 2 decimals"),
 });
 
 export const siigoCreditNoteReasonSchema = z.enum([
@@ -65,7 +62,7 @@ export const siigoCreditNoteSchema = z
   .refine(
     (cn) => {
       const itemsTotal = cn.items.reduce((s, i) => s + i.price * i.quantity, 0);
-      const paymentsTotal = cn.payments.reduce((s, p) => s + p.amount, 0);
+      const paymentsTotal = cn.payments.reduce((s, p) => s + p.value, 0);
       return toCents(itemsTotal) === toCents(cn.total) && toCents(paymentsTotal) === toCents(cn.total);
     },
     {
@@ -95,6 +92,7 @@ export function toCreditNotePayload(
   base: { id: string; cufe: string },
   reason: AnnulmentReason,
 ): SiigoCreditNotePayload {
+  const itemsTotal = original.items.reduce((s, i) => s + i.price * i.quantity, 0);
   return {
     base_document: base,
     customer: original.customer,
@@ -103,14 +101,12 @@ export function toCreditNotePayload(
       description: i.description,
       quantity: i.quantity,
       price: -i.price,
-      taxes: i.taxes,
     })),
     payments: original.payments.map((p) => ({
-      payment_type_id: p.payment_type_id,
-      amount: -p.amount,
-      paid_date: p.paid_date,
+      id: p.id,
+      value: -p.value,
     })),
-    total: -original.total,
+    total: -itemsTotal,
     reason,
     stamp: { send: false },
     mail: { send: false },

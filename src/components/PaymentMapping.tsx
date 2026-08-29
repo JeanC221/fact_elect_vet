@@ -9,7 +9,7 @@ import type { SiigoPaymentType } from "@/schemas/siigo";
 interface PaymentMappingProps {
   rows: PaymentMappingRow[];
   siigoPaymentTypes: SiigoPaymentType[];
-  onSelect: (provetMethod: string, siigoPaymentTypeId: string | null) => void;
+  onSelect: (provetMethod: string, siigoPaymentTypeId: number | null) => void;
 }
 
 const COLUMNS = [
@@ -83,7 +83,7 @@ export function PaymentMapping({ rows, siigoPaymentTypes, onSelect }: PaymentMap
                     <select
                       value={row.siigoPaymentTypeId ?? ""}
                       onChange={(e) =>
-                        onSelect(row.provetMethod, e.target.value || null)
+                        onSelect(row.provetMethod, e.target.value ? Number(e.target.value) : null)
                       }
                       className="w-full rounded-md border border-grid-line bg-pure-white px-1 py-1 text-xs text-slate-text focus:border-clinical-blue focus:outline-none"
                       aria-label={`Tipo de pago Siigo para ${row.provetMethod}`}

@@ -68,16 +68,17 @@ describe("submitInvoice", () => {
     );
     expect(err).toBeInstanceOf(SiigoApiError);
     expect((err as SiigoApiError).code).toBe("invalid_identification");
+    expect((err as SiigoApiError).status).toBe(400);
   });
 
   it("maps 429/503 without a Siigo error body to fallback codes", async () => {
     fetchMock.mockResolvedValueOnce(fakeRes({}, 429));
     await expect(submitInvoice(payload, "t", "PARTNER1")).rejects.toMatchObject(
-      { code: "requests_limit" },
+      { code: "requests_limit", status: 429 },
     );
     fetchMock.mockResolvedValueOnce(fakeRes({}, 503));
     await expect(submitInvoice(payload, "t", "PARTNER1")).rejects.toMatchObject(
-      { code: "service_unavailable" },
+      { code: "service_unavailable", status: 503 },
     );
   });
 
@@ -89,7 +90,7 @@ describe("submitInvoice", () => {
   });
 
   it("validates the payload with Zod before any network call", async () => {
-    const bad = { ...payload, total: payload.total + 1 };
+    const bad = { ...payload, seller: -1 };
     await expect(submitInvoice(bad, "t", "PARTNER1")).rejects.toThrow();
     expect(fetchMock).not.toHaveBeenCalled();
   });

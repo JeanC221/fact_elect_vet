@@ -141,10 +141,10 @@ describe("quickEditFormSchema", () => {
 describe("buildInvoicePayloadFromQuickEdit", () => {
   it("applies form overrides and keeps stamp.send=false", () => {
     const p = buildInvoicePayloadFromQuickEdit(mockConsultations, mockClients, mockPatients, "CON-001", validFormValues);
-    expect(p?.customer.email).toBe("nueva@mail.co");
+    expect(p?.customer.branch_office).toBe(0);
     expect(p?.customer.name).toEqual(["María García", "López"]);
-    expect(p?.customer.phone).toBe("3105550101");
-    expect(p?.payments[0].payment_type_id).toBe("PT-003");
+    expect(p?.customer.person_type).toBe("Person");
+    expect(p?.payments[0].id).toBe(10948);
     expect(p?.stamp.send).toBe(false);
     expect(p?.mail.send).toBe(true);
   });

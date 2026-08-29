@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { siigoInvoicePayloadSchema } from "@/schemas/siigo";
-import { getSiigoAccessToken } from "@/services/siigoAuth";
+import { getSiigoAccessToken, SiigoAuthError } from "@/services/siigoAuth";
 import { generateIdempotencyKey, SiigoApiError, submitInvoice } from "@/services/siigoApi";
 
 export const dynamic = "force-dynamic";
@@ -22,8 +22,15 @@ export async function POST(req: Request): Promise<NextResponse> {
     const response = await submitInvoice(payload, accessToken, partnerId, idempotencyKey);
     return NextResponse.json(response);
   } catch (err) {
+    if (err instanceof SiigoAuthError) {
+      return NextResponse.json(
+        { error: { code: err.code, message: "Error de autenticacion con Siigo." } },
+        { status: 502 },
+      );
+    }
     if (err instanceof SiigoApiError) {
-      return NextResponse.json({ error: { code: err.code, message: err.message } }, { status: 502 });
+      const status = err.status ?? 502;
+      return NextResponse.json({ error: { code: err.code, message: err.message } }, { status });
     }
     if (err instanceof z.ZodError) {
       return NextResponse.json({ error: { code: "invalid_payload", message: "Payload inválido para Siigo." } }, { status: 400 });

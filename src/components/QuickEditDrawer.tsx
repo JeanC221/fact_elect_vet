@@ -16,6 +16,7 @@ interface QuickEditDrawerProps {
   detail: QuickEditDetail | null;
   isSubmitting: boolean;
   errorMessage: string | null;
+  errorDetail?: string | null;
   onClose: () => void;
   onSubmit: (values: QuickEditFormValues) => void;
 }
@@ -32,7 +33,7 @@ function initialValues(d: QuickEditDetail | null): QuickEditFormValues {
   return { name: d?.clientName ?? "", identificationType: d?.identificationType ?? "CC", identificationNumber: d?.identificationNumber ?? "", email: d?.email ?? "", phone: d?.phone ?? "", paymentMethod: d?.paymentMethod ?? "", paidAmount: d?.total ?? 0 };
 }
 
-export function QuickEditDrawer({ detail, isSubmitting, errorMessage, onClose, onSubmit }: QuickEditDrawerProps) {
+export function QuickEditDrawer({ detail, isSubmitting, errorMessage, errorDetail, onClose, onSubmit }: QuickEditDrawerProps) {
   const [values, setValues] = useState<QuickEditFormValues>(() => initialValues(detail));
   const [isEditingAmount, setIsEditingAmount] = useState(false);
   useEffect(() => { setValues(initialValues(detail)); setIsEditingAmount(false); }, [detail?.id]);
@@ -123,7 +124,7 @@ export function QuickEditDrawer({ detail, isSubmitting, errorMessage, onClose, o
               {detail.items.map((it) => (<tr key={it.code} className="border-b border-grid-line last:border-0"><td className="px-2 py-1 text-slate-text">{it.name}</td><td className="px-2 py-1 text-right text-muted">x{it.quantity}</td><td className="px-2 py-1 text-right font-medium text-slate-text">{formatCOP(it.lineTotal)}</td></tr>))}
             </tbody></table>
           </div>
-          {errorMessage && <div className="flex items-start gap-2 rounded-md border border-status-rejected-border bg-status-rejected-bg px-2 py-2 text-xs text-status-rejected-text"><AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" /><span>{errorMessage}</span></div>}
+          {errorMessage && <div className="flex items-start gap-2 rounded-md border border-status-rejected-border bg-status-rejected-bg px-2 py-2 text-xs text-status-rejected-text"><AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" /><span>{errorDetail ?? errorMessage}</span></div>}
         </div>
         <footer className="border-t border-grid-line p-3">
           <button type="button" onClick={() => canSubmit && onSubmit(values)} disabled={!canSubmit} className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-clinical-blue px-3 py-2 text-sm font-semibold text-white hover:bg-clinical-blue-hover active:bg-clinical-blue-active disabled:cursor-not-allowed disabled:opacity-50">{isSubmitting ? (<><Loader2 className="h-4 w-4 animate-spin" /> Emitiendo a DIAN...</>) : "⚡ Emitir Factura"}</button>

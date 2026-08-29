@@ -118,7 +118,10 @@ export function buildQuickEditDetail(
   };
 }
 
-/** Pure O(n) composition: form overrides + Provet trio → Siigo payload. */
+/** Pure O(n) composition: form overrides + Provet trio → Siigo payload.
+ *  When the consultation is not found in the provided arrays, an optional
+ *  `fallbackDetail` (e.g. from a live Provet row) is used to synthesise the
+ *  minimal Provet objects required by `provetToSiigoInvoice`. */
 export function buildInvoicePayloadFromQuickEdit(
   consultations: Consultation[],
   clients: Client[],
@@ -126,22 +129,63 @@ export function buildInvoicePayloadFromQuickEdit(
   id: string,
   values: QuickEditFormValues,
   options?: ProvetToSiigoOptions,
+  fallbackDetail?: QuickEditDetail,
 ): SiigoInvoicePayload | undefined {
   const consultation = consultations.find((c) => c.id === id);
-  if (!consultation) return undefined;
-  const client = clients.find((c) => c.id === consultation.client_id);
-  if (!client) return undefined;
-  const patient = patients.find((p) => p.id === consultation.patient_id);
+  const client = consultation ? clients.find((c) => c.id === consultation.client_id) : undefined;
+  const patient = consultation ? patients.find((p) => p.id === consultation.patient_id) : undefined;
 
-  const overriddenClient: Client = {
-    ...client,
+  if (consultation && client) {
+    const overriddenClient: Client = {
+      ...client,
+      name: values.name,
+      identification: { type: values.identificationType, number: values.identificationNumber },
+      email: values.email,
+      phone: values.phone,
+    };
+    const overriddenConsultation: Consultation = { ...consultation, payment_method: values.paymentMethod };
+    const fallbackPatient: Patient = { id: consultation.patient_id, name: "Paciente desconocido", species: "—", owner_id: client.id };
+    return provetToSiigoInvoice(overriddenConsultation, overriddenClient, patient ?? fallbackPatient, options);
+  }
+
+  if (!fallbackDetail) return undefined;
+
+  const syntheticConsultation: Consultation = {
+    id: fallbackDetail.id,
+    client_id: `CLI-${fallbackDetail.id}`,
+    patient_id: `PAT-${fallbackDetail.id}`,
+    items: fallbackDetail.items.length > 0
+      ? fallbackDetail.items.map((it) => ({
+          code: it.code,
+          name: it.name,
+          quantity: it.quantity,
+          unit_price: it.lineTotal / it.quantity,
+          tax_rate: 0,
+          discount: 0,
+        }))
+      : [],
+    subtotal: fallbackDetail.total,
+    tax_total: 0,
+    total: fallbackDetail.total,
+    payment_method: values.paymentMethod,
+    status: "closed",
+    created_at: fallbackDetail.createdAt,
+    updated_at: fallbackDetail.createdAt,
+  };
+  const syntheticClient: Client = {
+    id: `CLI-${fallbackDetail.id}`,
     name: values.name,
     identification: { type: values.identificationType, number: values.identificationNumber },
     email: values.email,
+    address: "—",
     phone: values.phone,
+    client_type: "natural",
   };
-  const overriddenConsultation: Consultation = { ...consultation, payment_method: values.paymentMethod };
-  const fallbackPatient: Patient = { id: consultation.patient_id, name: "Paciente desconocido", species: "—", owner_id: client.id };
-
-  return provetToSiigoInvoice(overriddenConsultation, overriddenClient, patient ?? fallbackPatient, options);
+  const syntheticPatient: Patient = {
+    id: `PAT-${fallbackDetail.id}`,
+    name: fallbackDetail.patientName,
+    species: "Canino",
+    owner_id: `CLI-${fallbackDetail.id}`,
+  };
+  return provetToSiigoInvoice(syntheticConsultation, syntheticClient, syntheticPatient, options);
 }

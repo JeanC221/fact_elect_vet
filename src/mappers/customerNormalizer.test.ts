@@ -3,23 +3,35 @@ import {
   buildSiigoName,
   cleanIdentification,
   cleanPhone,
+  mapIdentificationType,
+  mapPersonType,
   sanitizeEmail,
   splitName,
 } from "./customerNormalizer";
 
 describe("cleanIdentification", () => {
-  it("strips dots, dashes and spaces from cédulas", () => {
-    expect(cleanIdentification("CC", "12.345.678-90")).toEqual({
-      type: "CC",
-      number: "1234567890",
-    });
+  it("strips dots, dashes and spaces from cédulas into a flat string", () => {
+    expect(cleanIdentification("12.345.678-90")).toBe("1234567890");
   });
 
-  it("strips dots, dashes and spaces from NITs", () => {
-    expect(cleanIdentification("NIT", "900.123.456 - 1")).toEqual({
-      type: "NIT",
-      number: "9001234561",
-    });
+  it("strips dots, dashes and spaces from NITs into a flat string", () => {
+    expect(cleanIdentification("900.123.456 - 1")).toBe("9001234561");
+  });
+});
+
+describe("mapIdentificationType", () => {
+  it("maps Provet identification types to Siigo numeric codes", () => {
+    expect(mapIdentificationType("CC")).toBe("13");
+    expect(mapIdentificationType("CE")).toBe("22");
+    expect(mapIdentificationType("NIT")).toBe("31");
+    expect(mapIdentificationType("PA")).toBe("41");
+  });
+});
+
+describe("mapPersonType", () => {
+  it("maps natural → Person and juridical → Company", () => {
+    expect(mapPersonType("natural")).toBe("Person");
+    expect(mapPersonType("juridical")).toBe("Company");
   });
 });
 
