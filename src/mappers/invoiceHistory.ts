@@ -28,6 +28,15 @@ export const invoiceHistoryEntrySchema = z.object({
   emittedAt: z.coerce.date(),
 });
 
+/** Zod-validated JSON serialization of the full history array for localStorage persistence. */
+export function serializeInvoiceHistory(entries: InvoiceHistoryEntry[]): string {
+  return JSON.stringify(z.array(invoiceHistoryEntrySchema).parse(entries));
+}
+/** Parse + Zod-validate a stored JSON blob; throws on corrupt/invalid input. */
+export function parseInvoiceHistory(stored: string): InvoiceHistoryEntry[] {
+  return z.array(invoiceHistoryEntrySchema).parse(JSON.parse(stored));
+}
+
 /** Table view-model for the history table (joined with the consultation queue row). */
 export interface InvoiceHistoryRow {
   invoiceId: string;

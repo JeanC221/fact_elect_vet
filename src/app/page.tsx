@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { CheckCircle2 } from "lucide-react";
 import { NavBar } from "@/components/NavBar";
 import { ConsultationQueue } from "@/components/ConsultationQueue";
@@ -19,6 +19,8 @@ import {
   buildInvoiceHistory,
   toInvoiceHistoryEntry,
   mapSiigoInvoiceStatus,
+  serializeInvoiceHistory,
+  parseInvoiceHistory,
   type InvoiceHistoryEntry,
   type InvoiceHistoryRow,
 } from "@/mappers/invoiceHistory";
@@ -34,6 +36,7 @@ import { useConsultationQueue } from "@/hooks/useConsultationQueue";
 type Tab = "queue" | "history";
 
 const TABS: { id: Tab; label: string }[] = [{ id: "queue", label: "Cola de Consultas" }, { id: "history", label: "Historial de Facturas" }];
+const HISTORY_STORAGE_KEY = "fact_vet.invoiceHistory";
 
 export default function HomePage() {
   const { rows, isInitialLoading, isRefreshing, fetchError: queueFetchError, clearFetchError, handleRefresh, setRowStatus } = useConsultationQueue();
@@ -49,6 +52,22 @@ export default function HomePage() {
   const [annulError, setAnnulError] = useState<string | null>(null);
   const [busyInvoiceId, setBusyInvoiceId] = useState<string | null>(null);
   const options = useEmissionOptions();
+
+  useEffect(() => {
+    const stored = window.localStorage.getItem(HISTORY_STORAGE_KEY);
+    if (!stored) return;
+    try { setHistory(parseInvoiceHistory(stored)); }
+    catch { /* corrupt blob → keep empty */ }
+  }, []);
+
+  const updateHistory = useCallback((updater: (prev: InvoiceHistoryEntry[]) => InvoiceHistoryEntry[]) => {
+    setHistory((prev) => {
+      const next = updater(prev);
+      try { window.localStorage.setItem(HISTORY_STORAGE_KEY, serializeInvoiceHistory(next)); }
+      catch { /* localStorage unavailable/full — history still updates in memory */ }
+      return next;
+    });
+  }, []);
 
   const selectedDetail = useMemo(() => {
     if (!selectedId) return null;
@@ -88,6 +107,15 @@ export default function HomePage() {
   const disableActions = isInitialLoading || isRefreshing || isSubmitting;
   const displayError = translatedError ?? queueFetchError;
   const handleDismissError = useCallback(() => { setTranslatedError(null); clearFetchError(); }, [clearFetchError]);
+
+  const invoicedConsultationIds = useMemo(
+    () => new Set(history.map((e) => e.consultationId)),
+    [history],
+  );
+  const pendingRows = useMemo(
+    () => rows.filter((r) => !invoicedConsultationIds.has(r.id)),
+    [rows, invoicedConsultationIds],
+  );
 
   const handleDownload = useCallback(async (invoiceId: string, format: "pdf" | "xml") => {
     setBusyInvoiceId(invoiceId);
@@ -132,11 +160,11 @@ export default function HomePage() {
       siigoCreditNoteSchema.parse(cn);
       const idemKey = generateIdempotencyKey();
       const response = await retryWithBackoff(() => submitCreditNote(cn, "", "", idemKey), { maxRetries: 5 });
-      setHistory((prev) => prev.map((e) => e.invoiceId === annulTarget.invoiceId ? { ...e, status: "Annulled" as InvoiceStatus, observations: `Anulada vía nota crédito ${response.id}` } : e).concat({ invoiceId: response.id, cufe: response.cufe, status: "Accepted" as InvoiceStatus, consultationId: annulTarget.consultationId, paymentMethod: annulTarget.paymentMethod, observations: `Nota crédito que anula ${annulTarget.invoiceId}`, emittedAt: new Date() }));
+      updateHistory((prev) => prev.map((e) => e.invoiceId === annulTarget.invoiceId ? { ...e, status: "Annulled" as InvoiceStatus, observations: `Anulada vía nota crédito ${response.id}` } : e).concat({ invoiceId: response.id, cufe: response.cufe, status: "Accepted" as InvoiceStatus, consultationId: annulTarget.consultationId, paymentMethod: annulTarget.paymentMethod, observations: `Nota crédito que anula ${annulTarget.invoiceId}`, emittedAt: new Date() }));
       setAnnulTarget(null);
       showToast(`Nota crédito ${response.id} generada · Factura ${annulTarget.invoiceId} anulada`);
     } catch (error) { setAnnulError(translateSiigoError(error).message); } finally { setIsAnnulling(false); }
-  }, [annulTarget, showToast]);
+  }, [annulTarget, showToast, updateHistory]);
 
   const handleSubmit = useCallback(async (values: QuickEditFormValues) => {
     if (!selectedId) return;
@@ -156,7 +184,7 @@ export default function HomePage() {
         return siigoInvoiceResponseSchema.parse(data);
       }, { maxRetries: 5, onRetry: (n) => setRetryAttempt(n) });
       setRowStatus(selectedId, mapSiigoInvoiceStatus(response.status));
-      setHistory((prev) => [...prev, toInvoiceHistoryEntry(response, selectedId, new Date(), values.paymentMethod)]);
+      updateHistory((prev) => [...prev, toInvoiceHistoryEntry(response, selectedId, new Date(), values.paymentMethod)]);
       const number = response.number ?? response.id;
       if (response.status === "Accepted") { setSelectedId(null); showToast(`Factura ${number} generada con éxito · CUFE: ${response.cufe}`); }
       else if (response.status === "Rejected") { setTranslatedError({ code: "rejected", message: "La DIAN rechazó la factura. Corrija los datos y reintente.", severity: "error", quickAction: "none", retryable: false }); }
@@ -167,7 +195,7 @@ export default function HomePage() {
       setTranslatedError(te);
       if (te.quickAction === "save_draft") setRowStatus(selectedId, "Draft");
     } finally { setIsSubmitting(false); setRetryAttempt(0); }
-  }, [selectedId, selectedDetail, options, setRowStatus, showToast]);
+  }, [selectedId, selectedDetail, options, setRowStatus, showToast, updateHistory]);
 
   const handleClose = useCallback(() => { if (!isSubmitting) { setSelectedId(null); setTranslatedError(null); setRetryAttempt(0); } }, [isSubmitting]);
   const handleQuickAction = useCallback((action: QuickAction) => { if (action.startsWith("edit_")) setTranslatedError(null); }, []);
@@ -183,7 +211,7 @@ export default function HomePage() {
         </nav>
         <ErrorBanner error={displayError} retryAttempt={retryAttempt} maxRetries={5} onQuickAction={handleQuickAction} onDismiss={handleDismissError} />
         {tab === "queue" ? (
-          <ConsultationQueue rows={rows} isRefreshing={isRefreshing} isInitialLoading={isInitialLoading} disableActions={disableActions} onRefresh={handleRefreshConsultations} onInvoiceClick={(id) => setSelectedId(id)} />
+          <ConsultationQueue rows={pendingRows} isRefreshing={isRefreshing} isInitialLoading={isInitialLoading} disableActions={disableActions} onRefresh={handleRefreshConsultations} onInvoiceClick={(id) => setSelectedId(id)} />
         ) : (
           <InvoiceHistory entries={history} rows={rows} busyInvoiceId={busyInvoiceId} onDownload={handleDownload} onAnnul={handleAnnul} />
         )}
