@@ -407,7 +407,7 @@ Internal web application (Middleware API + Operational Dashboard) designed to au
 
   **(3) QuickEditDrawer Payment Dropdown — placeholder + active mapped options only:**
   - `src/mappers/consultationQueue.ts` (modified, 146 lines): added `PaymentOption` interface; `QuickEditDetail.paymentMethodOptions` changed from `string[]` to `PaymentOption[]`; new `buildPaymentOptions(mapping)` returns only non-null mapped payments; `buildQuickEditDetail` gains optional `mapping?` param, sets `paymentMethod: ""` (empty placeholder); removed dead `LEGACY_PAYMENT_OPTIONS`.
-  - `src/components/QuickEditDrawer.tsx` (modified, 138 lines): `<select>` now has `<option value="">— Seleccionar Medio de Pago —</option>` placeholder; dropdown populated only with `PaymentOption[]`; `canSubmit` adds `&& values.paymentMethod !== ""` so `[⚡ Emitir Factura]` stays disabled while no method is selected.
+  - `src/components/QuickEditDrawer.tsx` (modified, 138 lines): `<select>` now has `<option value="">— Seleccionar Medio de Pago —</option>` placeholder; dropdown populated only with `PaymentOption[]`; `canSubmit` adds `&& values.paymentMethod !== ""` so `[Emitir Factura]` stays disabled while no method is selected.
   - `src/app/page.tsx` (modified, 182 lines): `buildQuickEditDetail` calls pass `options.mapping`; fallback uses `buildPaymentOptions(options.mapping)` + `paymentMethod: ""`; annul flow uses `srcCon.payment_method` (original) instead of `d.paymentMethod` (now `""`).
 
   **Tests (TDD — 16 new tests across 4 new + 2 modified test files):**

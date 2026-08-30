@@ -1,16 +1,5 @@
 import { z } from "zod";
 
-/**
- * Raw Provet Cloud REST API shapes (Django REST Framework).
- * Field names mirror the live API response (discovered via /consultation,
- * /client, /patient, /invoice, /consultationitem). Schemas are partial +
- * `.passthrough()` so unknown Provet fields never break parsing.
- *
- * Auth: the OAuth client-credentials access_token is passed as the
- * `?access_token=` query parameter (NOT a header) — see provetAuth/provetApi.
- */
-
-/** DRF paginated envelope: { count, next, previous, results }. */
 export function provetPaginatedSchema<T extends z.ZodTypeAny>(item: T) {
   return z.object({
     count: z.number().int().nonnegative().catch(0),
@@ -20,11 +9,6 @@ export function provetPaginatedSchema<T extends z.ZodTypeAny>(item: T) {
   });
 }
 
-/**
- * Relation values are either a bare id ("123" / numeric 123) or a hyperlinked
- * URL. `z.coerce.string()` accepts numbers (Provet returns ids/status as numbers
- * on some resources) and converts them to strings.
- */
 const rel = z.coerce.string().trim().min(1);
 /** Tolerant text field: numbers → string, null/undefined/missing → "". */
 const txt = z.preprocess((v) => (v == null ? "" : String(v)), z.string().trim());
@@ -75,6 +59,16 @@ export const provetPatientRawSchema = z
     breed: txt.nullable().catch(null),
   })
   .passthrough();
+  
+export const provetPhoneNumberRawSchema = z
+  .object({
+    id: z.coerce.string(),
+    client: rel.nullable().catch(null),
+    type_code: z.coerce.number().catch(0),
+    phone_number: txt,
+    is_secondary_owners_phone_number: z.boolean().catch(false),
+  })
+  .passthrough();
 
 export const provetInvoiceRawSchema = z
   .object({
@@ -99,7 +93,9 @@ export const provetConsultationItemRawSchema = z
     name: txt,
     quantity: z.coerce.number().default(1),
     price: z.coerce.number().default(0),
+    price_with_vat: z.coerce.number().catch(0),
     vat_percentage: z.coerce.number().default(0),
+    hide_on_consultation: z.boolean().catch(false),
   })
   .passthrough();
 
@@ -108,3 +104,4 @@ export type ProvetClientRaw = z.infer<typeof provetClientRawSchema>;
 export type ProvetPatientRaw = z.infer<typeof provetPatientRawSchema>;
 export type ProvetInvoiceRaw = z.infer<typeof provetInvoiceRawSchema>;
 export type ProvetConsultationItemRaw = z.infer<typeof provetConsultationItemRawSchema>;
+export type ProvetPhoneNumberRaw = z.infer<typeof provetPhoneNumberRawSchema>;

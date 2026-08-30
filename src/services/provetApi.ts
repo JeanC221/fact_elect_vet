@@ -5,6 +5,8 @@ import {
   provetPatientRawSchema,
   provetInvoiceRawSchema,
   provetPaginatedSchema,
+  provetPhoneNumberRawSchema,
+  provetConsultationItemRawSchema,
 } from "@/schemas/provetApi";
 
 /** Custom error class wrapping Provet REST API failures. */
@@ -17,12 +19,6 @@ export class ProvetApiError extends Error {
 
 const BASE = process.env.PROVET_BASE_URL ?? "https://api.provetcloud.com";
 
-/**
- * Fetch one page of a Provet REST resource. Auth uses the opaque OAuth
- * access_token as the `?access_token=` query parameter (per the live API),
- * never a header. Ordering forced to `-created` so the most recent records
- * arrive first — reception staff see freshly closed consultations.
- */
 async function fetchProvetPage<S extends z.ZodTypeAny>(
   path: string,
   token: string,
@@ -67,3 +63,7 @@ export const fetchPatients = (token: string) =>
   firstPage("/patient", token, provetPatientRawSchema);
 export const fetchInvoices = (token: string) =>
   firstPage("/invoice", token, provetInvoiceRawSchema);
+export const fetchPhoneNumbers = (token: string) =>
+  firstPage("/phonenumber", token, provetPhoneNumberRawSchema);
+export const fetchConsultationItems = (token: string) =>
+  firstPage("/consultationitem", token, provetConsultationItemRawSchema);

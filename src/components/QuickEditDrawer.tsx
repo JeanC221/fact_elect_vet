@@ -128,7 +128,7 @@ export function QuickEditDrawer({ detail, isSubmitting, errorMessage, errorDetai
           {errorMessage && <div className="flex items-start gap-2 rounded-md border border-status-rejected-border bg-status-rejected-bg px-2 py-2 text-xs text-status-rejected-text"><AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" /><span>{errorDetail ?? errorMessage}</span></div>}
         </div>
         <footer className="border-t border-grid-line p-3">
-          <button type="button" onClick={() => canSubmit && onSubmit(values)} disabled={!canSubmit} className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-clinical-blue px-3 py-2 text-sm font-semibold text-white hover:bg-clinical-blue-hover active:bg-clinical-blue-active disabled:cursor-not-allowed disabled:opacity-50">{isSubmitting ? (<><Loader2 className="h-4 w-4 animate-spin" /> Emitiendo a DIAN...</>) : "⚡ Emitir Factura"}</button>
+          <button type="button" onClick={() => canSubmit && onSubmit(values)} disabled={!canSubmit} className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-clinical-blue px-3 py-2 text-sm font-semibold text-white hover:bg-clinical-blue-hover active:bg-clinical-blue-active disabled:cursor-not-allowed disabled:opacity-50">{isSubmitting ? (<><Loader2 className="h-4 w-4 animate-spin" /> Emitiendo a DIAN...</>) : "Emitir Factura"}</button>
           <p className="mt-1 text-center text-2xs text-muted">Esc para cerrar · Ctrl+Enter para emitir</p>
         </footer>
       </aside>

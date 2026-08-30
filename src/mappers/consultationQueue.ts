@@ -18,8 +18,18 @@ export type InvoiceStatus = "Accepted" | "Draft" | "Rejected" | "Annulled";
 export type ProvetStatus = "pending" | "closed";
 
 /** Joined consultation row consumed by the queue UI (no mapping inside components). */
+/** Editable line item view-model for the Quick-Edit drawer (tax-inclusive line total). */
+export interface QuickEditItem { code: string; name: string; quantity: number; lineTotal: number; }
+
 export interface ConsultationQueueRow {
   id: string; clientId: string; clientName: string; clientDoc: string;
+  /** Colombian document type inferred from Provet's client record — see provetToQueue.ts. */
+  identificationType: (typeof identificationTypes)[number];
+  identificationNumber: string;
+  email: string;
+  phone: string;
+  /** Real line items from Provet's /consultationitem/ (hidden items excluded) — empty when Provet has none. */
+  items: QuickEditItem[];
   patientName: string; total: number; paymentMethod: string;
   provetStatus: ProvetStatus; invoiceStatus: InvoiceStatus; createdAt: Date;
 }
@@ -48,6 +58,11 @@ export function buildConsultationQueue(consultations: Consultation[], clients: C
       id: c.id, clientId: c.client_id,
       clientName: client?.name ?? "Cliente desconocido",
       clientDoc: client ? `${client.identification.type} ${client.identification.number}` : "—",
+      identificationType: client?.identification.type ?? "CC",
+      identificationNumber: client?.identification.number ?? "",
+      email: client?.email ?? "",
+      phone: client?.phone ?? "",
+      items: c.items.map((i) => ({ code: i.code, name: i.name, quantity: i.quantity, lineTotal: i.unit_price * i.quantity * (1 + i.tax_rate) - i.discount })),
       patientName: patient?.name ?? "Paciente desconocido",
       total: c.total, paymentMethod: c.payment_method,
       provetStatus: c.status, invoiceStatus: "Draft", createdAt: c.created_at,
@@ -56,7 +71,6 @@ export function buildConsultationQueue(consultations: Consultation[], clients: C
 }
 
 /** Editable line item view-model for the Quick-Edit drawer (tax-inclusive line total). */
-export interface QuickEditItem { code: string; name: string; quantity: number; lineTotal: number; }
 
 /** Pre-filled Provet detail consumed by the Quick-Edit drawer (no fetch in UI). */
 export interface QuickEditDetail {
@@ -114,10 +128,6 @@ export function buildQuickEditDetail(consultations: Consultation[], clients: Cli
   };
 }
 
-/** Pure O(n) composition: form overrides + Provet trio → Siigo payload.
- *  When the consultation is not found in the provided arrays, an optional
- *  `fallbackDetail` (e.g. from a live Provet row) is used to synthesise the
- *  minimal Provet objects required by `provetToSiigoInvoice`. */
 export function buildInvoicePayloadFromQuickEdit(
   consultations: Consultation[], clients: Client[], patients: Patient[],
   id: string, values: QuickEditFormValues, options?: ProvetToSiigoOptions, fallbackDetail?: QuickEditDetail,

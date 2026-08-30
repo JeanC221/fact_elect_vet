@@ -40,6 +40,9 @@ const HISTORY_STORAGE_KEY = "fact_vet.invoiceHistory";
 
 export default function HomePage() {
   const { rows, isInitialLoading, isRefreshing, fetchError: queueFetchError, clearFetchError, handleRefresh, setRowStatus } = useConsultationQueue();
+  // Always starts empty so server-rendered markup and the client's first
+  // render match exactly (localStorage doesn't exist during SSR) — hydrated
+  // from localStorage in the useEffect below, after mount.
   const [history, setHistory] = useState<InvoiceHistoryEntry[]>([]);
   const [tab, setTab] = useState<Tab>("queue");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -53,6 +56,9 @@ export default function HomePage() {
   const [busyInvoiceId, setBusyInvoiceId] = useState<string | null>(null);
   const options = useEmissionOptions();
 
+  // Client-only hydration (after mount, no SSR/hydration risk): load
+  // persisted invoice history so already-emitted rows stay excluded from the
+  // queue across page reloads (see pendingRows below).
   useEffect(() => {
     const stored = window.localStorage.getItem(HISTORY_STORAGE_KEY);
     if (!stored) return;
@@ -60,6 +66,8 @@ export default function HomePage() {
     catch { /* corrupt blob → keep empty */ }
   }, []);
 
+  // Wraps setHistory to always persist to localStorage in the same step —
+  // every history mutation in this file goes through this, never setHistory directly.
   const updateHistory = useCallback((updater: (prev: InvoiceHistoryEntry[]) => InvoiceHistoryEntry[]) => {
     setHistory((prev) => {
       const next = updater(prev);
@@ -73,23 +81,24 @@ export default function HomePage() {
     if (!selectedId) return null;
     const detail = buildQuickEditDetail(mockConsultations, mockClients, mockPatients, selectedId, options.mapping);
     if (detail) return detail;
-    // Live Provet consultation not in mocks → build minimal detail from queue row
+    // Live Provet consultation not in mocks → build detail directly from the
+    // queue row, which already carries the correctly-inferred identification
+    // type/number and email (see provetToQueue.ts inferIdentification) —
+    // no more re-parsing clientDoc, which silently produced empty/wrong values.
     const row = rows.find((r) => r.id === selectedId);
     if (!row) return null;
-    const docParts = row.clientDoc.split(" ");
-    const knownTypes = new Set<string>(["CC", "CE", "NIT", "PA"]);
     const fallback: QuickEditDetail = {
       id: row.id,
       clientName: row.clientName,
-      identificationType: knownTypes.has(docParts[0]) ? (docParts[0] as QuickEditDetail["identificationType"]) : "CC",
-      identificationNumber: docParts.slice(1).join(" ") || "",
-      email: "",
-      phone: "",
+      identificationType: row.identificationType,
+      identificationNumber: row.identificationNumber,
+      email: row.email,
+      phone: row.phone,
       patientName: row.patientName,
       paymentMethod: "",
       paymentMethodOptions: buildPaymentOptions(options.mapping),
       total: row.total,
-      items: [],
+      items: row.items,
       createdAt: row.createdAt,
     };
     return fallback;
@@ -108,6 +117,12 @@ export default function HomePage() {
   const displayError = translatedError ?? queueFetchError;
   const handleDismissError = useCallback(() => { setTranslatedError(null); clearFetchError(); }, [clearFetchError]);
 
+  // Rows still pending emission: excludes any consultation with an entry in
+  // `history` (the real source of truth for "already invoiced"). Not based
+  // on invoiceStatus alone — Siigo returns "Draft" both for "never emitted"
+  // (the row's own default) AND "emitted successfully in sandbox" (stamp.send
+  // is false there, so it's never sent to the DIAN), so the two cases are
+  // indistinguishable from invoiceStatus without checking history.
   const invoicedConsultationIds = useMemo(
     () => new Set(history.map((e) => e.consultationId)),
     [history],

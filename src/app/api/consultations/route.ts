@@ -5,28 +5,26 @@ import {
   fetchClients,
   fetchPatients,
   fetchInvoices,
+  fetchPhoneNumbers,
+  fetchConsultationItems,
   ProvetApiError,
 } from "@/services/provetApi";
 import { buildQueueFromProvet } from "@/mappers/provetToQueue";
 
 export const dynamic = "force-dynamic";
 
-/**
- * GET /api/consultations — live Provet Cloud poll.
- * Orchestrates OAuth + the 4 resource fetches + the pure mapper server-side,
- * so client credentials never reach the browser. Returns dashboard queue rows
- * (or a 502 with a Spanish, user-facing error message on failure).
- */
 export async function GET(): Promise<NextResponse> {
   try {
     const token = await getProvetAccessToken();
-    const [consultations, clients, patients, invoices] = await Promise.all([
+    const [consultations, clients, patients, invoices, phoneNumbers, consultationItems] = await Promise.all([
       fetchConsultations(token),
       fetchClients(token),
       fetchPatients(token),
       fetchInvoices(token),
+      fetchPhoneNumbers(token),
+      fetchConsultationItems(token),
     ]);
-    const rows = buildQueueFromProvet(consultations, clients, patients, invoices);
+    const rows = buildQueueFromProvet(consultations, clients, patients, invoices, phoneNumbers, consultationItems);
     return NextResponse.json({ rows, count: rows.length });
   } catch (err) {
     const code = err instanceof ProvetAuthError || err instanceof ProvetApiError ? err.code : "unknown";
