@@ -6,6 +6,7 @@ import {
   retryWithBackoff,
 } from "./errorTranslator";
 import { SiigoApiError } from "./siigoApi";
+import { UnmappedPaymentMethodError } from "@/mappers/catalogMapping";
 
 describe("translateSiigoError", () => {
   it("maps invalid_identification to error/edit_identification/non-retryable", () => {
@@ -51,6 +52,14 @@ describe("translateSiigoError", () => {
   it("falls back to default for non-SiigoApiError exceptions", () => {
     expect(translateSiigoError(new Error("raw"))).toMatchObject({ code: "default", severity: "error" });
     expect(translateSiigoError(new Error("raw")).detail).toBe("raw");
+  });
+
+  it("maps UnmappedPaymentMethodError to error/edit_payments/non-retryable", () => {
+    const err = new UnmappedPaymentMethodError("Davivienda");
+    const r = translateSiigoError(err);
+    expect(r).toMatchObject({ code: "unmapped_payment", severity: "error", quickAction: "edit_payments", retryable: false });
+    expect(r.message).toContain("Davivienda");
+    expect(r.message).toContain("Mapeo");
   });
 
   it("falls back to default for null/undefined", () => {

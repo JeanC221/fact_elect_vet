@@ -104,6 +104,26 @@ describe("submitInvoice", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("asserts the outgoing payload structurally matches the official Siigo contract", async () => {
+    const spy = vi.spyOn(console, "info").mockImplementation(() => {});
+    fetchMock.mockResolvedValue(fakeRes(okBody));
+    await submitInvoice(payload, "tok-123", "PARTNER1");
+    const sent = JSON.parse(String(callAt(0)[1].body));
+    expect(sent).toHaveProperty("document.id");
+    expect(sent).toHaveProperty("date");
+    expect(sent).toHaveProperty("customer");
+    expect(sent).toHaveProperty("items");
+    expect(sent).toHaveProperty("payments");
+    expect(sent).toHaveProperty("seller");
+    expect(sent).toHaveProperty("stamp");
+    expect(sent).toHaveProperty("mail");
+    expect(sent).not.toHaveProperty("total");
+    expect(spy).toHaveBeenCalledWith(
+      expect.stringContaining("[Siigo] payload validated against official contract before POST /v1/invoices"),
+    );
+    spy.mockRestore();
+  });
+
   it("throws when the success body fails response schema validation", async () => {
     fetchMock.mockResolvedValue(fakeRes({ id: "INV-1" }, 200));
     await expect(submitInvoice(payload, "t", "PARTNER1")).rejects.toThrow();

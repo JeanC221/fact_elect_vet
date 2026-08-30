@@ -17,7 +17,6 @@ import {
   type InvoiceHistoryEntry,
 } from "@/mappers/invoiceHistory";
 import {
-  formatCOP,
   formatDate,
   type ConsultationQueueRow,
 } from "@/mappers/consultationQueue";
@@ -113,7 +112,7 @@ export function InvoiceHistory({
                     <div className="truncate text-muted" title={r.clientDoc}>{r.clientDoc}</div>
                   </td>
                   <td className="border-l border-grid-line px-3 py-2 text-slate-text">{r.patientName}</td>
-                  <td className="border-l border-grid-line px-3 py-2 font-medium text-slate-text">{formatCOP(r.total)}</td>
+                  <td className="border-l border-grid-line px-3 py-2 font-medium text-slate-text">{r.total}</td>
                   <td className="border-l border-grid-line px-3 py-2 text-slate-text">{r.paymentMethod}</td>
                   <td className="border-l border-grid-line px-3 py-2 text-muted">{formatDate(r.emittedAt)}</td>
                   <td className="border-l border-grid-line px-3 py-2"><StatusBadge status={r.status} /></td>

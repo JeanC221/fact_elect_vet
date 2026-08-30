@@ -1,4 +1,5 @@
 import { SiigoApiError } from "./siigoApi";
+import { UnmappedPaymentMethodError } from "@/mappers/catalogMapping";
 
 /** Action the user can take to resolve the error. */
 export type QuickAction =
@@ -83,6 +84,15 @@ const DEFAULT_TRANSLATION: TranslationEntry = {
 
 /** Translate any emission failure into a structured Spanish error for the UI. */
 export function translateSiigoError(error: unknown): TranslatedError {
+  if (error instanceof UnmappedPaymentMethodError) {
+    return {
+      code: "unmapped_payment",
+      message: error.message,
+      severity: "error",
+      quickAction: "edit_payments",
+      retryable: false,
+    };
+  }
   if (error instanceof SiigoApiError) {
     const entry = ERROR_TRANSLATIONS[error.code] ?? DEFAULT_TRANSLATION;
     return { code: error.code, detail: error.message, ...entry };

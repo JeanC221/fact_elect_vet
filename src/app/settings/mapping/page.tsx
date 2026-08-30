@@ -33,6 +33,9 @@ export default function MappingPage() {
   const [loaded, setLoaded] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
+  // Live Siigo catalogs — seeded with mocks, replaced by real data after a successful sync.
+  const [siigoProducts, setSiigoProducts] = useState<SiigoProduct[]>(mockSiigoProducts);
+  const [siigoPaymentTypes, setSiigoPaymentTypes] = useState<SiigoPaymentType[]>(mockSiigoPaymentTypes);
 
   // SSR-safe load: reconcile persisted mapping against current catalogs.
   useEffect(() => {
@@ -45,8 +48,8 @@ export default function MappingPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const itemRows = useMemo(() => buildItemMappingRows(provetItems, mockSiigoProducts, mapping.items), [provetItems, mapping.items]);
-  const paymentRows = useMemo(() => buildPaymentMappingRows(provetMethods, mockSiigoPaymentTypes, mapping.payments), [provetMethods, mapping.payments]);
+  const itemRows = useMemo(() => buildItemMappingRows(provetItems, siigoProducts, mapping.items), [provetItems, siigoProducts, mapping.items]);
+  const paymentRows = useMemo(() => buildPaymentMappingRows(provetMethods, siigoPaymentTypes, mapping.payments), [provetMethods, siigoPaymentTypes, mapping.payments]);
 
   const handleItemSelect = useCallback((provetCode: string, siigoProductId: string | null) => {
     setMapping((p) => ({ ...p, items: p.items.map((m) => m.provetCode === provetCode ? { ...m, siigoProductId } : m) }));
@@ -82,6 +85,8 @@ export default function MappingPage() {
       if (!res.ok || !data.paymentTypes || !data.products) { setToast(data.error?.message ?? "Error al sincronizar"); setTimeout(() => setToast(null), 2500); return; }
       const next = reconcileMapping(mapping, provetItems, data.products, provetMethods, data.paymentTypes);
       setMapping(next);
+      setSiigoProducts(data.products);
+      setSiigoPaymentTypes(data.paymentTypes);
       window.localStorage.setItem(STORAGE_KEY, serializeCatalogMapping(next));
       window.dispatchEvent(new StorageEvent("storage", { key: STORAGE_KEY }));
       setToast("Catalogos sincronizados en vivo");
@@ -128,8 +133,8 @@ export default function MappingPage() {
         </div>
       </header>
       <div className="scrollbar-thin flex h-[calc(100vh-64px)] flex-col gap-2 overflow-y-auto">
-        <CatalogMapping rows={itemRows} siigoProducts={mockSiigoProducts} onSelect={handleItemSelect} isRefreshing={isSyncing} onSync={handleSyncCatalogs} />
-        <PaymentMapping rows={paymentRows} siigoPaymentTypes={mockSiigoPaymentTypes} onSelect={handlePaymentSelect} />
+        <CatalogMapping rows={itemRows} siigoProducts={siigoProducts} onSelect={handleItemSelect} isRefreshing={isSyncing} onSync={handleSyncCatalogs} />
+        <PaymentMapping rows={paymentRows} siigoPaymentTypes={siigoPaymentTypes} onSelect={handlePaymentSelect} />
       </div>
       {toast && (
         <div className="fixed bottom-4 right-4 z-50 flex items-center gap-2 rounded-md border border-status-accepted-border bg-status-accepted-bg px-3 py-2 text-sm font-semibold text-status-accepted-text">
