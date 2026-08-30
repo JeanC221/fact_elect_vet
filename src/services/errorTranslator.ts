@@ -53,6 +53,66 @@ const ERROR_TRANSLATIONS: Record<string, TranslationEntry> = {
     quickAction: "edit_email",
     retryable: false,
   },
+  invalid_reference: {
+    message:
+      "Un código o ID enviado no existe en Siigo (producto, forma de pago, vendedor o tipo de documento). Verifique el mapeo de catálogos en Ajustes.",
+    severity: "error",
+    quickAction: "none",
+    retryable: false,
+  },
+  invalid_date: {
+    message:
+      "La fecha de la factura es inválida. Para facturación electrónica debe ser la fecha actual (no puede ser anterior).",
+    severity: "error",
+    quickAction: "none",
+    retryable: false,
+  },
+  invalid_payment: {
+    message:
+      "La forma de pago enviada no es válida para este tipo de comprobante. Verifique el mapeo de métodos de pago.",
+    severity: "error",
+    quickAction: "edit_payments",
+    retryable: false,
+  },
+  parameter_inactive: {
+    message:
+      "El parámetro enviado (forma de pago, vendedor, etc.) está inactivo en Siigo Nube. Actívelo o use otro.",
+    severity: "error",
+    quickAction: "none",
+    retryable: false,
+  },
+  customer_settings: {
+    message:
+      "El cliente no tiene contactos creados en su perfil de Siigo Nube. Cree un contacto para este cliente o verifique que tenga correo electrónico.",
+    severity: "error",
+    quickAction: "edit_email",
+    retryable: false,
+  },
+  invalid_email: {
+    message: "El correo electrónico del cliente no tiene un formato válido.",
+    severity: "error",
+    quickAction: "edit_email",
+    retryable: false,
+  },
+  document_settings: {
+    message:
+      "Falta configuración en el tipo de comprobante en Siigo Nube (vendedor por ítem, decimales, numeración, etc.). Revise Configuración → Transacciones → Facturas.",
+    severity: "error",
+    quickAction: "none",
+    retryable: false,
+  },
+  invalid_payload: {
+    message: "El formato de los datos enviados no es válido. Contacte soporte técnico si persiste.",
+    severity: "error",
+    quickAction: "none",
+    retryable: false,
+  },
+  unhandled_error: {
+    message: "Error no controlado del lado de Siigo. Si persiste, contacte a soporteapi@siigo.com.",
+    severity: "error",
+    quickAction: "none",
+    retryable: true,
+  },
   requests_limit: {
     message: "Servidor de facturación ocupado. Reintento automático en curso...",
     severity: "warning",

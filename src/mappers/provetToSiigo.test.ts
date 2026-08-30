@@ -37,7 +37,7 @@ const map = (i: number, o: ProvetToSiigoOptions = opts()) =>
 describe("provetToSiigoInvoice", () => {
   it("transforms CON-001 via dynamic mapping (Zod round-trip)", () => {
     const result = map(0);
-    expect(result.date).toBe("2026-08-15");
+    expect(result.date).toBe(new Date().toISOString().slice(0, 10));
     expect(result.seller).toBe(62);
     expect(result.customer.identification).toBe("1234567890");
     expect(result.customer.id_type).toBe("13");

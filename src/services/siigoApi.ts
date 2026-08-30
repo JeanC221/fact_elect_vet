@@ -32,26 +32,41 @@ const STATUS_ERROR_CODES: Record<number, string> = {
   503: "service_unavailable",
 };
 
-/** Extracts a human-readable message from Siigo's alternate error shapes (Errors[] array, plain string). */
-function extractSiigoErrorText(body: unknown): string | null {
-  if (typeof body === "string" && body.trim().length > 0) return body.trim();
+/** Extracted error info from Siigo's alternate error shapes (Errors[] array, plain string). */
+interface ExtractedSiigoError {
+  code: string | null;
+  message: string;
+}
+
+/**
+ * Extracts code + message from Siigo's documented error envelope:
+ * `{ Status, Errors: [{ Code, Message, Params, Detail }] }` (PascalCase,
+ * plural `Errors`) — the ACTUAL shape per developers.siigo.com/docs, distinct
+ * from the lowercase `{code, message}` this app's `siigoErrorSchema` also
+ * accepts defensively. Falls back to a plain string or `.message` field.
+ */
+function extractSiigoError(body: unknown): ExtractedSiigoError | null {
+  if (typeof body === "string" && body.trim().length > 0) return { code: null, message: body.trim() };
   if (body && typeof body === "object") {
     const obj = body as Record<string, unknown>;
     if (Array.isArray(obj.Errors) && obj.Errors.length > 0) {
-      return obj.Errors.map((e) => {
+      const first = obj.Errors[0];
+      const firstCode = first && typeof first === "object" ? (first as Record<string, unknown>).Code : undefined;
+      const message = obj.Errors.map((e) => {
         if (e && typeof e === "object") {
           const err = e as Record<string, unknown>;
           return [err.Code, err.Message].filter(Boolean).join(": ");
         }
         return String(e);
       }).join(" | ");
+      return { code: typeof firstCode === "string" ? firstCode : null, message };
     }
-    if (typeof obj.message === "string") return obj.message;
+    if (typeof obj.message === "string") return { code: null, message: obj.message };
   }
   return null;
 }
 
-/** Build a SiigoApiError from a failed HTTP response. Always surfaces Siigo's raw message when present. */
+/** Build a SiigoApiError from a failed HTTP response. Always surfaces Siigo's raw code + message when present. */
 async function toSiigoError(res: Response): Promise<SiigoApiError> {
   const fallback = STATUS_ERROR_CODES[res.status] ?? "default";
   let rawBody: unknown;
@@ -64,9 +79,9 @@ async function toSiigoError(res: Response): Promise<SiigoApiError> {
   if (parsed.success) {
     return new SiigoApiError(parsed.data.code, parsed.data.message, res.status);
   }
-  const rawText = extractSiigoErrorText(rawBody);
-  if (rawText) {
-    return new SiigoApiError(fallback, rawText, res.status);
+  const extracted = extractSiigoError(rawBody);
+  if (extracted) {
+    return new SiigoApiError(extracted.code ?? fallback, extracted.message, res.status);
   }
   return new SiigoApiError(
     fallback,
@@ -83,7 +98,7 @@ async function toSiigoError(res: Response): Promise<SiigoApiError> {
  * `service_unavailable` SiigoApiErrors; HTTP errors via `toSiigoError`.
  */
 async function postToSiigo<B, R>(
-  path: string, body: B, bodySchema: z.ZodType<B>, responseSchema: z.ZodType<R>,
+  path: string, body: B, bodySchema: z.ZodType<B>, responseSchema: z.ZodType<R, z.ZodTypeDef, unknown>,
   accessToken: string, partnerId: string, idempotencyKey: string,
 ): Promise<R> {
   const validBody = bodySchema.parse(body);

@@ -33,7 +33,9 @@ export async function POST(req: Request): Promise<NextResponse> {
       return NextResponse.json({ error: { code: err.code, message: err.message } }, { status });
     }
     if (err instanceof z.ZodError) {
-      return NextResponse.json({ error: { code: "invalid_payload", message: "Payload inválido para Siigo." } }, { status: 400 });
+      const detail = err.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join(" | ");
+      console.error("Invoice payload failed Zod validation:", detail);
+      return NextResponse.json({ error: { code: "invalid_payload", message: `Payload inválido para Siigo: ${detail}` } }, { status: 400 });
     }
     const message = err instanceof Error ? err.message : "Error inesperado al emitir la factura.";
     return NextResponse.json({ error: { code: "default", message } }, { status: 500 });

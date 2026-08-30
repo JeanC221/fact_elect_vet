@@ -28,7 +28,7 @@ describe("POST /api/invoices", () => {
   });
 
   it("returns the Siigo response on success", async () => {
-    const siigoResponse = { id: "INV-1", number: "FV-1-123", cufe: "CUFE-123", status: "Accepted" as const };
+    const siigoResponse = { id: "INV-1", number: 123, cufe: "CUFE-123", status: "Accepted" as const, observations: undefined };
     vi.mocked(submitInvoice).mockResolvedValue(siigoResponse);
 
     const req = new Request("http://localhost/api/invoices", {

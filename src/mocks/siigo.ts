@@ -57,7 +57,7 @@ export const mockSiigoInvoicePayloads: SiigoInvoicePayload[] = [
       identification: "1234567890",
       branch_office: 0,
       name: ["María García", "López"],
-      contacts: [{ first_name: "María García", last_name: "López", email: "maria.garcia@email.com", phone: "3105550101" }],
+      contacts: [{ first_name: "María García", last_name: "López", email: "maria.garcia@email.com", phone: { number: "3105550101" } }],
     },
     seller: 62,
     items: [
@@ -82,7 +82,7 @@ export const mockSiigoInvoicePayloads: SiigoInvoicePayload[] = [
       check_digit: "1",
       branch_office: 0,
       name: ["Veterinaria Los Andes S.A.S."],
-      contacts: [{ first_name: "Veterinaria Los Andes", last_name: "S.A.S.", email: "factura@losandes.co", phone: "6045550102" }],
+      contacts: [{ first_name: "Veterinaria Los Andes", last_name: "S.A.S.", email: "factura@losandes.co", phone: { number: "6045550102" } }],
     },
     seller: 62,
     items: [
@@ -108,13 +108,14 @@ export const mockSiigoInvoicePayloads: SiigoInvoicePayload[] = [
 export const mockSiigoInvoiceResponses: SiigoInvoiceResponse[] = [
   {
     id: "INV-7751",
-    number: "FV-1-7751",
+    number: 7751,
     cufe: "CUFE-abc123def456ghi789jkl012mno345pqr678stu901vwx234yz",
     status: "Accepted",
+    observations: undefined,
   },
   {
     id: "INV-7752",
-    number: "FV-1-7752",
+    number: 7752,
     cufe: "",
     status: "Draft",
     observations: "Pendiente de envío a DIAN.",

@@ -38,7 +38,9 @@ export async function POST(req: Request): Promise<NextResponse> {
       return NextResponse.json({ error: { code: err.code, message: err.message } }, { status: err.status ?? 502 });
     }
     if (err instanceof z.ZodError) {
-      return NextResponse.json({ error: { code: "invalid_credentials", message: "Formato de credenciales invalido." } }, { status: 400 });
+      const detail = err.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join(" | ");
+      console.error("Invoice payload failed Zod validation:", detail);
+      return NextResponse.json({ error: { code: "invalid_payload", message: `Payload inválido para Siigo: ${detail}` } }, { status: 400 });
     }
     return NextResponse.json({ error: { code: "default", message: "Error inesperado al sincronizar catalogos." } }, { status: 500 });
   }

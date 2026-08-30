@@ -126,7 +126,7 @@ describe("buildSiigoCustomer", () => {
       name: ["Veterinaria Los Andes S.A.S."],
     });
     expect(customer).not.toHaveProperty("identification_type");
-    expect(customer.contacts?.[0]).toMatchObject({ email: "factura@losandes.co", phone: "6045550102" });
+        expect(customer.contacts?.[0]).toMatchObject({ email: "factura@losandes.co", phone: { number: "6045550102" } });
     expect(customer.contacts?.[0]?.first_name).toBe("Veterinaria Los Andes");
     expect(customer.contacts?.[0]?.last_name).toBe("S.A.S.");
   });

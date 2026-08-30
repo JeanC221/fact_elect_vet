@@ -27,12 +27,19 @@ export const siigoPaymentTypeSchema = z.object({
   type: z.string().trim().min(1).max(50),
 });
 
+/** Phone object shape Siigo expects nested under contacts[].phone (and customer-level phones[]). */
+export const siigoPhoneSchema = z.object({
+  indicative: z.string().trim().max(5).optional(),
+  number: z.string().trim().min(1).max(20),
+  extension: z.string().trim().max(10).optional(),
+});
+
 /** Siigo customer contact (invoice mail dispatch target when mail.send is true). */
 export const siigoContactSchema = z.object({
   first_name: z.string().trim().min(1).max(100).transform(sanitizeText),
   last_name: z.string().trim().min(1).max(100).transform(sanitizeText),
   email: z.string().trim().max(254).email("Invalid contact email"),
-  phone: z.string().trim().max(20).optional(),
+  phone: siigoPhoneSchema.optional(),
 });
 
 /** Official Siigo customer (Invoice + Customer - Create): flat identification + branch_office 0. */
@@ -93,13 +100,28 @@ export const siigoInvoicePayloadSchema = z.object({
   mail: z.object({ send: z.boolean().default(false) }),
 });
 
-export const siigoInvoiceResponseSchema = z.object({
+export const siigoInvoiceRawResponseSchema = z.object({
   id: z.string().trim().min(1),
-  number: z.string().trim().max(50).optional(),
-  cufe: z.string().trim().min(1),
-  status: z.string().trim().min(1),
-  observations: z.string().max(500).optional(),
+  number: z.number().int().optional(),
+  name: z.string().trim().max(50).optional(),
+  stamp: z.object({
+    status: z.string().trim().optional(),
+    cufe: z.string().trim().optional(),
+    cude: z.string().trim().optional(),
+    observations: z.string().optional(),
+    errors: z.string().optional(),
+  }).optional(),
 }).passthrough();
+
+/** Flattened shape this app's UI/history layer consumes (cufe/status/observations at root). */
+export const siigoInvoiceResponseSchema = siigoInvoiceRawResponseSchema.transform((raw) => ({
+  ...raw,
+  cufe: raw.stamp?.cufe ?? "",
+  // Draft (no CUFE yet, stamp.send was false) is the correct default — never
+  // silently assume "Accepted" when Siigo didn't say so.
+  status: raw.stamp?.status ?? "Draft",
+  observations: raw.stamp?.observations as string | undefined,
+}));
 
 export const siigoErrorSchema = z.object({
   code: z.string().trim().min(1).max(50),

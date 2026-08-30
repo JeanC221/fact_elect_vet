@@ -77,7 +77,7 @@ export function provetToSiigoInvoice(
     const fallbackItem = { name: "Consulta Veterinaria General", code: fallbackItemCode ?? DEFAULT_FALLBACK_ITEM_CODE, quantity: 1, unit_price: Math.max(consultation.total || 1, 1), tax_rate: 0, discount: 0 };
   const sourceItems = consultation.items.length > 0 ? consultation.items : [fallbackItem];
   const paymentValue = sumLineTotals(sourceItems);
-  const date = new Date(consultation.created_at).toISOString().slice(0, 10);
+  const date = new Date().toISOString().slice(0, 10);
 
   return {
     document: { id: documentTypeId ?? DEFAULT_DOCUMENT_TYPE_ID },

@@ -119,7 +119,7 @@ export function buildSiigoCustomer(client: Client): SiigoCustomer {
         first_name: sanitizeText(first),
         last_name: sanitizeText(last),
         email,
-        ...(client.phone ? { phone: cleanPhone(client.phone) } : {}),
+        ...(client.phone ? { phone: { number: cleanPhone(client.phone) } } : {}),
       },
     ];
   }
