@@ -11,29 +11,36 @@ import {
   buildPaymentMappingRows,
   defaultItemMapping,
   defaultPaymentMapping,
-  extractProvetItems,
-  extractProvetPaymentMethods,
   parseCatalogMapping,
   reconcileMapping,
   serializeCatalogMapping,
   type CatalogMapping as CatalogMappingState,
 } from "@/mappers/catalogMapping";
-import { mockConsultations } from "@/mocks/provet";
 import { mockSiigoPaymentTypes, mockSiigoProducts } from "@/mocks/siigo";
 import { SIIGO_PRODUCTS_KEY, SIIGO_PAYMENT_TYPES_KEY, FALLBACK_ITEM_CODE_KEY } from "@/hooks/useEmissionOptions";
 import type { SiigoPaymentType, SiigoProduct } from "@/schemas/siigo";
+import type { ConsultationQueueRow } from "@/mappers/consultationQueue";
 
 const STORAGE_KEY = "fact_vet.catalogMapping";
 
+const FIXED_PROVET_PAYMENT_METHODS = [
+  "Efectivo",
+  "Tarjeta Crédito",
+  "Tarjeta Débito",
+  "Transferencia",
+  "Nequi/Daviplata",
+];
+
 export default function MappingPage() {
-  const provetItems = useMemo(() => extractProvetItems(mockConsultations), []);
-  const provetMethods = useMemo(() => extractProvetPaymentMethods(mockConsultations), []);
+  const [provetItems, setProvetItems] = useState<{ code: string; name: string }[]>([]);
+  const provetMethods = FIXED_PROVET_PAYMENT_METHODS;
 
   const [mapping, setMapping] = useState<CatalogMappingState>(() => ({ items: defaultItemMapping(provetItems, mockSiigoProducts), payments: defaultPaymentMapping(provetMethods, mockSiigoPaymentTypes), version: 0, updatedAt: new Date().toISOString() }));
   const [dirty, setDirty] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
+
   const [siigoProducts, setSiigoProducts] = useState<SiigoProduct[]>(mockSiigoProducts);
   const [siigoPaymentTypes, setSiigoPaymentTypes] = useState<SiigoPaymentType[]>(mockSiigoPaymentTypes);
   const [fallbackItemCode, setFallbackItemCode] = useState<string>("");
@@ -55,10 +62,39 @@ export default function MappingPage() {
 
     const stored = window.localStorage.getItem(STORAGE_KEY);
     if (stored) {
-      try { setMapping(reconcileMapping(parseCatalogMapping(stored), provetItems, liveProducts, provetMethods, livePaymentTypes)); }
+      try {
+        const parsed = parseCatalogMapping(stored);
+        setMapping((m) => reconcileMapping({ ...parsed, items: m.items.length ? m.items : parsed.items }, provetItems, liveProducts, provetMethods, livePaymentTypes));
+      }
       catch { /* corrupt blob → keep seeded defaults */ }
     }
     setLoaded(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/consultations");
+        const data = (await res.json()) as { rows?: ConsultationQueueRow[] };
+        if (cancelled || !res.ok || !Array.isArray(data.rows)) return;
+        const seen = new Set<string>();
+        const items: { code: string; name: string }[] = [];
+        for (const row of data.rows) for (const it of row.items) {
+          if (!seen.has(it.code)) { seen.add(it.code); items.push({ code: it.code, name: it.name }); }
+        }
+        setProvetItems(items);
+        const stored = window.localStorage.getItem(STORAGE_KEY);
+        if (stored) {
+          try {
+            const parsed = parseCatalogMapping(stored);
+            setMapping((m) => reconcileMapping({ ...parsed, payments: m.payments }, items, mockSiigoProducts, provetMethods, mockSiigoPaymentTypes));
+          } catch { /* corrupt blob → keep current */ }
+        }
+      } catch { /* network error → item list stays empty; user can still sync catalogs */ }
+    })();
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

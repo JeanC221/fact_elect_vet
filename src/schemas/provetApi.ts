@@ -86,7 +86,7 @@ export const provetInvoiceRawSchema = z
 
 export const provetConsultationItemRawSchema = z
   .object({
-    id: rel,
+    url: z.string().nullable().catch(null),
     consultation: rel.nullable().catch(null),
     patient: rel.nullable().catch(null),
     code: txt,

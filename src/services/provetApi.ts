@@ -43,7 +43,9 @@ async function fetchProvetPage<S extends z.ZodTypeAny>(
       `Provet ${path} falló (HTTP ${res.status}).`,
     );
   }
-  const parsed = provetPaginatedSchema(schema).safeParse(await res.json());
+  const parsedJson = await res.json();
+  console.info(`[DEBUG] fetchProvetPage path="${path}" first result:`, JSON.stringify(parsedJson?.results?.[0]));
+  const parsed = provetPaginatedSchema(schema).safeParse(parsedJson);
   if (!parsed.success) {
     throw new ProvetApiError("parse_failed", `Respuesta de Provet ${path} con formato inesperado.`);
   }

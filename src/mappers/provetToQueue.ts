@@ -88,16 +88,16 @@ export function buildQueueFromProvet(
     list.push(ph);
     phonesByClient.set(cid, list);
   }
-  // Real billable line items, grouped by consultation. `hide_on_consultation`
-  // items are internal notes/steps, not billable — never sent to Siigo.
   const itemsByConsultation = new Map<string, QuickEditItem[]>();
   for (const it of consultationItems) {
     if (it.hide_on_consultation) continue;
     const cid = extractId(it.consultation);
     if (!cid) continue;
-    const list = itemsByConsultation.get(cid) ?? [];
     const unitPriceWithVat = it.price_with_vat || it.price * (1 + it.vat_percentage / 100);
-    list.push({ code: it.code || it.id, name: it.name, quantity: it.quantity, lineTotal: unitPriceWithVat * it.quantity });
+    if (unitPriceWithVat <= 0) continue;
+    const list = itemsByConsultation.get(cid) ?? [];
+    const itemCode = it.code || extractId(it.url) || `ITEM-${cid}-${list.length}`;
+    list.push({ code: itemCode, name: it.name, quantity: it.quantity, lineTotal: unitPriceWithVat * it.quantity });
     itemsByConsultation.set(cid, list);
   }
 
