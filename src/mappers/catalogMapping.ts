@@ -33,6 +33,7 @@ export interface PaymentMappingRow {
   siigoPaymentTypeId: number | null;
   siigoPaymentTypeName: string | null;
   siigoPaymentCategory: SiigoPaymentType["type"] | null;
+  siigoPaymentActive: boolean | null;
   mapped: boolean;
 }
 
@@ -73,7 +74,8 @@ export function buildPaymentMappingRows(methods: string[], siigoPaymentTypes: Si
     const id = byMethod.get(method) ?? null;
     const pt = id ? byId.get(id) ?? null : null;
     return { provetMethod: method, siigoPaymentTypeId: pt ? id : null,
-      siigoPaymentTypeName: pt?.name ?? null, siigoPaymentCategory: pt?.type ?? null, mapped: Boolean(pt) };
+      siigoPaymentTypeName: pt?.name ?? null, siigoPaymentCategory: pt?.type ?? null,
+      siigoPaymentActive: pt?.active ?? null, mapped: Boolean(pt) };
   });
 }
 /** Auto-match items by exact code equality; others null. */

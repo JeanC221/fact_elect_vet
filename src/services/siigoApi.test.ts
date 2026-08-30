@@ -13,6 +13,9 @@ import { mockSiigoInvoicePayloads, mockSiigoInvoiceResponses } from "@/mocks/sii
 
 const payload = mockSiigoInvoicePayloads[0];
 const okBody = mockSiigoInvoiceResponses[0];
+// Raw Siigo wire shape (cufe/status nested under stamp) — what fetch() actually
+// receives; `okBody` above is the already-flattened shape this app consumes.
+const okRawBody = { id: okBody.id, number: okBody.number, stamp: { status: okBody.status, cufe: okBody.cufe } };
 
 const fakeRes = (body: unknown, status = 200): Response =>
   ({
@@ -32,7 +35,7 @@ const headersAt = (i: number): Record<string, string> =>
 
 describe("submitInvoice", () => {
   it("POSTs to /v1/invoices with mandatory headers and returns a parsed response", async () => {
-    fetchMock.mockResolvedValue(fakeRes(okBody));
+    fetchMock.mockResolvedValue(fakeRes(okRawBody));
     const res = await submitInvoice(payload, "tok-123", "PARTNER1");
     const [url, init] = callAt(0);
     const headers = headersAt(0);
@@ -45,11 +48,11 @@ describe("submitInvoice", () => {
     expect(JSON.parse(String(init.body)).customer.name).toEqual(
       payload.customer.name,
     );
-    expect(res).toEqual(okBody);
+    expect(res).toMatchObject({ id: okBody.id, number: okBody.number, cufe: okBody.cufe, status: okBody.status });
   });
 
   it("generates a unique Idempotency-Key per request unless one is provided", async () => {
-    fetchMock.mockResolvedValue(fakeRes(okBody));
+    fetchMock.mockResolvedValue(fakeRes(okRawBody));
     await submitInvoice(payload, "t", "PARTNER1");
     await submitInvoice(payload, "t", "PARTNER1");
     expect(headersAt(0)["Idempotency-Key"]).not.toBe(
@@ -60,7 +63,7 @@ describe("submitInvoice", () => {
   });
 
   it("never serializes a root `total` key, even if a rogue caller injects one", async () => {
-    fetchMock.mockResolvedValue(fakeRes(okBody));
+    fetchMock.mockResolvedValue(fakeRes(okRawBody));
     const rogue = { ...payload, total: 999 } as unknown as typeof payload;
     await submitInvoice(rogue, "tok-123", "PARTNER1");
     const body = JSON.parse(String(callAt(0)[1].body)) as Record<string, unknown>;
@@ -106,7 +109,7 @@ describe("submitInvoice", () => {
 
   it("asserts the outgoing payload structurally matches the official Siigo contract", async () => {
     const spy = vi.spyOn(console, "info").mockImplementation(() => {});
-    fetchMock.mockResolvedValue(fakeRes(okBody));
+    fetchMock.mockResolvedValue(fakeRes(okRawBody));
     await submitInvoice(payload, "tok-123", "PARTNER1");
     const sent = JSON.parse(String(callAt(0)[1].body));
     expect(sent).toHaveProperty("document.id");
@@ -125,7 +128,7 @@ describe("submitInvoice", () => {
   });
 
   it("throws when the success body fails response schema validation", async () => {
-    fetchMock.mockResolvedValue(fakeRes({ id: "INV-1" }, 200));
+    fetchMock.mockResolvedValue(fakeRes({ id: "" }, 200)); // empty id fails min(1)
     await expect(submitInvoice(payload, "t", "PARTNER1")).rejects.toThrow();
   });
 });

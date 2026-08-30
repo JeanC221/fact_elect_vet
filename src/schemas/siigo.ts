@@ -25,6 +25,8 @@ export const siigoPaymentTypeSchema = z.object({
   id: z.number().int().positive(),
   name: z.string().trim().min(1).max(50),
   type: z.string().trim().min(1).max(50),
+  active: z.boolean().optional().default(true),
+  due_date: z.boolean().optional(),
 });
 
 /** Phone object shape Siigo expects nested under contacts[].phone (and customer-level phones[]). */

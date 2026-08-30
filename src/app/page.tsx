@@ -132,7 +132,7 @@ export default function HomePage() {
       siigoCreditNoteSchema.parse(cn);
       const idemKey = generateIdempotencyKey();
       const response = await retryWithBackoff(() => submitCreditNote(cn, "", "", idemKey), { maxRetries: 5 });
-      setHistory((prev) => prev.map((e) => e.invoiceId === annulTarget.invoiceId ? { ...e, status: "Annulled" as InvoiceStatus, observations: `Anulada vía nota crédito ${response.id}` } : e).concat({ invoiceId: response.id, cufe: response.cufe, status: "Accepted" as InvoiceStatus, consultationId: annulTarget.consultationId, observations: `Nota crédito que anula ${annulTarget.invoiceId}`, emittedAt: new Date() }));
+      setHistory((prev) => prev.map((e) => e.invoiceId === annulTarget.invoiceId ? { ...e, status: "Annulled" as InvoiceStatus, observations: `Anulada vía nota crédito ${response.id}` } : e).concat({ invoiceId: response.id, cufe: response.cufe, status: "Accepted" as InvoiceStatus, consultationId: annulTarget.consultationId, paymentMethod: annulTarget.paymentMethod, observations: `Nota crédito que anula ${annulTarget.invoiceId}`, emittedAt: new Date() }));
       setAnnulTarget(null);
       showToast(`Nota crédito ${response.id} generada · Factura ${annulTarget.invoiceId} anulada`);
     } catch (error) { setAnnulError(translateSiigoError(error).message); } finally { setIsAnnulling(false); }
@@ -156,7 +156,7 @@ export default function HomePage() {
         return siigoInvoiceResponseSchema.parse(data);
       }, { maxRetries: 5, onRetry: (n) => setRetryAttempt(n) });
       setRowStatus(selectedId, mapSiigoInvoiceStatus(response.status));
-      setHistory((prev) => [...prev, toInvoiceHistoryEntry(response, selectedId, new Date())]);
+      setHistory((prev) => [...prev, toInvoiceHistoryEntry(response, selectedId, new Date(), values.paymentMethod)]);
       const number = response.number ?? response.id;
       if (response.status === "Accepted") { setSelectedId(null); showToast(`Factura ${number} generada con éxito · CUFE: ${response.cufe}`); }
       else if (response.status === "Rejected") { setTranslatedError({ code: "rejected", message: "La DIAN rechazó la factura. Corrija los datos y reintente.", severity: "error", quickAction: "none", retryable: false }); }

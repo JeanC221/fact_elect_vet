@@ -20,10 +20,8 @@ const COLUMNS = [
 ] as const;
 
 const CATEGORY_LABELS: Record<string, string> = {
-  cash: "Efectivo",
-  card: "Tarjeta",
-  transfer: "Transferencia",
-  credit: "Crédito",
+  Cartera: "Cartera (venta)",
+  CarteraProveedor: "Cartera/Proveedor",
 };
 
 export function PaymentMapping({ rows, siigoPaymentTypes, onSelect }: PaymentMappingProps) {
@@ -34,6 +32,11 @@ export function PaymentMapping({ rows, siigoPaymentTypes, onSelect }: PaymentMap
     const start = (page - 1) * pageSize;
     return rows.slice(start, start + pageSize);
   }, [rows, page, pageSize]);
+
+  const selectableTypes = useMemo(
+    () => siigoPaymentTypes.filter((pt) => pt.active !== false),
+    [siigoPaymentTypes],
+  );
 
   const handlePageSizeChange = (size: number) => {
     setPageSize(size as PageSizeOption);
@@ -89,18 +92,35 @@ export function PaymentMapping({ rows, siigoPaymentTypes, onSelect }: PaymentMap
                       aria-label={`Tipo de pago Siigo para ${row.provetMethod}`}
                     >
                       <option value="">— Sin mapear —</option>
-                      {siigoPaymentTypes.map((pt) => (
+                      {selectableTypes.map((pt) => (
                         <option key={pt.id} value={pt.id}>
                           {pt.name}
                         </option>
                       ))}
+                      {/* Keep a stale/inactive selection visible & selected rather than vanishing from the list. */}
+                      {row.siigoPaymentTypeId != null && row.siigoPaymentActive === false && (
+                        <option value={row.siigoPaymentTypeId}>
+                          {row.siigoPaymentTypeName} (inactivo)
+                        </option>
+                      )}
                     </select>
                   </td>
                   <td className="border-l border-grid-line px-3 py-2 text-muted">
-                    {row.siigoPaymentCategory ? CATEGORY_LABELS[row.siigoPaymentCategory] ?? row.siigoPaymentCategory : "—"}
+                    {row.siigoPaymentCategory === "CarteraProveedor" ? (
+                      <span className="inline-flex items-center gap-1 text-status-draft-text" title="Puede fallar en facturas de venta según la configuración de la cuenta. Prefiera una opción marcada solo 'Cartera'.">
+                        <AlertTriangle className="h-3 w-3 shrink-0" />
+                        {CATEGORY_LABELS.CarteraProveedor}
+                      </span>
+                    ) : (
+                      row.siigoPaymentCategory ? CATEGORY_LABELS[row.siigoPaymentCategory] ?? row.siigoPaymentCategory : "—"
+                    )}
                   </td>
                   <td className="border-l border-grid-line px-3 py-2">
-                    {row.mapped ? (
+                    {row.mapped && row.siigoPaymentActive === false ? (
+                      <span className="inline-flex items-center gap-1 rounded-md border border-status-rejected-border bg-status-rejected-bg px-2 py-0.5 text-xs font-semibold text-status-rejected-text" title="Esta forma de pago está inactiva en Siigo Nube. Emitir con ella fallará.">
+                        <AlertTriangle className="h-3 w-3" /> Inactivo en Siigo
+                      </span>
+                    ) : row.mapped ? (
                       <span className="inline-flex items-center gap-1 rounded-md border border-status-accepted-border bg-status-accepted-bg px-2 py-0.5 text-xs font-semibold text-status-accepted-text">
                         <CheckCircle2 className="h-3 w-3" /> Mapeado
                       </span>

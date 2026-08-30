@@ -11,6 +11,8 @@ export interface InvoiceHistoryEntry {
   cufe: string;
   status: InvoiceStatus;
   consultationId: string;
+  /** Provet payment method label chosen by staff at emission time (e.g. "Efectivo"). Not sourced from Provet's API — selected manually in the Quick-Edit drawer. */
+  paymentMethod: string;
   observations?: string;
   emittedAt: Date;
 }
@@ -21,6 +23,7 @@ export const invoiceHistoryEntrySchema = z.object({
   cufe: z.string(),
   status: z.enum(["Accepted", "Draft", "Rejected", "Annulled"]),
   consultationId: z.string().trim().min(1),
+  paymentMethod: z.string().default(""),
   observations: z.string().optional(),
   emittedAt: z.coerce.date(),
 });
@@ -49,6 +52,7 @@ export const HISTORY_STATUS_FILTERS: HistoryStatusFilter[] = [
   "Annulled",
 ];
 
+/** Known Siigo invoice statuses this app models explicitly. */
 const KNOWN_INVOICE_STATUSES: readonly InvoiceStatus[] = ["Accepted", "Draft", "Rejected", "Annulled"];
 
 export function mapSiigoInvoiceStatus(raw: string): InvoiceStatus {
@@ -62,12 +66,14 @@ export function toInvoiceHistoryEntry(
   response: SiigoInvoiceResponse,
   consultationId: string,
   emittedAt: Date,
+  paymentMethod: string = "",
 ): InvoiceHistoryEntry {
   return {
     invoiceId: response.id,
     cufe: response.cufe,
     status: mapSiigoInvoiceStatus(response.status),
     consultationId,
+    paymentMethod,
     observations: response.observations,
     emittedAt,
   };
@@ -90,7 +96,7 @@ export function buildInvoiceHistory(
       clientDoc: r?.clientDoc ?? "—",
       patientName: r?.patientName ?? "Paciente desconocido",
       total: r?.total ?? 0,
-      paymentMethod: r?.paymentMethod ?? "—",
+      paymentMethod: e.paymentMethod || "Pendiente",
       emittedAt: e.emittedAt,
     };
   });

@@ -42,9 +42,9 @@ export const mockSiigoProducts: SiigoProduct[] = [
 ];
 
 export const mockSiigoPaymentTypes: SiigoPaymentType[] = [
-  { id: 10948, name: "Efectivo", type: "cash" },
-  { id: 5636, name: "Tarjeta Crédito", type: "card" },
-  { id: 8466, name: "Transferencia Bancaria", type: "transfer" },
+  { id: 10948, name: "Efectivo", type: "cash", active: true },
+  { id: 5636, name: "Tarjeta Crédito", type: "card", active: true },
+  { id: 8466, name: "Transferencia Bancaria", type: "transfer", active: true },
 ];
 
 export const mockSiigoInvoicePayloads: SiigoInvoicePayload[] = [

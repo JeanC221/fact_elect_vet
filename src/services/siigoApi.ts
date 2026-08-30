@@ -38,13 +38,6 @@ interface ExtractedSiigoError {
   message: string;
 }
 
-/**
- * Extracts code + message from Siigo's documented error envelope:
- * `{ Status, Errors: [{ Code, Message, Params, Detail }] }` (PascalCase,
- * plural `Errors`) — the ACTUAL shape per developers.siigo.com/docs, distinct
- * from the lowercase `{code, message}` this app's `siigoErrorSchema` also
- * accepts defensively. Falls back to a plain string or `.message` field.
- */
 function extractSiigoError(body: unknown): ExtractedSiigoError | null {
   if (typeof body === "string" && body.trim().length > 0) return { code: null, message: body.trim() };
   if (body && typeof body === "object") {
@@ -90,13 +83,8 @@ async function toSiigoError(res: Response): Promise<SiigoApiError> {
   );
 }
 
-/**
- * Shared live POST against the Siigo Nube API with mandatory headers per spec:
- * `Partner-Id` (3–100 alnum), `Idempotency-Key` (alnum, max 30 — reuse the same
- * key across retries to avoid duplicates), `Authorization` (Bearer token).
- * Body and success response are Zod-validated; network failures surface as
- * `service_unavailable` SiigoApiErrors; HTTP errors via `toSiigoError`.
- */
+const SIIGO_POST_TIMEOUT_MS = 120_000;
+
 async function postToSiigo<B, R>(
   path: string, body: B, bodySchema: z.ZodType<B>, responseSchema: z.ZodType<R, z.ZodTypeDef, unknown>,
   accessToken: string, partnerId: string, idempotencyKey: string,
@@ -105,6 +93,8 @@ async function postToSiigo<B, R>(
   const validPartnerId = partnerIdHeaderSchema.parse(partnerId);
   const validIdempotencyKey = idempotencyKeyHeaderSchema.parse(idempotencyKey);
   console.info(`[Siigo] payload validated against official contract before POST ${path}`);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SIIGO_POST_TIMEOUT_MS);
   let res: Response;
   try {
     res = await fetch(`${SIIGO_API_BASE_URL}${path}`, {
@@ -116,19 +106,23 @@ async function postToSiigo<B, R>(
         Authorization: `Bearer ${accessToken}`,
       },
       body: JSON.stringify(validBody),
+      signal: controller.signal,
     });
-  } catch {
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new SiigoApiError(
+        "request_timeout",
+        `Siigo no respondió en ${SIIGO_POST_TIMEOUT_MS / 1000}s. La factura puede haberse creado igualmente — revise el historial antes de reintentar.`,
+      );
+    }
     throw new SiigoApiError("service_unavailable", "Network failure while reaching the Siigo API.");
+  } finally {
+    clearTimeout(timer);
   }
   if (!res.ok) throw await toSiigoError(res);
   return responseSchema.parse(await res.json());
 }
 
-/**
- * Submit a Zod-validated invoice payload to Siigo Nube (live POST /v1/invoices).
- * DIAN stamping is governed by the payload's `stamp.send` flag, resolved
- * upstream via `stampSendFor(mode)` — sandbox stays false, production enables it.
- */
 export function submitInvoice(
   payload: SiigoInvoicePayload, accessToken: string, partnerId: string,
   idempotencyKey: string = generateIdempotencyKey(),
@@ -136,10 +130,6 @@ export function submitInvoice(
   return postToSiigo("/v1/invoices", payload, siigoInvoicePayloadSchema, siigoInvoiceResponseSchema, accessToken, partnerId, idempotencyKey);
 }
 
-/**
- * Submit a Zod-validated credit note (live POST /v1/credit-notes) annulling the
- * base invoice (Resolution 948). V1-aligned: document, base_document, payments.
- */
 export function submitCreditNote(
   payload: SiigoCreditNotePayload, accessToken: string, partnerId: string,
   idempotencyKey: string = generateIdempotencyKey(),
@@ -158,10 +148,6 @@ function base64ToBlob(base64: string, mimeType: string): Blob {
   return new Blob([bytes], { type: mimeType });
 }
 
-/**
- * Fetch an invoice document (GET /v1/invoices/{id}/{format}). Handles the
- * base64-JSON shape first and falls back to a raw binary body.
- */
 async function fetchInvoiceFile(
   invoiceId: string, format: "pdf" | "xml", accessToken: string, partnerId: string,
 ): Promise<Blob> {

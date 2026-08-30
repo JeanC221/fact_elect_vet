@@ -8,6 +8,7 @@ import type { SiigoProduct } from "@/schemas/siigo";
 const MAPPING_KEY = "fact_vet.catalogMapping";
 const CREDENTIALS_KEY = "fact_vet.credentialsConfig";
 export const SIIGO_PRODUCTS_KEY = "fact_vet.siigoProducts";
+export const SIIGO_PAYMENT_TYPES_KEY = "fact_vet.siigoPaymentTypes";
 export const FALLBACK_ITEM_CODE_KEY = "fact_vet.fallbackItemCode";
 
 function readFallbackItemCode(): string | undefined {
@@ -52,12 +53,6 @@ function readMapping(): CatalogMapping {
   return DEFAULT_MAPPING;
 }
 
-/**
- * Reactive emission options: reads localStorage synchronously on mount and
- * re-reads on the window `storage` event (fires when another tab/route writes
- * to localStorage), so the emission flow picks up mapping/credential changes
- * saved in Settings without a full page reload.
- */
 export function useEmissionOptions(): ProvetToSiigoOptions {
   const [mode, setMode] = useState<EnvironmentMode>(readMode);
   const [mapping, setMapping] = useState<CatalogMapping>(readMapping);
@@ -74,6 +69,5 @@ export function useEmissionOptions(): ProvetToSiigoOptions {
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
   }, []);
-
   return { mapping, siigoProducts, mode, fallbackItemCode };
 }

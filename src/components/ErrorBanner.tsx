@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, RefreshCw, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, RefreshCw, X } from "lucide-react";
 import type {
   QuickAction,
   TranslatedError,
@@ -59,7 +59,10 @@ export function ErrorBanner({
 
   if (!error) return null;
 
-  const Icon = error.severity === "warning" ? RefreshCw : AlertTriangle;
+  // "Draft" (guardada en Siigo, aún sin CUFE/DIAN) is a successful outcome in
+  // sandbox mode — never show it with the "warning/error" icon, which reads
+  // as a failure even though the invoice was created correctly.
+  const Icon = error.quickAction === "save_draft" ? CheckCircle2 : error.severity === "warning" ? RefreshCw : AlertTriangle;
   const label = ACTION_LABELS[error.quickAction];
 
   return (

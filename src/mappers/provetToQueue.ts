@@ -6,11 +6,6 @@ import type {
 } from "@/schemas/provetApi";
 import type { ConsultationQueueRow, InvoiceStatus, ProvetStatus } from "@/mappers/consultationQueue";
 
-/**
- * If a relation value is a hyperlinked URL, return its trailing id segment;
- * otherwise return the value unchanged (it is already a bare id). Provet
- * relations may be either form depending on the serializer.
- */
 export function extractId(rel: string | null | undefined): string | null {
   if (!rel) return null;
   const trimmed = rel.trim();
@@ -33,12 +28,6 @@ const clientDoc = (c: ProvetClientRaw | undefined): string => {
   return c.vat_number?.trim() || c.id_number?.trim() || "—";
 };
 
-/**
- * Pure O(n) join of Provet raw resources into dashboard queue rows.
- * Resolves client/patient names and the linked invoice total; sets
- * `provetStatus` to "closed" when the consultation has a finished date or
- * a linked invoice, otherwise "pending".
- */
 export function buildQueueFromProvet(
   consultations: ProvetConsultationRaw[],
   clients: ProvetClientRaw[],
@@ -77,7 +66,7 @@ export function buildQueueFromProvet(
       clientDoc: clientDoc(client),
       patientName: patient?.name ?? "Paciente desconocido",
       total: invoice?.total_with_vat ?? invoice?.total ?? 0,
-      paymentMethod: "—",
+      paymentMethod: "Pendiente",
       provetStatus,
       invoiceStatus: "Draft",
       createdAt: new Date(con.created),
@@ -85,11 +74,6 @@ export function buildQueueFromProvet(
   });
 }
 
-/**
- * Merge freshly polled rows into the existing queue preserving the DIAN
- * `invoiceStatus` of rows already processed (Accepted/Draft/Rejected) so a
- * manual refresh never wipes emission badges. Pure O(n).
- */
 export function mergeQueueRows(
   prev: ConsultationQueueRow[],
   fresh: ConsultationQueueRow[],
