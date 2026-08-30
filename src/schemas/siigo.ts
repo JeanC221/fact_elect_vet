@@ -17,6 +17,7 @@ export const siigoProductSchema = z.object({
   id: z.string().trim().min(1),
   code: z.string().trim().min(1).max(50),
   name: z.string().trim().min(1).max(200).transform(sanitizeText),
+  // Accept Siigo's real field, but don't fail parsing when it's absent/differently-shaped.
   tax_classification: z.string().trim().optional(),
   unit: z.object({ code: z.string().optional(), name: z.string().optional() }).optional(),
 }).passthrough();
@@ -119,8 +120,6 @@ export const siigoInvoiceRawResponseSchema = z.object({
 export const siigoInvoiceResponseSchema = siigoInvoiceRawResponseSchema.transform((raw) => ({
   ...raw,
   cufe: raw.stamp?.cufe ?? "",
-  // Draft (no CUFE yet, stamp.send was false) is the correct default — never
-  // silently assume "Accepted" when Siigo didn't say so.
   status: raw.stamp?.status ?? "Draft",
   observations: raw.stamp?.observations as string | undefined,
 }));

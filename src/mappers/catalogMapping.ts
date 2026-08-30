@@ -33,6 +33,7 @@ export interface PaymentMappingRow {
   siigoPaymentTypeId: number | null;
   siigoPaymentTypeName: string | null;
   siigoPaymentCategory: SiigoPaymentType["type"] | null;
+  /** Whether the currently-mapped Siigo payment type is enabled ("En uso" in Siigo Nube). Null when unmapped. */
   siigoPaymentActive: boolean | null;
   mapped: boolean;
 }

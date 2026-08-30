@@ -34,29 +34,28 @@ export default function MappingPage() {
   const [loaded, setLoaded] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
-  const [siigoProducts, setSiigoProducts] = useState<SiigoProduct[]>(() => {
-    if (typeof window === "undefined") return mockSiigoProducts;
-    try {
-      const raw = window.localStorage.getItem(SIIGO_PRODUCTS_KEY);
-      return raw ? (JSON.parse(raw) as SiigoProduct[]) : mockSiigoProducts;
-    } catch { return mockSiigoProducts; }
-  });
-  const [siigoPaymentTypes, setSiigoPaymentTypes] = useState<SiigoPaymentType[]>(() => {
-    if (typeof window === "undefined") return mockSiigoPaymentTypes;
-    try {
-      const raw = window.localStorage.getItem(SIIGO_PAYMENT_TYPES_KEY);
-      return raw ? (JSON.parse(raw) as SiigoPaymentType[]) : mockSiigoPaymentTypes;
-    } catch { return mockSiigoPaymentTypes; }
-  });
-  const [fallbackItemCode, setFallbackItemCode] = useState<string>(() => {
-    if (typeof window === "undefined") return "";
-    return window.localStorage.getItem(FALLBACK_ITEM_CODE_KEY) ?? "";
-  });
+  const [siigoProducts, setSiigoProducts] = useState<SiigoProduct[]>(mockSiigoProducts);
+  const [siigoPaymentTypes, setSiigoPaymentTypes] = useState<SiigoPaymentType[]>(mockSiigoPaymentTypes);
+  const [fallbackItemCode, setFallbackItemCode] = useState<string>("");
 
   useEffect(() => {
+    let liveProducts = mockSiigoProducts;
+    let livePaymentTypes = mockSiigoPaymentTypes;
+    try {
+      const rawProducts = window.localStorage.getItem(SIIGO_PRODUCTS_KEY);
+      if (rawProducts) liveProducts = JSON.parse(rawProducts) as SiigoProduct[];
+    } catch { /* corrupt -> mocks */ }
+    try {
+      const rawPaymentTypes = window.localStorage.getItem(SIIGO_PAYMENT_TYPES_KEY);
+      if (rawPaymentTypes) livePaymentTypes = JSON.parse(rawPaymentTypes) as SiigoPaymentType[];
+    } catch { /* corrupt -> mocks */ }
+    setSiigoProducts(liveProducts);
+    setSiigoPaymentTypes(livePaymentTypes);
+    setFallbackItemCode(window.localStorage.getItem(FALLBACK_ITEM_CODE_KEY) ?? "");
+
     const stored = window.localStorage.getItem(STORAGE_KEY);
     if (stored) {
-      try { setMapping(reconcileMapping(parseCatalogMapping(stored), provetItems, siigoProducts, provetMethods, siigoPaymentTypes)); }
+      try { setMapping(reconcileMapping(parseCatalogMapping(stored), provetItems, liveProducts, provetMethods, livePaymentTypes)); }
       catch { /* corrupt blob → keep seeded defaults */ }
     }
     setLoaded(true);
