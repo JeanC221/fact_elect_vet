@@ -19,6 +19,7 @@ export interface ProvetToSiigoOptions {
   documentTypeId?: number;
   /** Active Siigo seller id (default: DEFAULT_SELLER_ID). */
   sellerId?: number;
+  fallbackItemCode?: string;
 }
 
 /** Default Siigo invoice document type (Factura de Venta — explicit sandbox default, override via options.documentTypeId). */
@@ -26,6 +27,7 @@ export const DEFAULT_DOCUMENT_TYPE_ID = 2372;
 
 /** Default Siigo seller id (explicit sandbox default — override via options.sellerId, never a credential). */
 export const DEFAULT_SELLER_ID = 62;
+export const DEFAULT_FALLBACK_ITEM_CODE = "FALLBACK-CVG-01";
 
 /** Empty-catalog default — emission REQUIRES an explicit dynamic payment mapping. */
 const DEFAULT_OPTIONS: ProvetToSiigoOptions = {
@@ -62,7 +64,7 @@ export function provetToSiigoInvoice(
   options: ProvetToSiigoOptions = DEFAULT_OPTIONS,
 ): SiigoInvoicePayload {
   void patient; // reserved for future audit/logging
-  const { mapping, siigoProducts, mode, documentTypeId, sellerId } = options;
+  const { mapping, siigoProducts, mode, documentTypeId, sellerId, fallbackItemCode } = options;
 
   const productIdByItemCode = new Map(
     mapping.items.map((m) => [m.provetCode, m.siigoProductId]),
@@ -72,7 +74,7 @@ export function provetToSiigoInvoice(
   const paymentTypeId = resolvePaymentTypeId(consultation.payment_method, mapping.payments);
 
   const stampSend = stampSendFor(mode);
-  const fallbackItem = { name: "Consulta Veterinaria General", code: "FALLBACK-CVG-01", quantity: 1, unit_price: Math.max(consultation.total || 1, 1), tax_rate: 0, discount: 0 };
+    const fallbackItem = { name: "Consulta Veterinaria General", code: fallbackItemCode ?? DEFAULT_FALLBACK_ITEM_CODE, quantity: 1, unit_price: Math.max(consultation.total || 1, 1), tax_rate: 0, discount: 0 };
   const sourceItems = consultation.items.length > 0 ? consultation.items : [fallbackItem];
   const paymentValue = sumLineTotals(sourceItems);
   const date = new Date(consultation.created_at).toISOString().slice(0, 10);

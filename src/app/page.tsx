@@ -18,6 +18,7 @@ import {
 import {
   buildInvoiceHistory,
   toInvoiceHistoryEntry,
+  mapSiigoInvoiceStatus,
   type InvoiceHistoryEntry,
   type InvoiceHistoryRow,
 } from "@/mappers/invoiceHistory";
@@ -150,7 +151,7 @@ export default function HomePage() {
         if (!res.ok) throw new SiigoApiError(data.error?.code ?? "default", data.error?.message ?? "Error al emitir la factura.");
         return siigoInvoiceResponseSchema.parse(data);
       }, { maxRetries: 5, onRetry: (n) => setRetryAttempt(n) });
-      setRowStatus(selectedId, response.status);
+            setRowStatus(selectedId, mapSiigoInvoiceStatus(response.status));
       setHistory((prev) => [...prev, toInvoiceHistoryEntry(response, selectedId, new Date())]);
       const number = response.number ?? response.id;
       if (response.status === "Accepted") { setSelectedId(null); showToast(`Factura ${number} generada con éxito · CUFE: ${response.cufe}`); }

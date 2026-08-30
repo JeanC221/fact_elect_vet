@@ -49,6 +49,14 @@ export const HISTORY_STATUS_FILTERS: HistoryStatusFilter[] = [
   "Annulled",
 ];
 
+const KNOWN_INVOICE_STATUSES: readonly InvoiceStatus[] = ["Accepted", "Draft", "Rejected", "Annulled"];
+
+export function mapSiigoInvoiceStatus(raw: string): InvoiceStatus {
+  return (KNOWN_INVOICE_STATUSES as readonly string[]).includes(raw)
+    ? (raw as InvoiceStatus)
+    : "Draft";
+}
+
 /** Pure factory: build a persisted entry from a Siigo response + consultation link. */
 export function toInvoiceHistoryEntry(
   response: SiigoInvoiceResponse,
@@ -58,7 +66,7 @@ export function toInvoiceHistoryEntry(
   return {
     invoiceId: response.id,
     cufe: response.cufe,
-    status: response.status,
+    status: mapSiigoInvoiceStatus(response.status),
     consultationId,
     observations: response.observations,
     emittedAt,

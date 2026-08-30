@@ -30,6 +30,7 @@ export async function POST(req: Request): Promise<NextResponse> {
     ]);
     return NextResponse.json(syncResponseSchema.parse({ paymentTypes, products }));
   } catch (err) {
+    //**console.error("SYNC CATCH:", err);
     if (err instanceof SiigoAuthError) {
       return NextResponse.json({ error: { code: err.code, message: "Error de autenticacion con Siigo." } }, { status: 502 });
     }

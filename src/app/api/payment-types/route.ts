@@ -21,7 +21,7 @@ export async function GET(): Promise<NextResponse> {
     const baseUrl = process.env.SIIGO_API_BASE_URL ?? "https://api.siigo.com";
     let res: Response;
     try {
-      res = await fetch(`${baseUrl}/v1/payment-types`, {
+      res = await fetch(`${baseUrl}/v1/payment-types?document_type=FV`, {
         method: "GET",
         headers: { "Partner-Id": partnerId, Authorization: `Bearer ${accessToken}` },
       });

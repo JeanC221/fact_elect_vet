@@ -24,6 +24,7 @@ vi.stubGlobal("fetch", fetchMock);
 afterEach(() => {
   fetchMock.mockReset();
   vi.mocked(getSiigoAccessToken).mockReset();
+  delete process.env.SIIGO_SANDBOX_MODE;
 });
 
 describe("aggregateOverall", () => {
@@ -102,6 +103,7 @@ describe("checkSiigoHealth", () => {
 });
 describe("checkHealth", () => {
   const setup = () => {
+    delete process.env.SIIGO_SANDBOX_MODE;
     process.env.PROVET_BASE_URL = "https://provet.test";
     process.env.PROVET_API_KEY = "provet-key-001";
     fetchMock.mockResolvedValue(fakeRes(true));
@@ -124,6 +126,7 @@ describe("checkHealth", () => {
     expect(provetCall[1].headers).toEqual({ "x-api-key": "provet-key-001" });
   });
   it("propagates Siigo offline to DIAN and overall", async () => {
+    delete process.env.SIIGO_SANDBOX_MODE;
     fetchMock.mockResolvedValue(fakeRes(true));
     vi.mocked(getSiigoAccessToken).mockRejectedValue(new SiigoAuthError("auth_failed", "Credenciales inválidas"));
     const report = await checkHealth();

@@ -42,6 +42,17 @@ async function getFromSiigo(
   return schema.parse(await res.json());
 }
 
+/** Siigo's paginated list envelope — GET /v1/products returns this, not a bare array. */
+const siigoPaginatedSchema = <T extends z.ZodTypeAny>(itemSchema: T) =>
+  z.object({
+    pagination: z.object({
+      page: z.number().int().nonnegative(),
+      page_size: z.number().int().nonnegative(),
+      total_results: z.number().int().nonnegative(),
+    }).partial(),
+    results: z.array(itemSchema),
+  });
+
 /** Fetch active Siigo payment types (GET /v1/payment-types?document_type=FV). */
 export async function fetchPaymentTypes(
   accessToken: string, partnerId: string, documentType = "FV",
@@ -50,9 +61,11 @@ export async function fetchPaymentTypes(
   return z.array(siigoPaymentTypeSchema).parse(await getFromSiigo(path, z.array(siigoPaymentTypeSchema), accessToken, partnerId));
 }
 
-/** Fetch active Siigo products (GET /v1/products). */
+/** Fetch active Siigo products (GET /v1/products — paginated: unwraps `results`). */
 export async function fetchProducts(
   accessToken: string, partnerId: string,
 ): Promise<SiigoProduct[]> {
-  return z.array(siigoProductSchema).parse(await getFromSiigo("/v1/products", z.array(siigoProductSchema), accessToken, partnerId));
+  const schema = siigoPaginatedSchema(siigoProductSchema);
+  const page = await getFromSiigo("/v1/products", schema, accessToken, partnerId) as z.infer<typeof schema>;
+  return page.results;
 }

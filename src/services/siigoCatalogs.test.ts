@@ -43,20 +43,25 @@ describe("fetchPaymentTypes", () => {
 });
 
 describe("fetchProducts", () => {
-  it("GETs /v1/products and returns Zod-validated products", async () => {
-    fetchMock.mockResolvedValue(fakeRes([
-      { id: "PROD-001", code: "SERV-CG-01", name: "Consulta General", price: 50000, tax_classification: "IVA_19" },
-    ]));
+  it("GETs /v1/products and returns Zod-validated products (unwraps paginated results)", async () => {
+    fetchMock.mockResolvedValue(fakeRes({
+      pagination: { page: 1, page_size: 25, total_results: 1 },
+      results: [
+        { id: "PROD-001", code: "SERV-CG-01", name: "Consulta General", price: 50000, tax_classification: "IVA_19" },
+      ],
+    }));
     const result = await fetchProducts("tok-123", "PARTNER-01");
     expect(result).toHaveLength(1);
     expect(result[0].id).toBe("PROD-001");
-    expect(result[0].unit_of_measure).toBe("UND"); // default applied by Zod
     const [url] = callAt(0);
     expect(url).toBe("https://api.siigo.com/v1/products");
   });
 
   it("throws SiigoApiError on malformed product (Zod validation)", async () => {
-    fetchMock.mockResolvedValue(fakeRes([{ id: "X", code: "Y", name: "Z", price: -1, tax_classification: "IVA_19" }]));
+    fetchMock.mockResolvedValue(fakeRes({
+      pagination: { page: 1, page_size: 25, total_results: 1 },
+      results: [{ id: "", code: "Y", name: "Z" }],
+    }));
     await expect(fetchProducts("tok", "pid")).rejects.toThrow();
   });
 });

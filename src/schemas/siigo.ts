@@ -16,16 +16,15 @@ export const siigoDocumentTypeSchema = z.object({ id: z.number().int().positive(
 export const siigoProductSchema = z.object({
   id: z.string().trim().min(1),
   code: z.string().trim().min(1).max(50),
-  name: z.string().trim().min(1).max(100).transform(sanitizeText),
-  price: z.number().nonnegative().max(1e9).refine((n) => hasMaxDecimals(n, 2), "Price max 2 decimals"),
-  tax_classification: siigoTaxEnum,
-  unit_of_measure: z.string().trim().min(1).max(10).default("UND"),
-});
+  name: z.string().trim().min(1).max(200).transform(sanitizeText),
+  tax_classification: z.string().trim().optional(),
+  unit: z.object({ code: z.string().optional(), name: z.string().optional() }).optional(),
+}).passthrough();
 
 export const siigoPaymentTypeSchema = z.object({
   id: z.number().int().positive(),
   name: z.string().trim().min(1).max(50),
-  type: z.enum(["cash", "card", "transfer", "credit"]),
+  type: z.string().trim().min(1).max(50),
 });
 
 /** Siigo customer contact (invoice mail dispatch target when mail.send is true). */
@@ -98,9 +97,9 @@ export const siigoInvoiceResponseSchema = z.object({
   id: z.string().trim().min(1),
   number: z.string().trim().max(50).optional(),
   cufe: z.string().trim().min(1),
-  status: z.enum(["Accepted", "Draft", "Rejected"]),
+  status: z.string().trim().min(1),
   observations: z.string().max(500).optional(),
-});
+}).passthrough();
 
 export const siigoErrorSchema = z.object({
   code: z.string().trim().min(1).max(50),

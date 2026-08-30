@@ -20,6 +20,7 @@ import {
 } from "@/mappers/catalogMapping";
 import { mockConsultations } from "@/mocks/provet";
 import { mockSiigoPaymentTypes, mockSiigoProducts } from "@/mocks/siigo";
+import { SIIGO_PRODUCTS_KEY, FALLBACK_ITEM_CODE_KEY } from "@/hooks/useEmissionOptions";
 import type { SiigoPaymentType, SiigoProduct } from "@/schemas/siigo";
 
 const STORAGE_KEY = "fact_vet.catalogMapping";
@@ -33,9 +34,21 @@ export default function MappingPage() {
   const [loaded, setLoaded] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
-  // Live Siigo catalogs — seeded with mocks, replaced by real data after a successful sync.
-  const [siigoProducts, setSiigoProducts] = useState<SiigoProduct[]>(mockSiigoProducts);
+  // Live Siigo catalogs — seeded with mocks, replaced by real data after a
+  // successful sync. Products also persist to SIIGO_PRODUCTS_KEY so
+  // useEmissionOptions (invoice emission flow) picks up the real catalog too.
+  const [siigoProducts, setSiigoProducts] = useState<SiigoProduct[]>(() => {
+    if (typeof window === "undefined") return mockSiigoProducts;
+    try {
+      const raw = window.localStorage.getItem(SIIGO_PRODUCTS_KEY);
+      return raw ? (JSON.parse(raw) as SiigoProduct[]) : mockSiigoProducts;
+    } catch { return mockSiigoProducts; }
+  });
   const [siigoPaymentTypes, setSiigoPaymentTypes] = useState<SiigoPaymentType[]>(mockSiigoPaymentTypes);
+  const [fallbackItemCode, setFallbackItemCode] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    return window.localStorage.getItem(FALLBACK_ITEM_CODE_KEY) ?? "";
+  });
 
   // SSR-safe load: reconcile persisted mapping against current catalogs.
   useEffect(() => {
@@ -59,6 +72,12 @@ export default function MappingPage() {
   const handlePaymentSelect = useCallback((provetMethod: string, siigoPaymentTypeId: number | null) => {
     setMapping((p) => ({ ...p, payments: p.payments.map((m) => m.provetMethod === provetMethod ? { ...m, siigoPaymentTypeId } : m) }));
     setDirty(true);
+  }, []);
+
+  const handleFallbackItemCodeChange = useCallback((value: string) => {
+    setFallbackItemCode(value);
+    window.localStorage.setItem(FALLBACK_ITEM_CODE_KEY, value);
+    window.dispatchEvent(new StorageEvent("storage", { key: FALLBACK_ITEM_CODE_KEY }));
   }, []);
 
   const handleSave = useCallback(() => {
@@ -88,7 +107,9 @@ export default function MappingPage() {
       setSiigoProducts(data.products);
       setSiigoPaymentTypes(data.paymentTypes);
       window.localStorage.setItem(STORAGE_KEY, serializeCatalogMapping(next));
+      window.localStorage.setItem(SIIGO_PRODUCTS_KEY, JSON.stringify(data.products));
       window.dispatchEvent(new StorageEvent("storage", { key: STORAGE_KEY }));
+      window.dispatchEvent(new StorageEvent("storage", { key: SIIGO_PRODUCTS_KEY }));
       setToast("Catalogos sincronizados en vivo");
       setTimeout(() => setToast(null), 2500);
     } catch { setToast("Error de red al sincronizar"); setTimeout(() => setToast(null), 2500); }
@@ -133,6 +154,21 @@ export default function MappingPage() {
         </div>
       </header>
       <div className="scrollbar-thin flex h-[calc(100vh-64px)] flex-col gap-2 overflow-y-auto">
+        <div className="rounded-md border border-grid-line bg-pure-white p-3">
+          <label className="block text-xs font-semibold text-slate-text">
+            Código de ítem de respaldo (Siigo)
+          </label>
+          <p className="mb-2 text-[11px] text-muted">
+            Se usa cuando una consulta llega sin ítems. Debe ser el código EXACTO de un producto/servicio ya creado en Siigo — de lo contrario Siigo rechaza la factura con <code>invalid_reference</code>.
+          </p>
+          <input
+            type="text"
+            value={fallbackItemCode}
+            onChange={(e) => handleFallbackItemCodeChange(e.target.value)}
+            placeholder="ej. CONS-GEN-01"
+            className="w-full rounded-md border border-grid-line px-2 py-1 text-sm"
+          />
+        </div>
         <CatalogMapping rows={itemRows} siigoProducts={siigoProducts} onSelect={handleItemSelect} isRefreshing={isSyncing} onSync={handleSyncCatalogs} />
         <PaymentMapping rows={paymentRows} siigoPaymentTypes={siigoPaymentTypes} onSelect={handlePaymentSelect} />
       </div>
