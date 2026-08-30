@@ -23,12 +23,11 @@ import {
   type InvoiceHistoryRow,
 } from "@/mappers/invoiceHistory";
 import { toCreditNotePayload, siigoCreditNoteSchema, type AnnulmentReason } from "@/mappers/creditNote";
-import { fetchInvoicePdf, fetchInvoiceXml, generateIdempotencyKey, SiigoApiError, submitCreditNote } from "@/services/siigoApi";
+import { generateIdempotencyKey, SiigoApiError, submitCreditNote } from "@/services/siigoApi";
 import { siigoInvoiceResponseSchema } from "@/schemas/siigo";
 import { translateSiigoError, retryWithBackoff, type TranslatedError, type QuickAction } from "@/services/errorTranslator";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { mockClients, mockConsultations, mockPatients } from "@/mocks/provet";
-import { mockSiigoInvoiceResponses } from "@/mocks/siigo";
 import { useEmissionOptions } from "@/hooks/useEmissionOptions";
 import { useConsultationQueue } from "@/hooks/useConsultationQueue";
 
@@ -38,7 +37,7 @@ const TABS: { id: Tab; label: string }[] = [{ id: "queue", label: "Cola de Consu
 
 export default function HomePage() {
   const { rows, isInitialLoading, isRefreshing, fetchError: queueFetchError, clearFetchError, handleRefresh, setRowStatus } = useConsultationQueue();
-  const [history, setHistory] = useState<InvoiceHistoryEntry[]>(() => [toInvoiceHistoryEntry(mockSiigoInvoiceResponses[0], "CON-001", new Date("2026-08-15T09:30:00.000Z")), toInvoiceHistoryEntry(mockSiigoInvoiceResponses[1], "CON-002", new Date("2026-08-16T10:30:00.000Z")), toInvoiceHistoryEntry(mockSiigoInvoiceResponses[2], "CON-003", new Date("2026-08-17T11:45:00.000Z"))]);
+  const [history, setHistory] = useState<InvoiceHistoryEntry[]>([]);
   const [tab, setTab] = useState<Tab>("queue");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -93,7 +92,12 @@ export default function HomePage() {
   const handleDownload = useCallback(async (invoiceId: string, format: "pdf" | "xml") => {
     setBusyInvoiceId(invoiceId);
     try {
-      const blob = await (format === "pdf" ? fetchInvoicePdf : fetchInvoiceXml)(invoiceId, "", "");
+      const res = await fetch(`/api/invoices/${invoiceId}/${format}`);
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new SiigoApiError(data?.error?.code ?? "default", data?.error?.message ?? `Error al descargar el ${format.toUpperCase()}.`, res.status);
+      }
+      const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -151,7 +155,7 @@ export default function HomePage() {
         if (!res.ok) throw new SiigoApiError(data.error?.code ?? "default", data.error?.message ?? "Error al emitir la factura.");
         return siigoInvoiceResponseSchema.parse(data);
       }, { maxRetries: 5, onRetry: (n) => setRetryAttempt(n) });
-            setRowStatus(selectedId, mapSiigoInvoiceStatus(response.status));
+      setRowStatus(selectedId, mapSiigoInvoiceStatus(response.status));
       setHistory((prev) => [...prev, toInvoiceHistoryEntry(response, selectedId, new Date())]);
       const number = response.number ?? response.id;
       if (response.status === "Accepted") { setSelectedId(null); showToast(`Factura ${number} generada con éxito · CUFE: ${response.cufe}`); }
