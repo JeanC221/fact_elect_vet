@@ -53,7 +53,7 @@ export const mockSiigoInvoicePayloads: SiigoInvoicePayload[] = [
     date: "2026-08-15",
     customer: {
       person_type: "Person",
-      identification_type: "13",
+      id_type: "13",
       identification: "1234567890",
       branch_office: 0,
       name: ["María García", "López"],
@@ -76,7 +76,7 @@ export const mockSiigoInvoicePayloads: SiigoInvoicePayload[] = [
     date: "2026-08-16",
     customer: {
       person_type: "Company",
-      identification_type: "31",
+      id_type: "31",
       identification: "9001234561",
       branch_office: 0,
       name: ["Veterinaria Los Andes", "S.A.S."],

@@ -46,9 +46,9 @@ describe("creditNote mapper", () => {
       expect(() => siigoCreditNoteSchema.parse(cn)).not.toThrow();
     });
 
-    it("keeps customer flat identification (identification_type + string identification)", () => {
+    it("keeps customer flat identification (id_type + string identification)", () => {
       const cn = toCreditNotePayload(original, base, "billing_error");
-      expect(cn.customer.identification_type).toBe(original.customer.identification_type);
+      expect(cn.customer.id_type).toBe(original.customer.id_type);
       expect(typeof cn.customer.identification).toBe("string");
       expect(cn.customer.identification).toBe(original.customer.identification);
     });

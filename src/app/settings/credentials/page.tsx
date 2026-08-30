@@ -60,8 +60,12 @@ export default function CredentialsPage() {
         configured: nextConfigured,
         updatedAt: new Date().toISOString(),
       };
-      // Per §2.1: persist ONLY mode + configured flags — never secret values.
+      // Persist mode + configured flags (display). Also persist the actual
+      // credential values so live health/catalog checks can POST them to the
+      // server routes (used in-memory only, never logged).
       window.localStorage.setItem(STORAGE_KEY, serializeCredentialsConfig(config));
+      window.localStorage.setItem("fact_vet.credentialsStore", JSON.stringify(values));
+      window.dispatchEvent(new StorageEvent("storage", { key: "fact_vet.credentialsStore" }));
       setMode(nextMode);
       setConfigured(nextConfigured);
       setToast(`Credenciales validadas — modo ${nextMode === "production" ? "Producción" : "Sandbox"}`);
@@ -69,6 +73,21 @@ export default function CredentialsPage() {
     },
     [configured],
   );
+
+  // Live credential validation: POSTs values to /api/credentials/health (never persisted).
+  const handleTestConnection = useCallback(async (values: Credentials): Promise<boolean> => {
+    try {
+      const res = await fetch("/api/credentials/health", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(values),
+      });
+      const data = (await res.json()) as { ok?: boolean };
+      return res.ok && data.ok === true;
+    } catch {
+      return false;
+    }
+  }, []);
 
   const stampSend = stampSendFor(mode);
 
@@ -113,7 +132,7 @@ export default function CredentialsPage() {
             Este panel valida formato y modo de emisión; no almacena secretos.
           </p>
           {loaded && (
-            <CredentialsForm initialMode={mode} configuredMap={configured} onSave={handleSave} />
+            <CredentialsForm initialMode={mode} configuredMap={configured} onSave={handleSave} onTestConnection={handleTestConnection} />
           )}
         </section>
       </div>

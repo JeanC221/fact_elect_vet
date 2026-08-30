@@ -5,7 +5,6 @@ import { Clock, FileText, Loader2, RefreshCw } from "lucide-react";
 import { StatusBadge } from "./StatusBadge";
 import { Pagination, PAGE_SIZE_OPTIONS, type PageSizeOption } from "./Pagination";
 import {
-  formatCOP,
   formatDate,
   type ConsultationQueueRow,
 } from "@/mappers/consultationQueue";
@@ -95,7 +94,7 @@ export function ConsultationQueue({ rows, onInvoiceClick, isRefreshing, isInitia
                     {row.patientName}
                   </td>
                   <td className="border-l border-grid-line px-3 py-2 font-medium text-slate-text">
-                    {formatCOP(row.total)}
+                    {row.total}
                   </td>
                   <td className="border-l border-grid-line px-3 py-2 text-slate-text">
                     {row.paymentMethod}

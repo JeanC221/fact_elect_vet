@@ -32,18 +32,47 @@ const STATUS_ERROR_CODES: Record<number, string> = {
   503: "service_unavailable",
 };
 
-/** Build a SiigoApiError from a failed HTTP response (never exposes raw traces). */
+/** Extracts a human-readable message from Siigo's alternate error shapes (Errors[] array, plain string). */
+function extractSiigoErrorText(body: unknown): string | null {
+  if (typeof body === "string" && body.trim().length > 0) return body.trim();
+  if (body && typeof body === "object") {
+    const obj = body as Record<string, unknown>;
+    if (Array.isArray(obj.Errors) && obj.Errors.length > 0) {
+      return obj.Errors.map((e) => {
+        if (e && typeof e === "object") {
+          const err = e as Record<string, unknown>;
+          return [err.Code, err.Message].filter(Boolean).join(": ");
+        }
+        return String(e);
+      }).join(" | ");
+    }
+    if (typeof obj.message === "string") return obj.message;
+  }
+  return null;
+}
+
+/** Build a SiigoApiError from a failed HTTP response. Always surfaces Siigo's raw message when present. */
 async function toSiigoError(res: Response): Promise<SiigoApiError> {
   const fallback = STATUS_ERROR_CODES[res.status] ?? "default";
+  let rawBody: unknown;
   try {
-    const parsed = siigoErrorSchema.safeParse(await res.json());
-    if (parsed.success) {
-      return new SiigoApiError(parsed.data.code, parsed.data.message, res.status);
-    }
+    rawBody = await res.json();
   } catch {
-    // Non-JSON error body — fall through to the status-derived code.
+    return new SiigoApiError(fallback, `Siigo request failed with HTTP ${res.status}.`, res.status);
   }
-  return new SiigoApiError(fallback, `Siigo request failed with HTTP ${res.status}.`, res.status);
+  const parsed = siigoErrorSchema.safeParse(rawBody);
+  if (parsed.success) {
+    return new SiigoApiError(parsed.data.code, parsed.data.message, res.status);
+  }
+  const rawText = extractSiigoErrorText(rawBody);
+  if (rawText) {
+    return new SiigoApiError(fallback, rawText, res.status);
+  }
+  return new SiigoApiError(
+    fallback,
+    `Siigo request failed with HTTP ${res.status}. Body: ${JSON.stringify(rawBody).slice(0, 300)}`,
+    res.status,
+  );
 }
 
 /**
@@ -60,6 +89,7 @@ async function postToSiigo<B, R>(
   const validBody = bodySchema.parse(body);
   const validPartnerId = partnerIdHeaderSchema.parse(partnerId);
   const validIdempotencyKey = idempotencyKeyHeaderSchema.parse(idempotencyKey);
+  console.info(`[Siigo] payload validated against official contract before POST ${path}`);
   let res: Response;
   try {
     res = await fetch(`${SIIGO_API_BASE_URL}${path}`, {

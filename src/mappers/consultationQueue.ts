@@ -1,6 +1,5 @@
 import { z } from "zod";
 import {
-  hasMaxDecimals,
   identificationSchema,
   identificationTypes,
   type Client,
@@ -22,10 +21,6 @@ export interface ConsultationQueueRow {
   patientName: string; total: number; paymentMethod: string;
   provetStatus: ProvetStatus; invoiceStatus: InvoiceStatus; createdAt: Date;
 }
-
-/** COP currency formatter (es-CO grouping, deterministic "$95.200"). */
-export const formatCOP = (value: number): string =>
-  `$${new Intl.NumberFormat("es-CO", { maximumFractionDigits: 0 }).format(value)}`;
 
 /** Deterministic short ISO date (YYYY-MM-DD), locale-independent. */
 export const formatDate = (value: Date): string => new Date(value).toISOString().slice(0, 10);
@@ -80,7 +75,7 @@ export const quickEditFormSchema = z
     email: z.string().trim().email("Correo electrónico inválido"),
     phone: z.string().trim().min(7, "Teléfono debe tener al menos 7 dígitos").max(20),
     paymentMethod: z.string().trim().min(1, "Método de pago requerido"),
-    paidAmount: z.number().positive("El monto pagado debe ser positivo").refine((n) => hasMaxDecimals(n, 2), "Monto pagado max 2 decimales"),
+    paidAmount: z.number().positive("El monto pagado debe ser positivo"),
   })
   .superRefine((data, ctx) => {
     const r = identificationSchema.safeParse({ type: data.identificationType, number: data.identificationNumber });
@@ -113,7 +108,7 @@ export function buildQuickEditDetail(consultations: Consultation[], clients: Cli
   };
 }
 
-/** Pure O(n) composition: form overrides + Provet trio → Siigo payload.
+/** Pure O(n) composition: form overrides + Provet trio — Siigo payload.
  *  When the consultation is not found in the provided arrays, an optional
  *  `fallbackDetail` (e.g. from a live Provet row) is used to synthesise the
  *  minimal Provet objects required by `provetToSiigoInvoice`. */

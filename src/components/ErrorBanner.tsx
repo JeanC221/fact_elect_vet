@@ -66,7 +66,12 @@ export function ErrorBanner({
     <div className={`${BASE} ${STYLES[error.severity]}`}>
       <Icon className="mt-0.5 h-3 w-3 shrink-0" />
       <div className="flex flex-1 flex-wrap items-center gap-2">
-        <span className="flex-1">{error.message}</span>
+        <span className="flex-1">
+          {error.message}
+          {error.detail && (
+          <span className="block text-[11px] opacity-75">{error.detail}</span>
+         )}
+        </span>
         {label && (
           <button
             type="button"

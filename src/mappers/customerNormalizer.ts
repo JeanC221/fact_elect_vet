@@ -1,8 +1,11 @@
 import { sanitizeText, type Identification } from "@/schemas/provet";
 
-/** Remove dots, dashes and spaces from any identification raw value. */
+/** Smart quotes (curly + ASCII double) stripped from names and contact emails. */
+const SMART_QUOTES = /[\u201C\u201D"]/g;
+
+/** Strip ALL non-alphanumeric chars from an identification raw value. */
 function cleanIdChars(raw: string): string {
-  return raw.replace(/[.\s]/g, "").replace(/-/g, "");
+  return raw.replace(/[^A-Za-z0-9]/g, "");
 }
 
 /** Siigo identification-type codes (DIAN Resolution 948 → Siigo Nube). */
@@ -15,15 +18,15 @@ const IDENTIFICATION_TYPE_MAP: Record<Identification["type"], string> = {
 
 /**
  * Normalizes a raw identification number for Siigo as a flat string:
- * strips dots, dashes and spaces. The cleaned string lands in the
+ * strips ALL non-alphanumeric chars. The cleaned string lands in the
  * `customer.identification` field; the document type is mapped separately
- * via `mapIdentificationType` into `customer.identification_type`.
+ * via `mapIdentificationType` into `customer.id_type`.
  */
 export function cleanIdentification(raw: string): string {
   return cleanIdChars(raw);
 }
 
-/** Maps a Provet identification type to its Siigo numeric code for `identification_type`. */
+/** Maps a Provet identification type to its Siigo numeric code for `id_type`. */
 export function mapIdentificationType(type: Identification["type"]): string {
   return IDENTIFICATION_TYPE_MAP[type];
 }
@@ -51,13 +54,31 @@ export function cleanPhone(raw: string): string {
   return digits.slice(0, 10);
 }
 
-/** Lower-cases and trims an email for Siigo contact dispatch. */
+/** Lower-cases, trims and strips smart quotes from an email for Siigo contact dispatch. */
 export function sanitizeEmail(raw: string): string {
-  return raw.trim().toLowerCase().replace(/\s/g, "");
+  return raw.trim().toLowerCase().replace(/\s/g, "").replace(SMART_QUOTES, "");
 }
 
-/** Builds a Siigo customer name tuple, applying the text sanitizer. */
+/** Builds a Siigo customer name tuple, stripping smart quotes + applying the text sanitizer. */
 export function buildSiigoName(fullName: string): [string, string] {
   const [first, last] = splitName(fullName);
-  return [sanitizeText(first), sanitizeText(last)];
+  return [
+    sanitizeText(first.replace(SMART_QUOTES, "")),
+    sanitizeText(last.replace(SMART_QUOTES, "")),
+  ];
+}
+
+/**
+ * Builds the Siigo `customer.contacts` array (≥1 entry) for invoice email
+ * dispatch. Splits the full name into first/last, sanitizes the email, and
+ * returns `undefined` when the email is empty (contacts stay optional).
+ */
+export function buildSiigoContacts(
+  fullName: string,
+  email: string,
+): [{ first_name: string; last_name: string; email: string }] | undefined {
+  const cleanEmail = sanitizeEmail(email);
+  if (cleanEmail.length === 0) return undefined;
+  const [first_name, last_name] = buildSiigoName(fullName);
+  return [{ first_name, last_name, email: cleanEmail }];
 }

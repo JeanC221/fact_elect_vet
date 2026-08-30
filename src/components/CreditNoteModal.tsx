@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { AlertTriangle, Loader2, X } from "lucide-react";
 import { ANNULMENT_REASONS, type AnnulmentReason } from "@/mappers/creditNote";
-import { formatCOP } from "@/mappers/consultationQueue";
 import type { InvoiceHistoryRow } from "@/mappers/invoiceHistory";
 
 interface CreditNoteModalProps {
@@ -60,7 +59,7 @@ export function CreditNoteModal({
             <div className="text-muted">Cliente</div>
             <div className="font-medium text-slate-text">{row.clientName}</div>
             <div className="mt-1 text-muted">Total original</div>
-            <div className="font-medium text-slate-text">{formatCOP(row.total)}</div>
+            <div className="font-medium text-slate-text">{row.total}</div>
           </div>
           <div>
             <label className="text-xs font-medium text-muted">Motivo de anulación</label>

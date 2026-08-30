@@ -40,13 +40,16 @@ describe("provetToSiigoInvoice", () => {
     expect(result.date).toBe("2026-08-15");
     expect(result.seller).toBe(62);
     expect(result.customer.identification).toBe("1234567890");
-    expect(result.customer.identification_type).toBe("13");
+    expect(result.customer.id_type).toBe("13");
     expect(result.customer.person_type).toBe("Person");
     expect(result.customer.branch_office).toBe(0);
     expect(result.customer.name).toEqual(["María García", "López"]);
+    expect(result.customer.contacts).toEqual([
+      { first_name: "María García", last_name: "López", email: "maria.garcia@email.com" },
+    ]);
     expect(result.customer).not.toHaveProperty("email");
     expect(result.customer).not.toHaveProperty("phone");
-    expect(result.customer).not.toHaveProperty("id_type");
+    expect(result.customer).not.toHaveProperty("identification_type");
     expect(result).not.toHaveProperty("total");
     expect(result.items).toHaveLength(2);
     expect(result.items[0]).toMatchObject({ code: "SERV-CG-01", price: 59500 });
@@ -82,7 +85,10 @@ describe("provetToSiigoInvoice", () => {
     expect(result.payments[0].id).toBe(10948);
     expect(result.payments[0].value).toBe(52500);
     expect(result.customer.name).toEqual(["Veterinaria Los Andes", "S.A.S."]);
-    expect(result.customer).toMatchObject({ identification: "9001234561", identification_type: "31", person_type: "Company", branch_office: 0 });
+    expect(result.customer.contacts).toEqual([
+      { first_name: "Veterinaria Los Andes", last_name: "S.A.S.", email: "factura@losandes.co" },
+    ]);
+    expect(result.customer).toMatchObject({ identification: "9001234561", id_type: "31", person_type: "Company", branch_office: 0 });
     expect(() => siigoInvoicePayloadSchema.parse(result)).not.toThrow();
   });
 
@@ -93,7 +99,7 @@ describe("provetToSiigoInvoice", () => {
     expect(result.payments[0].id).toBe(8466);
     expect(result.payments[0].value).toBe(120000);
     expect(result.customer.name).toEqual(["John", "Smith"]);
-    expect(result.customer).toMatchObject({ identification: "CE9876543", identification_type: "22", person_type: "Person" });
+    expect(result.customer).toMatchObject({ identification: "CE9876543", id_type: "22", person_type: "Person" });
     expect(() => siigoInvoicePayloadSchema.parse(result)).not.toThrow();
   });
 
@@ -129,5 +135,20 @@ describe("provetToSiigoInvoice", () => {
     const production = map(0, opts("production"));
     expect(production.stamp.send).toBe(true);
     expect(production.mail.send).toBe(true);
+  });
+
+  it("normalizes float drift via Number(val.toFixed(2)) preserving 2-decimal COP precision", () => {
+    // 3294.44 * 1.19 = 3920.3836 — toFixed(2) kills the drift → 3920.38.
+    const consultation = {
+      ...mockConsultations[0],
+      items: [{ name: "Svc", code: "SERV-CG-01", quantity: 1, unit_price: 3294.44, tax_rate: 0.19, discount: 0 }],
+      subtotal: 3294.44, tax_total: 625.9436, total: 3920.38,
+    };
+    const result = provetToSiigoInvoice(consultation, mockClients[0], mockPatients[0], opts());
+    expect(result.items[0].price).toBe(Number((3294.44 * 1.19).toFixed(2)));
+    expect(result.payments[0].value).toBe(Number((result.items[0].price * 1).toFixed(2)));
+    expect(result.items[0].price).toBe(3920.38);
+    expect(result.payments[0].value).toBe(3920.38);
+    expect(() => siigoInvoicePayloadSchema.parse(result)).not.toThrow();
   });
 });

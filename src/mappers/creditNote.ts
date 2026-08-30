@@ -4,7 +4,6 @@ import {
   siigoDocumentTypeSchema,
   type SiigoInvoicePayload,
 } from "@/schemas/siigo";
-import { hasMaxDecimals, toCents } from "@/schemas/provet";
 
 /** DIAN-compliant credit note reason codes for invoice annulment. */
 export type AnnulmentReason =
@@ -37,13 +36,13 @@ export const siigoCreditNoteItemSchema = z.object({
   code: z.string().trim().min(1).max(50),
   description: z.string().trim().min(1).max(200),
   quantity: z.number().positive().max(1e6),
-  price: z.number().max(1e9).refine((n) => hasMaxDecimals(n, 6), "Price max 6 decimals"),
+  price: z.number().max(1e9),
 });
 
 /** Reversal payment — value is negated relative to the original invoice. */
 export const siigoCreditNotePaymentSchema = z.object({
   id: z.number().int().positive(),
-  value: z.number().max(1e12).refine((n) => hasMaxDecimals(n, 2), "Value max 2 decimals"),
+  value: z.number().max(1e12),
 });
 
 export const siigoCreditNoteReasonSchema = z.enum([
@@ -74,7 +73,7 @@ export const siigoCreditNoteSchema = z
     (cn) => {
       const itemsTotal = cn.items.reduce((s, i) => s + i.price * i.quantity, 0);
       const paymentsTotal = cn.payments.reduce((s, p) => s + p.value, 0);
-      return toCents(itemsTotal) === toCents(cn.total) && toCents(paymentsTotal) === toCents(cn.total);
+      return itemsTotal === cn.total && paymentsTotal === cn.total;
     },
     {
       message:

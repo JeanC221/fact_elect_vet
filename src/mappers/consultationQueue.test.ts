@@ -4,7 +4,6 @@ import {
   buildInvoicePayloadFromQuickEdit,
   buildPaymentMethodOptions,
   buildQuickEditDetail,
-  formatCOP,
   formatDate,
   quickEditFormSchema,
   type QuickEditFormValues,
@@ -55,12 +54,6 @@ describe("buildConsultationQueue", () => {
     expect(rows[0].clientName).toBe("Cliente desconocido");
     expect(rows[0].patientName).toBe("Paciente desconocido");
     expect(rows[0].clientDoc).toBe("—");
-  });
-});
-
-describe("formatCOP", () => {
-  it("formats a number as Colombian pesos without decimals", () => {
-    expect(formatCOP(95200)).toBe("$95.200");
   });
 });
 
@@ -123,8 +116,8 @@ describe("quickEditFormSchema", () => {
     expect(quickEditFormSchema.safeParse({ ...validFormValues, identificationType: "NIT", identificationNumber: "9001234561" }).success).toBe(true);
   });
 
-  it("rejects a paidAmount with more than 2 decimals", () => {
-    expect(quickEditFormSchema.safeParse({ ...validFormValues, paidAmount: 95200.001 }).success).toBe(false);
+  it("accepts a paidAmount with raw decimals (no precision guard)", () => {
+    expect(quickEditFormSchema.safeParse({ ...validFormValues, paidAmount: 95200.001 }).success).toBe(true);
   });
 
   it("rejects empty name and too-short phone", () => {

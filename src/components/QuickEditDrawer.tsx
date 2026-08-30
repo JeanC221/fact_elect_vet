@@ -3,13 +3,11 @@
 import { type ReactNode, useEffect, useState } from "react";
 import { AlertTriangle, CheckCircle2, Loader2, Pencil, X } from "lucide-react";
 import {
-  formatCOP,
   formatDate,
   quickEditFormSchema,
   type QuickEditDetail,
   type QuickEditFormValues,
 } from "@/mappers/consultationQueue";
-import { toCents } from "@/schemas/provet";
 import { ReconciliationBar } from "./ReconciliationBar";
 
 interface QuickEditDrawerProps {
@@ -41,7 +39,7 @@ export function QuickEditDrawer({ detail, isSubmitting, errorMessage, errorDetai
 
   const parsed = quickEditFormSchema.safeParse(values);
   const errors: Record<string, string> = parsed.success ? {} : Object.fromEntries(parsed.error.issues.map((i) => [String(i.path[0]), i.message]));
-  const balanced = toCents(detail?.total ?? 0) - toCents(values.paidAmount) === 0;
+  const balanced = (detail?.total ?? 0) === values.paidAmount;
   const canSubmit = parsed.success && balanced && !isSubmitting && detail !== null;
 
   useEffect(() => {
@@ -99,7 +97,7 @@ export function QuickEditDrawer({ detail, isSubmitting, errorMessage, errorDetai
             <Field label="Monto pagado (COP)">
               {isEditingAmount ? (
                 <div className="flex items-center gap-1">
-                  <input type="number" min={0} step="0.01" value={values.paidAmount} onChange={(e) => update({ paidAmount: Math.round(Number(e.target.value) * 100) / 100 })} className={INPUT} disabled={isSubmitting} />
+                  <input type="number" min={0} step="0.01" value={values.paidAmount} onChange={(e) => update({ paidAmount: Number(e.target.value) })} className={INPUT} disabled={isSubmitting} />
                   <button type="button" onClick={() => setIsEditingAmount(false)} disabled={isSubmitting} className="shrink-0 rounded p-0.5 text-status-accepted-text hover:bg-cool-grey disabled:opacity-40" aria-label="Confirmar monto pagado">
                     <CheckCircle2 className="h-4 w-4" />
                   </button>
@@ -107,7 +105,7 @@ export function QuickEditDrawer({ detail, isSubmitting, errorMessage, errorDetai
               ) : (
                 <div className="flex items-center gap-2">
                   <span className={`text-sm font-semibold ${balanced ? "text-slate-text" : "text-status-rejected-text"}`}>
-                    {formatCOP(values.paidAmount)} COP
+                    {values.paidAmount} COP
                   </span>
                   <button type="button" onClick={() => setIsEditingAmount((prev) => !prev)} disabled={isSubmitting} className="rounded p-0.5 text-muted hover:bg-cool-grey hover:text-clinical-blue disabled:opacity-40" aria-label="Editar monto pagado">
                     <Pencil className="h-4 w-4" />
@@ -121,7 +119,7 @@ export function QuickEditDrawer({ detail, isSubmitting, errorMessage, errorDetai
           <div className="rounded-md border border-grid-line">
             <div className="border-b border-grid-line px-2 py-1 text-xs font-semibold text-muted">Ítems</div>
             <table className="w-full text-xs"><tbody>
-              {detail.items.map((it) => (<tr key={it.code} className="border-b border-grid-line last:border-0"><td className="px-2 py-1 text-slate-text">{it.name}</td><td className="px-2 py-1 text-right text-muted">x{it.quantity}</td><td className="px-2 py-1 text-right font-medium text-slate-text">{formatCOP(it.lineTotal)}</td></tr>))}
+              {detail.items.map((it) => (<tr key={it.code} className="border-b border-grid-line last:border-0"><td className="px-2 py-1 text-slate-text">{it.name}</td><td className="px-2 py-1 text-right text-muted">x{it.quantity}</td><td className="px-2 py-1 text-right font-medium text-slate-text">{it.lineTotal}</td></tr>))}
             </tbody></table>
           </div>
           {errorMessage && <div className="flex items-start gap-2 rounded-md border border-status-rejected-border bg-status-rejected-bg px-2 py-2 text-xs text-status-rejected-text"><AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" /><span>{errorDetail ?? errorMessage}</span></div>}

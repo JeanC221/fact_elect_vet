@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildSiigoContacts,
   buildSiigoName,
   cleanIdentification,
   cleanPhone,
@@ -10,12 +11,16 @@ import {
 } from "./customerNormalizer";
 
 describe("cleanIdentification", () => {
-  it("strips dots, dashes and spaces from cédulas into a flat string", () => {
+  it("strips dots, dashes and spaces from cedulas into a flat string", () => {
     expect(cleanIdentification("12.345.678-90")).toBe("1234567890");
   });
 
   it("strips dots, dashes and spaces from NITs into a flat string", () => {
     expect(cleanIdentification("900.123.456 - 1")).toBe("9001234561");
+  });
+
+  it("strips ALL non-alphanumeric chars (slashes, parens, etc.)", () => {
+    expect(cleanIdentification("CE-98/76.54 (3)")).toBe("CE9876543");
   });
 });
 
@@ -29,7 +34,7 @@ describe("mapIdentificationType", () => {
 });
 
 describe("mapPersonType", () => {
-  it("maps natural → Person and juridical → Company", () => {
+  it("maps natural -> Person and juridical -> Company", () => {
     expect(mapPersonType("natural")).toBe("Person");
     expect(mapPersonType("juridical")).toBe("Company");
   });
@@ -37,11 +42,11 @@ describe("mapPersonType", () => {
 
 describe("splitName", () => {
   it("splits a two-part name into firstname and lastname", () => {
-    expect(splitName("María García López")).toEqual(["María García", "López"]);
+    expect(splitName("Maria Garcia Lopez")).toEqual(["Maria Garcia", "Lopez"]);
   });
 
   it("duplicates the single part when only one word is provided", () => {
-    expect(splitName("Clínica")).toEqual(["Clínica", "Clínica"]);
+    expect(splitName("Clinica")).toEqual(["Clinica", "Clinica"]);
   });
 
   it("falls back for empty input", () => {
@@ -51,7 +56,29 @@ describe("splitName", () => {
 
 describe("buildSiigoName", () => {
   it("sanitizes quote and control chars", () => {
-    expect(buildSiigoName("Clínica Vet")).toEqual(["Clínica", "Vet"]);
+    expect(buildSiigoName("Clinica Vet")).toEqual(["Clinica", "Vet"]);
+  });
+
+  it("strips smart quotes from each name part", () => {
+    expect(buildSiigoName("Maria \u201CGarcia\u201D Lopez")).toEqual(["Maria Garcia", "Lopez"]);
+  });
+});
+
+describe("buildSiigoContacts", () => {
+  it("builds a single contact from a full name and email", () => {
+    expect(buildSiigoContacts("María García López", "maria.garcia@email.com")).toEqual([
+      { first_name: "María García", last_name: "López", email: "maria.garcia@email.com" },
+    ]);
+  });
+
+  it("sanitizes the email (trims, lowercases, strips smart quotes)", () => {
+    const contacts = buildSiigoContacts("Clinica Vet", "  \u201Cinfo\u201D@Clinica.CO ");
+    expect(contacts?.[0].email).toBe("info@clinica.co");
+  });
+
+  it("returns undefined when the email is empty", () => {
+    expect(buildSiigoContacts("Cliente Sin Email", "")).toBeUndefined();
+    expect(buildSiigoContacts("Cliente Sin Email", "   ")).toBeUndefined();
   });
 });
 
@@ -65,5 +92,9 @@ describe("cleanPhone", () => {
 describe("sanitizeEmail", () => {
   it("trims, lowercases and removes spaces", () => {
     expect(sanitizeEmail("  Maria@Email.COM ")).toBe("maria@email.com");
+  });
+
+  it("strips smart quotes from the email string", () => {
+    expect(sanitizeEmail("\u201Cmaria\u201D@email.com")).toBe("maria@email.com");
   });
 });
