@@ -70,6 +70,26 @@ describe("POST /api/catalogs/sync", () => {
     expect(res.status).toBe(503);
   });
 
+  it("falls back to server env vars when the body is empty (no browser-stored credentials)", async () => {
+    vi.mocked(fetchPaymentTypes).mockResolvedValue([]);
+    vi.mocked(fetchProducts).mockResolvedValue([]);
+    const req = new Request("http://localhost/api/catalogs/sync", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(200);
+    expect(getSiigoAccessToken).toHaveBeenCalledWith(undefined);
+  });
+
+  it("falls back to server env vars when the request has no body at all", async () => {
+    vi.mocked(fetchPaymentTypes).mockResolvedValue([]);
+    vi.mocked(fetchProducts).mockResolvedValue([]);
+    const req = new Request("http://localhost/api/catalogs/sync", { method: "POST" });
+    const res = await POST(req);
+    expect(res.status).toBe(200);
+    expect(getSiigoAccessToken).toHaveBeenCalledWith(undefined);
+  });
+
   it("returns 400 for Zod-invalid credentials", async () => {
     const bad = { ...validCreds, username: "" };
     const req = new Request("http://localhost/api/catalogs/sync", {

@@ -166,11 +166,10 @@ export default function MappingPage() {
     setIsSyncing(true);
     try {
       const stored = window.localStorage.getItem("fact_vet.credentialsStore");
-      if (!stored) { setToast("Configure credenciales primero"); setTimeout(() => setToast(null), 2500); return; }
-      const creds = JSON.parse(stored) as { partnerId: string; username: string; accessKey: string; clientId: string; clientSecret: string };
+      const body = stored ? stored : "{}";
       const res = await fetch("/api/catalogs/sync", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(creds),
+        body,
       });
       const data = (await res.json()) as { paymentTypes?: SiigoPaymentType[]; products?: SiigoProduct[]; documentTypes?: SiigoDocumentTypeCatalogEntry[]; sellers?: SiigoSeller[]; error?: { message?: string } };
       if (!res.ok || !data.paymentTypes || !data.products || !data.documentTypes || !data.sellers) { setToast(data.error?.message ?? "Error al sincronizar"); setTimeout(() => setToast(null), 2500); return; }

@@ -136,7 +136,7 @@ export function QuickEditDrawer({ detail, isSubmitting, errorMessage, errorDetai
           {missingFallback && (
             <div className="flex items-start gap-2 rounded-md border border-status-draft-border bg-status-draft-bg px-2 py-2 text-xs text-status-draft-text">
               <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
-              <span>Esta consulta no tiene ítems registrados en Provet. Configure un "Código de ítem de respaldo" en Ajustes → Mapeo de Catálogo antes de poder emitir esta factura.</span>
+              <span>Esta consulta no tiene ítems registrados en Provet.</span>
             </div>
           )}
           {missingSiigoSettings && (

@@ -34,7 +34,7 @@ export function InvoiceSnapshotDrawer({ row, onClose }: InvoiceSnapshotDrawerPro
           ) : (
             <>
               <p className="text-2xs text-muted">
-                Esto es exactamente lo que se confirmó en Edición Rápida al emitir — no se puede editar aquí. Si el PDF/XML de Siigo muestra algo distinto, la diferencia está del lado de Siigo, no en lo que esta app envió.
+                Datos enviados en facturación. Estos valores se enviaron a DIAN y no pueden modificarse; si hay errores, genere una nota crédito y vuelva a facturar.
               </p>
               <div className={FIELD}>
                 <div className={LABEL}>Nombre del Cliente</div>

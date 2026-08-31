@@ -120,7 +120,8 @@ describe("reconcileMapping", () => {
     const items = extractProvetItems(mockConsultations);
     const methods = extractProvetPaymentMethods(mockConsultations);
     const stale = { items: [{ provetCode: "GONE-CODE", siigoProductId: "PROD-001" }],
-      payments: [{ provetMethod: "GONE-METHOD", siigoPaymentTypeId: 99999 }], version: 1, updatedAt: "2026-01-01T00:00:00.000Z" };
+      payments: [{ provetMethod: "GONE-METHOD", siigoPaymentTypeId: 99999 }], version: 1, updatedAt: "2026-01-01T00:00:00.000Z",
+      documentTypeId: null, creditNoteDocumentTypeId: null, sellerId: null };
     const r = reconcileMapping(stale, items, mockSiigoProducts, methods, mockSiigoPaymentTypes);
     expect(r.items.map((m) => m.provetCode)).not.toContain("GONE-CODE");
     expect(r.items).toHaveLength(items.length);
@@ -130,6 +131,24 @@ describe("reconcileMapping", () => {
     expect(r.version).toBe(2);
     expect(r.updatedAt).not.toBe("2026-01-01T00:00:00.000Z");
   });
+
+  it("keeps documentTypeId/creditNoteDocumentTypeId/sellerId when still present in the fresh catalog, nulls them when gone", () => {
+    const items = extractProvetItems(mockConsultations);
+    const methods = extractProvetPaymentMethods(mockConsultations);
+    const fv = { id: 2372, code: "1", name: "Factura de venta", type: "FV", active: true };
+    const nc = { id: 2379, code: "3", name: "Nota Crédito", type: "NC", active: true };
+    const seller = { id: 916, first_name: "Pruebas", last_name: "Api", active: true };
+    const withSettings = { items: [], payments: [], version: 1, updatedAt: "2026-01-01T00:00:00.000Z",
+      documentTypeId: 2372, creditNoteDocumentTypeId: 2379, sellerId: 916 };
+    const kept = reconcileMapping(withSettings, items, mockSiigoProducts, methods, mockSiigoPaymentTypes, [fv, nc], [seller]);
+    expect(kept.documentTypeId).toBe(2372);
+    expect(kept.creditNoteDocumentTypeId).toBe(2379);
+    expect(kept.sellerId).toBe(916);
+    const nulled = reconcileMapping(withSettings, items, mockSiigoProducts, methods, mockSiigoPaymentTypes, [], []);
+    expect(nulled.documentTypeId).toBeNull();
+    expect(nulled.creditNoteDocumentTypeId).toBeNull();
+    expect(nulled.sellerId).toBeNull();
+  });
 });
 
 describe("serialize / parse", () => {
@@ -138,7 +157,8 @@ describe("serialize / parse", () => {
     const methods = extractProvetPaymentMethods(mockConsultations);
     const mapping = { items: defaultItemMapping(items, mockSiigoProducts),
       payments: defaultPaymentMapping(methods, mockSiigoPaymentTypes),
-      version: 1, updatedAt: new Date("2026-08-26T00:00:00.000Z").toISOString() };
+      version: 1, updatedAt: new Date("2026-08-26T00:00:00.000Z").toISOString(),
+      documentTypeId: null, creditNoteDocumentTypeId: null, sellerId: null };
     expect(parseCatalogMapping(serializeCatalogMapping(mapping))).toEqual(mapping);
   });
   it("parseCatalogMapping throws on corrupt JSON", () => {

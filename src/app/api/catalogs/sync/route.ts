@@ -14,18 +14,14 @@ const syncResponseSchema = z.object({
   sellers: z.array(z.any()),
 });
 
-/**
- * POST /api/catalogs/sync — live Siigo catalog fetch.
- * Validates UI credentials, authenticates, then fetches payment types
- * (GET /v1/payment-types?document_type=FV) and products (GET /v1/products)
- * in parallel. Credentials live only in the request body — never persisted.
- */
 export async function POST(req: Request): Promise<NextResponse> {
   try {
-    const creds = credentialsSchema.parse(await req.json());
-    const { accessToken, partnerId } = await getSiigoAccessToken({
-      username: creds.username, accessKey: creds.accessKey, partnerId: creds.partnerId,
-    });
+    const rawBody = await req.json().catch(() => ({}));
+    const hasBodyCreds = rawBody && typeof rawBody === "object" && Object.keys(rawBody).length > 0;
+    const creds = hasBodyCreds ? credentialsSchema.parse(rawBody) : undefined;
+    const { accessToken, partnerId } = await getSiigoAccessToken(
+      creds ? { username: creds.username, accessKey: creds.accessKey, partnerId: creds.partnerId } : undefined,
+    );
     const [paymentTypes, products, documentTypes, sellers] = await Promise.all([
       fetchPaymentTypes(accessToken, partnerId),
       fetchProducts(accessToken, partnerId),
