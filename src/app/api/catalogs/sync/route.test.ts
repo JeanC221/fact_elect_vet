@@ -27,7 +27,7 @@ describe("POST /api/catalogs/sync", () => {
   });
 
   it("returns payment types + products on success", async () => {
-    const pts = [{ id: 10948, name: "Efectivo", type: "cash" as const }];
+    const pts = [{ id: 10948, name: "Efectivo", type: "cash" as const, active: true }];
     const prods = [{ id: "PROD-001", code: "SERV-CG-01", name: "Consulta", price: 50000, tax_classification: "IVA_19" as const, unit_of_measure: "UND" }];
     vi.mocked(fetchPaymentTypes).mockResolvedValue(pts);
     vi.mocked(fetchProducts).mockResolvedValue(prods);

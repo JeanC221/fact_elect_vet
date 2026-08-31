@@ -64,7 +64,7 @@ export default function MappingPage() {
     if (stored) {
       try {
         const parsed = parseCatalogMapping(stored);
-        setMapping((m) => reconcileMapping({ ...parsed, items: m.items.length ? m.items : parsed.items }, provetItems, liveProducts, provetMethods, livePaymentTypes));
+        setMapping((m) => ({ ...parsed, items: m.items.length ? m.items : parsed.items }));
       }
       catch { /* corrupt blob → keep seeded defaults */ }
     }
@@ -85,11 +85,23 @@ export default function MappingPage() {
           if (!seen.has(it.code)) { seen.add(it.code); items.push({ code: it.code, name: it.name }); }
         }
         setProvetItems(items);
+        let currentProducts = mockSiigoProducts;
+        let currentPaymentTypes = mockSiigoPaymentTypes;
+        try {
+          const rawProducts = window.localStorage.getItem(SIIGO_PRODUCTS_KEY);
+          if (rawProducts) currentProducts = JSON.parse(rawProducts) as SiigoProduct[];
+        } catch { /* corrupt -> mocks */ }
+        try {
+          const rawPaymentTypes = window.localStorage.getItem(SIIGO_PAYMENT_TYPES_KEY);
+          if (rawPaymentTypes) currentPaymentTypes = JSON.parse(rawPaymentTypes) as SiigoPaymentType[];
+        } catch { /* corrupt -> mocks */ }
+        setSiigoProducts(currentProducts);
+        setSiigoPaymentTypes(currentPaymentTypes);
         const stored = window.localStorage.getItem(STORAGE_KEY);
         if (stored) {
           try {
             const parsed = parseCatalogMapping(stored);
-            setMapping((m) => reconcileMapping({ ...parsed, payments: m.payments }, items, siigoProducts, provetMethods, siigoPaymentTypes));
+            setMapping((m) => reconcileMapping({ ...parsed, payments: m.payments }, items, currentProducts, provetMethods, currentPaymentTypes));
           } catch { /* corrupt blob → keep current */ }
         }
       } catch { /* network error → item list stays empty; user can still sync catalogs */ }

@@ -44,19 +44,6 @@ const lineUnitPrice = (it: Consultation["items"][number]): number =>
 const sumLineTotals = (items: Consultation["items"]): number =>
   round2(items.reduce((sum, it) => sum + lineUnitPrice(it) * it.quantity, 0));
 
-/**
- * Pure, side-effect-free transformation:
- *   Provet Consultation + Client + Patient → SiigoInvoicePayload.
- * Matches the official Siigo POST /v1/invoices (Invoice + Customer - Create)
- * collection: root `document`, `date`, `customer`, `seller`, `items`,
- * `payments`, `stamp`, `mail` — with NO `total` key. `payments[].id` resolves
- * exclusively from `options.mapping.payments` (unmapped methods throw
- * UnmappedPaymentMethodError). Customer composition (flat `identification`,
- * `check_digit`, single-element Company `name`, `contacts`) is delegated to
- * `buildSiigoCustomer`; items emit only `code`/`description`/`quantity`/`price`.
- * Item `price` and `payments[0].value` are rounded to 2 decimals so the
- * cent-integer reconciliation `sum(payments) == sum(items)` holds exactly.
- */
 export function provetToSiigoInvoice(
   consultation: Consultation,
   client: Client,
@@ -96,6 +83,6 @@ export function provetToSiigoInvoice(
     }),
     payments: [{ id: paymentTypeId, value: paymentValue }],
     stamp: { send: stampSend },
-    mail: { send: true },
+    mail: { send: stampSend },
   };
 }

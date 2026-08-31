@@ -107,6 +107,13 @@ const ERROR_TRANSLATIONS: Record<string, TranslationEntry> = {
     quickAction: "none",
     retryable: false,
   },
+  invalid_value: {
+    message:
+      "Un valor enviado no es válido para el producto. Verifique en Siigo → Inventario que la unidad de medida del producto admita decimales si la cantidad tiene decimales, o revise el mapeo de ese ítem en Ajustes.",
+    severity: "error",
+    quickAction: "none",
+    retryable: false,
+  },
   unhandled_error: {
     message: "Error no controlado del lado de Siigo. Si persiste, contacte a soporteapi@siigo.com.",
     severity: "error",

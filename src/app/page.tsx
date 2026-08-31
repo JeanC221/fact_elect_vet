@@ -56,9 +56,6 @@ export default function HomePage() {
   const [busyInvoiceId, setBusyInvoiceId] = useState<string | null>(null);
   const options = useEmissionOptions();
 
-  // Client-only hydration (after mount, no SSR/hydration risk): load
-  // persisted invoice history so already-emitted rows stay excluded from the
-  // queue across page reloads (see pendingRows below).
   useEffect(() => {
     const stored = window.localStorage.getItem(HISTORY_STORAGE_KEY);
     if (!stored) return;
@@ -81,10 +78,6 @@ export default function HomePage() {
     if (!selectedId) return null;
     const detail = buildQuickEditDetail(mockConsultations, mockClients, mockPatients, selectedId, options.mapping);
     if (detail) return detail;
-    // Live Provet consultation not in mocks → build detail directly from the
-    // queue row, which already carries the correctly-inferred identification
-    // type/number and email (see provetToQueue.ts inferIdentification) —
-    // no more re-parsing clientDoc, which silently produced empty/wrong values.
     const row = rows.find((r) => r.id === selectedId);
     if (!row) return null;
     const fallback: QuickEditDetail = {
@@ -106,8 +99,6 @@ export default function HomePage() {
 
   const showToast = useCallback((msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3000); }, []);
 
-  // Wrap the hook's refresh so a manual sync surfaces a success toast (fetch
-  // logic, persistence & fallback live in useConsultationQueue).
   const handleRefreshConsultations = useCallback(async () => {
     const r = await handleRefresh();
     if (r.ok) showToast(`${r.count} consultas sincronizadas desde Provet`);
@@ -117,12 +108,6 @@ export default function HomePage() {
   const displayError = translatedError ?? queueFetchError;
   const handleDismissError = useCallback(() => { setTranslatedError(null); clearFetchError(); }, [clearFetchError]);
 
-  // Rows still pending emission: excludes any consultation with an entry in
-  // `history` (the real source of truth for "already invoiced"). Not based
-  // on invoiceStatus alone — Siigo returns "Draft" both for "never emitted"
-  // (the row's own default) AND "emitted successfully in sandbox" (stamp.send
-  // is false there, so it's never sent to the DIAN), so the two cases are
-  // indistinguishable from invoiceStatus without checking history.
   const invoicedConsultationIds = useMemo(
     () => new Set(history.map((e) => e.consultationId)),
     [history],
@@ -203,7 +188,10 @@ export default function HomePage() {
       const number = response.number ?? response.id;
       if (response.status === "Accepted") { setSelectedId(null); showToast(`Factura ${number} generada con éxito · CUFE: ${response.cufe}`); }
       else if (response.status === "Rejected") { setTranslatedError({ code: "rejected", message: "La DIAN rechazó la factura. Corrija los datos y reintente.", severity: "error", quickAction: "none", retryable: false }); }
-      else { setTranslatedError({ code: "draft", message: "Factura guardada como borrador.", severity: "warning", quickAction: "save_draft", retryable: false }); }
+      else {
+        setSelectedId(null);
+        showToast("Factura guardada como borrador en Siigo (pendiente de timbrar).");
+      }
     } catch (error) {
       console.error("Invoice emission failed:", error);
       const te = translateSiigoError(error);

@@ -26,6 +26,8 @@ const STYLES = {
     "border-status-rejected-border bg-status-rejected-bg text-status-rejected-text",
   warning:
     "border-status-draft-border bg-status-draft-bg text-status-draft-text",
+  success:
+    "border-status-accepted-border bg-status-accepted-bg text-status-accepted-text",
 } as const;
 
 export function ErrorBanner({
@@ -59,14 +61,12 @@ export function ErrorBanner({
 
   if (!error) return null;
 
-  // "Draft" (guardada en Siigo, aún sin CUFE/DIAN) is a successful outcome in
-  // sandbox mode — never show it with the "warning/error" icon, which reads
-  // as a failure even though the invoice was created correctly.
-  const Icon = error.quickAction === "save_draft" ? CheckCircle2 : error.severity === "warning" ? RefreshCw : AlertTriangle;
+  const isDraftSuccess = error.quickAction === "save_draft";
+  const Icon = isDraftSuccess ? CheckCircle2 : error.severity === "warning" ? RefreshCw : AlertTriangle;
   const label = ACTION_LABELS[error.quickAction];
 
   return (
-    <div className={`${BASE} ${STYLES[error.severity]}`}>
+    <div className={`${BASE} ${isDraftSuccess ? STYLES.success : STYLES[error.severity]}`}>
       <Icon className="mt-0.5 h-3 w-3 shrink-0" />
       <div className="flex flex-1 flex-wrap items-center gap-2">
         <span className="flex-1">

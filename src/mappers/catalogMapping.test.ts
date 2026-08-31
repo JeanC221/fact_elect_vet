@@ -4,6 +4,7 @@ import {
   buildItemMappingRows, buildPaymentMappingRows,
   defaultItemMapping, defaultPaymentMapping, reconcileMapping,
   serializeCatalogMapping, parseCatalogMapping, catalogMappingSchema,
+  nameSimilarity, rankSiigoProductsFor,
 } from "./catalogMapping";
 import { mockConsultations } from "@/mocks/provet";
 import { mockSiigoProducts, mockSiigoPaymentTypes } from "@/mocks/siigo";
@@ -67,16 +68,37 @@ describe("buildPaymentMappingRows", () => {
 });
 
 describe("defaultItemMapping", () => {
-  it("auto-matches by equal code and leaves others null", () => {
+  it("auto-matches by equal code first", () => {
     const byCode = new Map(defaultItemMapping(extractProvetItems(mockConsultations), mockSiigoProducts)
       .map((m) => [m.provetCode, m.siigoProductId]));
     expect(byCode.get("SERV-CG-01")).toBe("PROD-001");
+  });
+  it("falls back to best name-similarity match when no code matches (e.g. 'Desparasitante Oral' -> 'Desparasitante Oral Canino')", () => {
+    const byCode = new Map(defaultItemMapping(extractProvetItems(mockConsultations), mockSiigoProducts)
+      .map((m) => [m.provetCode, m.siigoProductId]));
+    expect(byCode.get("MED-DES-05")).toBe("PROD-003");
+  });
+  it("leaves items with zero shared words unmapped rather than guessing", () => {
+    const byCode = new Map(defaultItemMapping(extractProvetItems(mockConsultations), mockSiigoProducts)
+      .map((m) => [m.provetCode, m.siigoProductId]));
     expect(byCode.get("LAB-HEM-01")).toBeNull();
-    expect(byCode.get("MED-DES-05")).toBeNull();
   });
   it("yields one entry per provet item", () => {
     const items = extractProvetItems(mockConsultations);
     expect(defaultItemMapping(items, mockSiigoProducts)).toHaveLength(items.length);
+  });
+});
+
+describe("nameSimilarity / rankSiigoProductsFor", () => {
+  it("scores 0 for names with no shared significant words", () => {
+    expect(nameSimilarity("Hemograma Completo", "Cirugía de Esterilización")).toBe(0);
+  });
+  it("scores > 0 when names share significant words regardless of order/case/accents", () => {
+    expect(nameSimilarity("desparasitante oral", "Desparasitante Oral Canino")).toBeGreaterThan(0);
+  });
+  it("ranks the best name match first", () => {
+    const ranked = rankSiigoProductsFor("Desparasitante Oral", mockSiigoProducts);
+    expect(ranked[0].name).toBe("Desparasitante Oral Canino");
   });
 });
 

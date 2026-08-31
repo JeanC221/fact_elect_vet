@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { AlertTriangle, CheckCircle2, RefreshCw } from "lucide-react";
 import { Pagination, PAGE_SIZE_OPTIONS, type PageSizeOption } from "./Pagination";
+import { rankSiigoProductsFor } from "@/mappers/catalogMapping";
 import type { ItemMappingRow } from "@/mappers/catalogMapping";
 import type { SiigoProduct } from "@/schemas/siigo";
 
@@ -83,47 +84,57 @@ export function CatalogMapping({ rows, siigoProducts, onSelect, isRefreshing, on
                 </td>
               </tr>
             ) : (
-              pagedRows.map((row) => (
-                <tr key={row.provetCode} className="border-b border-grid-line hover:bg-cool-grey">
-                  <td className="truncate px-3 py-2 font-medium text-slate-text" title={row.provetCode}>
-                    {row.provetCode}
-                  </td>
-                  <td className="border-l border-grid-line px-3 py-2 text-slate-text" title={row.provetName}>
-                    <div className="truncate">{row.provetName}</div>
-                  </td>
-                  <td className="border-l border-grid-line px-3 py-2">
-                    <select
-                      value={row.siigoProductId ?? ""}
-                      onChange={(e) =>
-                        onSelect(row.provetCode, e.target.value || null)
-                      }
-                      className="w-full rounded-md border border-grid-line bg-pure-white px-1 py-1 text-xs text-slate-text focus:border-clinical-blue focus:outline-none"
-                      aria-label={`Producto Siigo para ${row.provetCode}`}
-                    >
-                      <option value="">— Sin mapear —</option>
-                      {siigoProducts.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.code} · {p.name}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
-                  <td className="border-l border-grid-line px-3 py-2 text-muted">
-                    {row.siigoTaxClassification ? TAX_LABELS[row.siigoTaxClassification] ?? row.siigoTaxClassification : "—"}
-                  </td>
-                  <td className="border-l border-grid-line px-3 py-2">
-                    {row.mapped ? (
-                      <span className="inline-flex items-center gap-1 rounded-md border border-status-accepted-border bg-status-accepted-bg px-2 py-0.5 text-xs font-semibold text-status-accepted-text">
-                        <CheckCircle2 className="h-3 w-3" /> Mapeado
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 rounded-md border border-status-draft-border bg-status-draft-bg px-2 py-0.5 text-xs font-semibold text-status-draft-text">
-                        <AlertTriangle className="h-3 w-3" /> Sin mapear
-                      </span>
-                    )}
-                  </td>
-                </tr>
-              ))
+              pagedRows.map((row) => {
+                // Best-name-match first so the likely correct product is at the top of the dropdown.
+                const rankedProducts = rankSiigoProductsFor(row.provetName, siigoProducts);
+                return (
+                  <tr key={row.provetCode} className="border-b border-grid-line hover:bg-cool-grey">
+                    <td className="truncate px-3 py-2 font-medium text-slate-text" title={row.provetCode}>
+                      {row.provetCode}
+                    </td>
+                    <td className="border-l border-grid-line px-3 py-2 text-slate-text" title={row.provetName}>
+                      <div className="truncate">{row.provetName}</div>
+                    </td>
+                    <td className="border-l border-grid-line px-3 py-2">
+                      <select
+                        value={row.siigoProductId ?? ""}
+                        onChange={(e) =>
+                          onSelect(row.provetCode, e.target.value || null)
+                        }
+                        className="w-full rounded-md border border-grid-line bg-pure-white px-1 py-1 text-xs text-slate-text focus:border-clinical-blue focus:outline-none"
+                        aria-label={`Producto Siigo para ${row.provetCode}`}
+                      >
+                        <option value="">— Sin mapear —</option>
+                        {rankedProducts.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.code} · {p.name} · {p.unit?.name ?? p.unit?.code ?? "sin unidad"}
+                          </option>
+                        ))}
+                      </select>
+                      {row.lowConfidence && (
+                        <div className="mt-1 flex items-start gap-1 text-[11px] font-medium text-status-draft-text">
+                          <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+                          <span>Nombres muy distintos — confirme que este es el producto correcto.</span>
+                        </div>
+                      )}
+                    </td>
+                    <td className="border-l border-grid-line px-3 py-2 text-muted">
+                      {row.siigoTaxClassification ? TAX_LABELS[row.siigoTaxClassification] ?? row.siigoTaxClassification : "—"}
+                    </td>
+                    <td className="border-l border-grid-line px-3 py-2">
+                      {row.mapped ? (
+                        <span className="inline-flex items-center gap-1 rounded-md border border-status-accepted-border bg-status-accepted-bg px-2 py-0.5 text-xs font-semibold text-status-accepted-text">
+                          <CheckCircle2 className="h-3 w-3" /> Mapeado
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 rounded-md border border-status-draft-border bg-status-draft-bg px-2 py-0.5 text-xs font-semibold text-status-draft-text">
+                          <AlertTriangle className="h-3 w-3" /> Sin mapear
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>

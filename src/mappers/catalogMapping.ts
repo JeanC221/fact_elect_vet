@@ -26,7 +26,10 @@ export interface ItemMappingRow {
   siigoProductId: string | null;
   siigoProductName: string | null;
   siigoTaxClassification: SiigoProduct["tax_classification"] | null;
+  siigoUnitName: string | null;
   mapped: boolean;
+  /** True when a product is mapped but its name shares no significant word with the Provet item name. */
+  lowConfidence: boolean;
 }
 export interface PaymentMappingRow {
   provetMethod: string;
@@ -39,6 +42,25 @@ export interface PaymentMappingRow {
 }
 
 type ProvetItemRef = { code: string; name: string };
+
+const norm = (s: string): string => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+/** Words of length >=3 to ignore noise from short connector words. */
+const significantWords = (s: string): string[] => norm(s).split(/[^a-z0-9]+/).filter((w) => w.length >= 3);
+export function nameSimilarity(a: string, b: string): number {
+  const wa = new Set(significantWords(a));
+  const wb = new Set(significantWords(b));
+  if (wa.size === 0 || wb.size === 0) return 0;
+  let shared = 0;
+  for (const w of wa) if (wb.has(w)) shared++;
+  return shared / Math.max(wa.size, wb.size);
+}
+/** Siigo products ranked by name similarity to a Provet item name, best match first (ties keep original order). */
+export function rankSiigoProductsFor(provetName: string, siigoProducts: SiigoProduct[]): SiigoProduct[] {
+  return siigoProducts
+    .map((p, i) => ({ p, i, score: nameSimilarity(provetName, p.name) }))
+    .sort((x, y) => y.score - x.score || x.i - y.i)
+    .map((x) => x.p);
+}
 
 /** Distinct Provet item {code,name}; first name wins; stable O(n). */
 export function extractProvetItems(consultations: Consultation[]): ProvetItemRef[] {
@@ -64,7 +86,9 @@ export function buildItemMappingRows(items: ProvetItemRef[], siigoProducts: Siig
     const id = byCode.get(it.code) ?? null;
     const p = id ? byId.get(id) ?? null : null;
     return { provetCode: it.code, provetName: it.name, siigoProductId: p ? id : null,
-      siigoProductName: p?.name ?? null, siigoTaxClassification: p?.tax_classification ?? null, mapped: Boolean(p) };
+      siigoProductName: p?.name ?? null, siigoTaxClassification: p?.tax_classification ?? null,
+      siigoUnitName: p?.unit?.name ?? p?.unit?.code ?? null,
+      mapped: Boolean(p), lowConfidence: Boolean(p) && nameSimilarity(it.name, p?.name ?? "") === 0 };
   });
 }
 /** Left-join provet methods -> siigo payment types via mapping; stale ids -> unmapped. */
@@ -79,12 +103,18 @@ export function buildPaymentMappingRows(methods: string[], siigoPaymentTypes: Si
       siigoPaymentActive: pt?.active ?? null, mapped: Boolean(pt) };
   });
 }
-/** Auto-match items by exact code equality; others null. */
+/** Auto-match items: exact code match first, else best name-similarity match (score > 0) so a plausible default is pre-selected instead of nothing. */
 export function defaultItemMapping(items: ProvetItemRef[], siigoProducts: SiigoProduct[]): ItemMapping[] {
   const byCode = new Map(siigoProducts.map((p) => [p.code, p.id]));
-  return items.map((it) => ({ provetCode: it.code, siigoProductId: byCode.get(it.code) ?? null }));
+  return items.map((it) => {
+    const exact = byCode.get(it.code);
+    if (exact) return { provetCode: it.code, siigoProductId: exact };
+    const ranked = rankSiigoProductsFor(it.name, siigoProducts);
+    const best = ranked[0];
+    const bestScore = best ? nameSimilarity(it.name, best.name) : 0;
+    return { provetCode: it.code, siigoProductId: bestScore > 0 ? best.id : null };
+  });
 }
-const norm = (s: string): string => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 /** Auto-match payment methods by normalized name containment (either direction). */
 export function defaultPaymentMapping(methods: string[], siigoPaymentTypes: SiigoPaymentType[]): PaymentMapping[] {
   const ns = siigoPaymentTypes.map((pt) => ({ id: pt.id, n: norm(pt.name) }));
