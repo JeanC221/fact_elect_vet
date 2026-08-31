@@ -1,9 +1,11 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Clock, FileText, Loader2, RefreshCw } from "lucide-react";
+import { Clock, FileText, Loader2, RefreshCw, Search } from "lucide-react";
 import { StatusBadge } from "./StatusBadge";
+import { SortableHeader } from "./SortableHeader";
 import { Pagination, PAGE_SIZE_OPTIONS, type PageSizeOption } from "./Pagination";
+import { nextSortState, sortRows, type SortState } from "@/mappers/tableSort";
 import {
   formatDate,
   type ConsultationQueueRow,
@@ -18,23 +20,61 @@ interface ConsultationQueueProps {
   onRefresh?: () => void;
 }
 
-const COLUMNS = ["Consulta", "Cliente", "Paciente", "Total", "Pago", "Fecha", "Estado DIAN", ""] as const;
+type SortColumn = "id" | "clientName" | "patientName" | "total" | "paymentMethod" | "createdAt";
+const SORT_EXTRACT: Record<SortColumn, (r: ConsultationQueueRow) => string | number | Date> = {
+  id: (r) => r.id,
+  clientName: (r) => r.clientName,
+  patientName: (r) => r.patientName,
+  total: (r) => r.total,
+  paymentMethod: (r) => r.paymentMethod,
+  createdAt: (r) => r.createdAt,
+};
 
 export function ConsultationQueue({ rows, onInvoiceClick, isRefreshing, isInitialLoading, disableActions, onRefresh }: ConsultationQueueProps) {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<PageSizeOption>(PAGE_SIZE_OPTIONS[0]);
+  const [search, setSearch] = useState("");
+  const [sort, setSort] = useState<SortState<SortColumn> | null>(null);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter((r) =>
+      r.clientName.toLowerCase().includes(q) ||
+      r.clientDoc.toLowerCase().includes(q) ||
+      r.patientName.toLowerCase().includes(q) ||
+      r.id.toLowerCase().includes(q));
+  }, [rows, search]);
+
+  const sorted = useMemo(
+    () => sortRows(filtered, sort, (r, col) => SORT_EXTRACT[col](r)),
+    [filtered, sort],
+  );
 
   const pagedRows = useMemo(() => {
     const startIdx = (page - 1) * pageSize;
-    return rows.slice(startIdx, startIdx + pageSize);
-  }, [rows, page, pageSize]);
+    return sorted.slice(startIdx, startIdx + pageSize);
+  }, [sorted, page, pageSize]);
+
+  const handleSort = (column: SortColumn) => { setSort((s) => nextSortState(s, column)); setPage(1); };
+  const TH = "border-r border-grid-line px-3 py-2 text-left";
 
   return (
     <section className="flex h-[calc(100vh-120px)] flex-col rounded-md border border-grid-line bg-pure-white">
       <div className="flex items-center justify-between border-b border-grid-line px-3 py-2">
         <h2 className="text-base font-semibold text-slate-text">Cola de Consultas</h2>
         <div className="flex items-center gap-2">
-          <span className="text-xs text-muted">{rows.length} consultas</span>
+          <span className="text-xs text-muted">{filtered.length} consultas</span>
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted" aria-hidden="true" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+              placeholder="Cliente, paciente o consulta..."
+              className="w-56 rounded-md border border-grid-line bg-pure-white py-1 pl-7 pr-2 text-xs text-slate-text focus:border-clinical-blue focus:outline-none"
+            />
+          </div>
           {onRefresh && (
             <button type="button" onClick={onRefresh} disabled={isRefreshing} className="inline-flex items-center gap-1 rounded-md border border-grid-line px-2 py-1 text-xs font-semibold text-muted hover:bg-cool-grey disabled:opacity-40">
               <RefreshCw className={`h-3 w-3 ${isRefreshing ? "animate-spin" : ""}`} aria-hidden="true" /> Refrescar Atenciones
@@ -47,27 +87,27 @@ export function ConsultationQueue({ rows, onInvoiceClick, isRefreshing, isInitia
         <table className="w-full table-fixed border-collapse text-xs">
           <thead className="sticky top-0 z-10 bg-pure-white">
             <tr className="border-b border-grid-line">
-              {COLUMNS.map((col, i) => (
-                <th
-                  key={col}
-                  className={`px-3 py-2 text-left font-semibold text-muted ${
-                    i < COLUMNS.length - 1 ? "border-r border-grid-line" : ""
-                  }`}
-                >
-                  {col}
-                </th>
-              ))}
+              <SortableHeader label="Consulta" column="id" sort={sort} onSort={handleSort} className={TH} />
+              <SortableHeader label="Cliente" column="clientName" sort={sort} onSort={handleSort} className={TH} />
+              <SortableHeader label="Paciente" column="patientName" sort={sort} onSort={handleSort} className={TH} />
+              <SortableHeader label="Total" column="total" sort={sort} onSort={handleSort} className={TH} />
+              <SortableHeader label="Pago" column="paymentMethod" sort={sort} onSort={handleSort} className={TH} />
+              <SortableHeader label="Fecha" column="createdAt" sort={sort} onSort={handleSort} className={TH} />
+              <th className={`${TH} font-semibold text-muted`}>Estado DIAN</th>
+              <th className="px-3 py-2" />
             </tr>
           </thead>
           <tbody>
             {pagedRows.length === 0 ? (
               <tr>
-                <td colSpan={COLUMNS.length} className="px-3 py-6 text-center text-muted">
+                <td colSpan={8} className="px-3 py-6 text-center text-muted">
                   {isInitialLoading ? (
                     <span className="inline-flex items-center gap-1.5">
                       <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
                       Cargando consultas desde Provet…
                     </span>
+                  ) : search.trim() ? (
+                    "Sin resultados para la búsqueda."
                   ) : (
                     "Sin consultas pendientes."
                   )}
@@ -137,7 +177,7 @@ export function ConsultationQueue({ rows, onInvoiceClick, isRefreshing, isInitia
       <Pagination
         page={page}
         pageSize={pageSize}
-        total={rows.length}
+        total={filtered.length}
         onPageChange={setPage}
         onPageSizeChange={(size) => { setPageSize(size as PageSizeOption); setPage(1); }}
       />

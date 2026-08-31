@@ -4,6 +4,8 @@ import { useMemo, useState } from "react";
 import { Ban, Code, Eye, FileText, Loader2 } from "lucide-react";
 import { StatusBadge } from "./StatusBadge";
 import { HistoryFilterBar } from "./HistoryFilterBar";
+import { SortableHeader } from "./SortableHeader";
+import { nextSortState, sortRows, type SortState } from "@/mappers/tableSort";
 import {
   PAGE_SIZE_OPTIONS,
   Pagination,
@@ -21,6 +23,17 @@ import {
   formatDate,
   type ConsultationQueueRow,
 } from "@/mappers/consultationQueue";
+
+type SortColumn = "invoiceId" | "clientName" | "patientName" | "total" | "paymentMethod" | "emittedAt" | "status";
+const SORT_EXTRACT: Record<SortColumn, (r: InvoiceHistoryRow) => string | number | Date> = {
+  invoiceId: (r) => r.invoiceNumber ?? r.invoiceId,
+  clientName: (r) => r.clientName,
+  patientName: (r) => r.patientName,
+  total: (r) => r.total,
+  paymentMethod: (r) => r.paymentMethod,
+  emittedAt: (r) => r.emittedAt,
+  status: (r) => r.status,
+};
 
 const COLUMNS = [
   "Factura",
@@ -54,6 +67,7 @@ export function InvoiceHistory({
   const [status, setStatus] = useState<HistoryStatusFilter>("All");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<PageSizeOption>(PAGE_SIZE_OPTIONS[0]);
+  const [sort, setSort] = useState<SortState<SortColumn> | null>(null);
 
   const historyRows = useMemo(() => buildInvoiceHistory(entries, rows), [
     entries,
@@ -63,14 +77,20 @@ export function InvoiceHistory({
     () => filterInvoiceHistory(historyRows, { search, status }),
     [historyRows, search, status],
   );
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const sorted = useMemo(
+    () => sortRows(filtered, sort, (r, col) => SORT_EXTRACT[col](r)),
+    [filtered, sort],
+  );
+  const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize));
   const safePage = Math.min(page, totalPages);
-  const { slice } = paginateHistory(filtered, safePage, pageSize);
+  const { slice } = paginateHistory(sorted, safePage, pageSize);
 
   const handlePageSize = (size: number) => {
     setPageSize(size as PageSizeOption);
     setPage(1);
   };
+  const handleSort = (column: SortColumn) => { setSort((s) => nextSortState(s, column)); setPage(1); };
+  const TH = "border-r border-grid-line px-3 py-2 text-left";
 
   const emptyMsg =
     historyRows.length === 0 ? "Sin facturas emitidas." : "Sin resultados para la búsqueda.";
@@ -83,7 +103,7 @@ export function InvoiceHistory({
       <HistoryFilterBar
         search={search}
         status={status}
-        resultCount={filtered.length}
+        resultCount={sorted.length}
         onSearchChange={(v) => { setSearch(v); setPage(1); }}
         onStatusChange={(s) => { setStatus(s); setPage(1); }}
       />
@@ -91,9 +111,14 @@ export function InvoiceHistory({
         <table className="w-full table-fixed border-collapse text-xs">
           <thead className="sticky top-0 z-10 bg-pure-white">
             <tr className="border-b border-grid-line">
-              {COLUMNS.map((col, i) => (
-                <th key={col} className={`px-3 py-2 text-left font-semibold text-muted ${i < COLUMNS.length - 1 ? "border-r border-grid-line" : ""}`}>{col}</th>
-              ))}
+              <SortableHeader label="Factura" column="invoiceId" sort={sort} onSort={handleSort} className={TH} />
+              <SortableHeader label="Cliente" column="clientName" sort={sort} onSort={handleSort} className={TH} />
+              <SortableHeader label="Paciente" column="patientName" sort={sort} onSort={handleSort} className={TH} />
+              <SortableHeader label="Total" column="total" sort={sort} onSort={handleSort} className={TH} />
+              <SortableHeader label="Pago" column="paymentMethod" sort={sort} onSort={handleSort} className={TH} />
+              <SortableHeader label="Emitida" column="emittedAt" sort={sort} onSort={handleSort} className={TH} />
+              <SortableHeader label="Estado DIAN" column="status" sort={sort} onSort={handleSort} className={TH} />
+              <th className="px-3 py-2 text-left font-semibold text-muted">PDF/XML</th>
             </tr>
           </thead>
           <tbody>
@@ -145,7 +170,7 @@ export function InvoiceHistory({
           </tbody>
         </table>
       </div>
-      <Pagination page={safePage} pageSize={pageSize} total={filtered.length} onPageChange={setPage} onPageSizeChange={handlePageSize} />
+      <Pagination page={safePage} pageSize={pageSize} total={sorted.length} onPageChange={setPage} onPageSizeChange={handlePageSize} />
     </section>
   );
 }
