@@ -1,8 +1,10 @@
 import { z } from "zod";
 import type { SiigoInvoiceResponse } from "@/schemas/siigo";
-import type {
-  ConsultationQueueRow,
-  InvoiceStatus,
+import {
+  quickEditFormSchema,
+  type ConsultationQueueRow,
+  type InvoiceStatus,
+  type QuickEditFormValues,
 } from "@/mappers/consultationQueue";
 
 /** Persisted emission record linking a Siigo invoice to its Provet consultation. */
@@ -17,6 +19,8 @@ export interface InvoiceHistoryEntry {
   paymentMethod: string;
   observations?: string;
   emittedAt: Date;
+  /** Exact Quick-Edit form values confirmed by staff at the moment of emission — the read-only "eye" view in the history table shows this verbatim, not a reconstruction from the current consultation state (which may have since changed). */
+  formSnapshot?: QuickEditFormValues;
 }
 
 /** Zod schema for persisted history entries (runtime validation on load). */
@@ -29,6 +33,7 @@ export const invoiceHistoryEntrySchema = z.object({
   paymentMethod: z.string().default(""),
   observations: z.string().optional(),
   emittedAt: z.coerce.date(),
+  formSnapshot: quickEditFormSchema.optional(),
 });
 
 /** Zod-validated JSON serialization of the full history array for localStorage persistence. */
@@ -53,6 +58,7 @@ export interface InvoiceHistoryRow {
   total: number;
   paymentMethod: string;
   emittedAt: Date;
+  formSnapshot?: QuickEditFormValues;
 }
 
 /** DIAN status filter tabs for the history view. */
@@ -80,6 +86,7 @@ export function toInvoiceHistoryEntry(
   consultationId: string,
   emittedAt: Date,
   paymentMethod: string = "",
+  formSnapshot?: QuickEditFormValues,
 ): InvoiceHistoryEntry {
   return {
     invoiceId: response.id,
@@ -90,6 +97,7 @@ export function toInvoiceHistoryEntry(
     paymentMethod,
     observations: response.observations,
     emittedAt,
+    formSnapshot,
   };
 }
 
@@ -113,6 +121,7 @@ export function buildInvoiceHistory(
       total: r?.total ?? 0,
       paymentMethod: e.paymentMethod || "Pendiente",
       emittedAt: e.emittedAt,
+      formSnapshot: e.formSnapshot,
     };
   });
 }

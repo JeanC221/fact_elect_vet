@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Ban, Code, FileText, Loader2 } from "lucide-react";
+import { Ban, Code, Eye, FileText, Loader2 } from "lucide-react";
 import { StatusBadge } from "./StatusBadge";
 import { HistoryFilterBar } from "./HistoryFilterBar";
 import {
@@ -15,6 +15,7 @@ import {
   paginateHistory,
   type HistoryStatusFilter,
   type InvoiceHistoryEntry,
+  type InvoiceHistoryRow,
 } from "@/mappers/invoiceHistory";
 import {
   formatDate,
@@ -38,6 +39,7 @@ interface InvoiceHistoryProps {
   busyDownload?: { invoiceId: string; format: "pdf" | "xml" } | null;
   onDownload?: (invoiceId: string, format: "pdf" | "xml") => void;
   onAnnul?: (invoiceId: string) => void;
+  onViewSnapshot?: (row: InvoiceHistoryRow) => void;
 }
 
 export function InvoiceHistory({
@@ -46,6 +48,7 @@ export function InvoiceHistory({
   busyDownload = null,
   onDownload,
   onAnnul,
+  onViewSnapshot,
 }: InvoiceHistoryProps) {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<HistoryStatusFilter>("All");
@@ -118,6 +121,11 @@ export function InvoiceHistory({
                   <td className="border-l border-grid-line px-3 py-2"><StatusBadge status={r.status} /></td>
                   <td className="border-l border-grid-line px-3 py-2">
                     <div className="flex items-center gap-1">
+                      {onViewSnapshot && (
+                        <button type="button" onClick={() => onViewSnapshot(r)} className="rounded-md border border-grid-line p-1 text-muted hover:bg-cool-grey hover:text-clinical-blue" aria-label="Ver datos enviados" title="Ver datos enviados">
+                          <Eye className="h-3.5 w-3.5" aria-hidden="true" />
+                        </button>
+                      )}
                       <button type="button" disabled={busyDownload?.invoiceId === r.invoiceId} onClick={() => onDownload?.(r.invoiceId, "pdf")} className="rounded-md border border-grid-line p-1 text-muted hover:bg-cool-grey hover:text-clinical-blue disabled:opacity-50" aria-label="Descargar PDF" title="Descargar PDF">
                         {busyDownload?.invoiceId === r.invoiceId && busyDownload.format === "pdf" ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <FileText className="h-3.5 w-3.5" aria-hidden="true" />}
                       </button>

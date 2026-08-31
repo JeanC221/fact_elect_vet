@@ -6,6 +6,7 @@ import { NavBar } from "@/components/NavBar";
 import { ConsultationQueue } from "@/components/ConsultationQueue";
 import { QuickEditDrawer } from "@/components/QuickEditDrawer";
 import { InvoiceHistory } from "@/components/InvoiceHistory";
+import { InvoiceSnapshotDrawer } from "@/components/InvoiceSnapshotDrawer";
 import { CreditNoteModal } from "@/components/CreditNoteModal";
 import {
   buildInvoicePayloadFromQuickEdit,
@@ -51,11 +52,15 @@ export default function HomePage() {
   const [retryAttempt, setRetryAttempt] = useState(0);
   const [toast, setToast] = useState<string | null>(null);
   const [annulTarget, setAnnulTarget] = useState<InvoiceHistoryRow | null>(null);
+  const [snapshotTarget, setSnapshotTarget] = useState<InvoiceHistoryRow | null>(null);
   const [isAnnulling, setIsAnnulling] = useState(false);
   const [annulError, setAnnulError] = useState<string | null>(null);
   const [busyDownload, setBusyDownload] = useState<{ invoiceId: string; format: "pdf" | "xml" } | null>(null);
   const options = useEmissionOptions();
 
+  // Client-only hydration (after mount, no SSR/hydration risk): load
+  // persisted invoice history so already-emitted rows stay excluded from the
+  // queue across page reloads (see pendingRows below).
   useEffect(() => {
     const stored = window.localStorage.getItem(HISTORY_STORAGE_KEY);
     if (!stored) return;
@@ -78,6 +83,7 @@ export default function HomePage() {
     if (!selectedId) return null;
     const detail = buildQuickEditDetail(mockConsultations, mockClients, mockPatients, selectedId, options.mapping);
     if (detail) return detail;
+
     const row = rows.find((r) => r.id === selectedId);
     if (!row) return null;
     const fallback: QuickEditDetail = {
@@ -99,6 +105,8 @@ export default function HomePage() {
 
   const showToast = useCallback((msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3000); }, []);
 
+  // Wrap the hook's refresh so a manual sync surfaces a success toast (fetch
+  // logic, persistence & fallback live in useConsultationQueue).
   const handleRefreshConsultations = useCallback(async () => {
     const r = await handleRefresh();
     if (r.ok) showToast(`${r.count} consultas sincronizadas desde Provet`);
@@ -117,7 +125,6 @@ export default function HomePage() {
     [rows, invoicedConsultationIds],
   );
 
-  // 2. handleDownload completo
   const handleDownload = useCallback(async (invoiceId: string, format: "pdf" | "xml") => {
     setBusyDownload({ invoiceId, format });
     try {
@@ -130,6 +137,9 @@ export default function HomePage() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
+      // Use the human-readable Siigo invoice number (e.g. "1234") instead of
+      // the opaque GUID id for the downloaded filename — falls back to the
+      // id only if Siigo never returned a number for this invoice.
       const readableName = history.find((e) => e.invoiceId === invoiceId)?.invoiceNumber ?? invoiceId;
       a.download = `factura-${readableName}.${format}`;
       a.click();
@@ -186,11 +196,12 @@ export default function HomePage() {
         return siigoInvoiceResponseSchema.parse(data);
       }, { maxRetries: 5, onRetry: (n) => setRetryAttempt(n) });
       setRowStatus(selectedId, mapSiigoInvoiceStatus(response.status));
-      updateHistory((prev) => [...prev, toInvoiceHistoryEntry(response, selectedId, new Date(), values.paymentMethod)]);
+      updateHistory((prev) => [...prev, toInvoiceHistoryEntry(response, selectedId, new Date(), values.paymentMethod, values)]);
       const number = response.number ?? response.id;
       if (response.status === "Accepted") { setSelectedId(null); showToast(`Factura ${number} generada con éxito · CUFE: ${response.cufe}`); }
       else if (response.status === "Rejected") { setTranslatedError({ code: "rejected", message: "La DIAN rechazó la factura. Corrija los datos y reintente.", severity: "error", quickAction: "none", retryable: false }); }
       else {
+
         setSelectedId(null);
         showToast("Factura guardada como borrador en Siigo (pendiente de timbrar).");
       }
@@ -218,10 +229,11 @@ export default function HomePage() {
         {tab === "queue" ? (
           <ConsultationQueue rows={pendingRows} isRefreshing={isRefreshing} isInitialLoading={isInitialLoading} disableActions={disableActions} onRefresh={handleRefreshConsultations} onInvoiceClick={(id) => setSelectedId(id)} />
         ) : (
-          <InvoiceHistory entries={history} rows={rows} busyDownload={busyDownload} onDownload={handleDownload} onAnnul={handleAnnul} />
+          <InvoiceHistory entries={history} rows={rows} busyDownload={busyDownload} onDownload={handleDownload} onAnnul={handleAnnul} onViewSnapshot={setSnapshotTarget} />
         )}
         <QuickEditDrawer detail={selectedDetail} isSubmitting={isSubmitting} errorMessage={translatedError?.message ?? null} errorDetail={translatedError?.detail ?? null} fallbackItemCode={options.fallbackItemCode} onClose={handleClose} onSubmit={handleSubmit} />
         <CreditNoteModal row={annulTarget} isSubmitting={isAnnulling} errorMessage={annulError} onClose={() => { if (!isAnnulling) setAnnulTarget(null); }} onConfirm={handleAnnulConfirm} />
+        <InvoiceSnapshotDrawer row={snapshotTarget} onClose={() => setSnapshotTarget(null)} />
         {toast && (
           <div className="fixed bottom-4 right-4 z-50 flex max-w-md items-center gap-2 rounded-md border border-status-accepted-border bg-status-accepted-bg px-3 py-2 text-sm font-semibold text-status-accepted-text">
             <CheckCircle2 className="h-4 w-4 shrink-0" />

@@ -6,20 +6,15 @@ import { generateIdempotencyKey, SiigoApiError, submitInvoice } from "@/services
 
 export const dynamic = "force-dynamic";
 
-/**
- * POST /api/invoices — live Siigo invoice emission.
- * Zod-validates the client payload, authenticates server-side, forwards the
- * request with mandatory Partner-Id + Idempotency-Key headers, and returns the
- * Siigo response (including the draft consecutive number) or a structured
- * Spanish error for the UI translation layer.
- */
 export async function POST(req: Request): Promise<NextResponse> {
   try {
     const body = await req.json();
     const payload = siigoInvoicePayloadSchema.parse(body);
+    console.log("[Siigo] POST /v1/invoices payload:", JSON.stringify(payload, null, 2));
     const idempotencyKey = req.headers.get("X-Idempotency-Key") ?? generateIdempotencyKey();
     const { accessToken, partnerId } = await getSiigoAccessToken();
     const response = await submitInvoice(payload, accessToken, partnerId, idempotencyKey);
+    console.log("[Siigo] POST /v1/invoices response:", JSON.stringify(response, null, 2));
     return NextResponse.json(response);
   } catch (err) {
     if (err instanceof SiigoAuthError) {

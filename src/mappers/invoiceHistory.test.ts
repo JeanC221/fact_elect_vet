@@ -20,6 +20,19 @@ describe("toInvoiceHistoryEntry", () => {
     expect(e.observations).toContain("invalid_identification");
     expect(e.consultationId).toBe("CON-001");
   });
+
+  it("stores the Quick-Edit form snapshot verbatim when provided (for the read-only history 'eye' view)", () => {
+    const snapshot = { name: "Adam Love", identificationType: "CC" as const, identificationNumber: "9876544331", email: "adam@example.com", phone: "3105550101", paymentMethod: "Tarjeta Crédito", paidAmount: 71.5 };
+    const e = toInvoiceHistoryEntry(mockSiigoInvoiceResponses[0], "CON-001", new Date("2026-08-15"), "Tarjeta Crédito", snapshot);
+    expect(e.formSnapshot).toEqual(snapshot);
+    expect(invoiceHistoryEntrySchema.safeParse(e).success).toBe(true);
+  });
+
+  it("leaves formSnapshot undefined when not provided, and that still validates (older entries predate this field)", () => {
+    const e = toInvoiceHistoryEntry(mockSiigoInvoiceResponses[0], "CON-001", new Date("2026-08-15"));
+    expect(e.formSnapshot).toBeUndefined();
+    expect(invoiceHistoryEntrySchema.safeParse(e).success).toBe(true);
+  });
 });
 
 describe("invoiceHistoryEntrySchema", () => {
