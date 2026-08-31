@@ -218,7 +218,7 @@ export default function HomePage() {
         ) : (
           <InvoiceHistory entries={history} rows={rows} busyInvoiceId={busyInvoiceId} onDownload={handleDownload} onAnnul={handleAnnul} />
         )}
-        <QuickEditDrawer detail={selectedDetail} isSubmitting={isSubmitting} errorMessage={translatedError?.message ?? null} errorDetail={translatedError?.detail ?? null} onClose={handleClose} onSubmit={handleSubmit} />
+        <QuickEditDrawer detail={selectedDetail} isSubmitting={isSubmitting} errorMessage={translatedError?.message ?? null} errorDetail={translatedError?.detail ?? null} fallbackItemCode={options.fallbackItemCode} onClose={handleClose} onSubmit={handleSubmit} />
         <CreditNoteModal row={annulTarget} isSubmitting={isAnnulling} errorMessage={annulError} onClose={() => { if (!isAnnulling) setAnnulTarget(null); }} onConfirm={handleAnnulConfirm} />
         {toast && (
           <div className="fixed bottom-4 right-4 z-50 flex max-w-md items-center gap-2 rounded-md border border-status-accepted-border bg-status-accepted-bg px-3 py-2 text-sm font-semibold text-status-accepted-text">

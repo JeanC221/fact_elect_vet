@@ -17,6 +17,8 @@ interface QuickEditDrawerProps {
   isSubmitting: boolean;
   errorMessage: string | null;
   errorDetail?: string | null;
+  /** Configured fallback Siigo product code (Ajustes → Mapeo), used when a consultation has no items. */
+  fallbackItemCode?: string;
   onClose: () => void;
   onSubmit: (values: QuickEditFormValues) => void;
 }
@@ -33,7 +35,7 @@ function initialValues(d: QuickEditDetail | null): QuickEditFormValues {
   return { name: d?.clientName ?? "", identificationType: d?.identificationType ?? "CC", identificationNumber: d?.identificationNumber ?? "", email: d?.email ?? "", phone: d?.phone ?? "", paymentMethod: d?.paymentMethod ?? "", paidAmount: d?.total ?? 0 };
 }
 
-export function QuickEditDrawer({ detail, isSubmitting, errorMessage, errorDetail, onClose, onSubmit }: QuickEditDrawerProps) {
+export function QuickEditDrawer({ detail, isSubmitting, errorMessage, errorDetail, fallbackItemCode, onClose, onSubmit }: QuickEditDrawerProps) {
   const [values, setValues] = useState<QuickEditFormValues>(() => initialValues(detail));
   const [isEditingAmount, setIsEditingAmount] = useState(false);
   useEffect(() => { setValues(initialValues(detail)); setIsEditingAmount(false); }, [detail?.id]);
@@ -42,7 +44,8 @@ export function QuickEditDrawer({ detail, isSubmitting, errorMessage, errorDetai
   const parsed = quickEditFormSchema.safeParse(values);
   const errors: Record<string, string> = parsed.success ? {} : Object.fromEntries(parsed.error.issues.map((i) => [String(i.path[0]), i.message]));
   const balanced = toCents(detail?.total ?? 0) - toCents(values.paidAmount) === 0;
-  const canSubmit = parsed.success && balanced && !isSubmitting && detail !== null && values.paymentMethod !== "";
+  const missingFallback = detail !== null && detail.items.length === 0 && !fallbackItemCode;
+  const canSubmit = parsed.success && balanced && !isSubmitting && detail !== null && values.paymentMethod !== "" && !missingFallback;
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
@@ -125,6 +128,12 @@ export function QuickEditDrawer({ detail, isSubmitting, errorMessage, errorDetai
               {detail.items.map((it) => (<tr key={it.code} className="border-b border-grid-line last:border-0"><td className="px-2 py-1 text-slate-text">{it.name}</td><td className="px-2 py-1 text-right text-muted">x{it.quantity}</td><td className="px-2 py-1 text-right font-medium text-slate-text">{formatCOP(it.lineTotal)}</td></tr>))}
             </tbody></table>
           </div>
+          {missingFallback && (
+            <div className="flex items-start gap-2 rounded-md border border-status-draft-border bg-status-draft-bg px-2 py-2 text-xs text-status-draft-text">
+              <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+              <span>Esta consulta aún no tiene ítems registrados en Provet.</span>
+            </div>
+          )}
           {errorMessage && <div className="flex items-start gap-2 rounded-md border border-status-rejected-border bg-status-rejected-bg px-2 py-2 text-xs text-status-rejected-text"><AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" /><span>{errorDetail ?? errorMessage}</span></div>}
         </div>
         <footer className="border-t border-grid-line p-3">
@@ -135,4 +144,3 @@ export function QuickEditDrawer({ detail, isSubmitting, errorMessage, errorDetai
     </div>
   );
 }
-
