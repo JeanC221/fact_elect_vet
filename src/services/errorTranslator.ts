@@ -114,6 +114,13 @@ const ERROR_TRANSLATIONS: Record<string, TranslationEntry> = {
     quickAction: "none",
     retryable: false,
   },
+  invalid_document: {
+    message:
+      "El XML de la factura electrónica solo está disponible una vez que la factura fue aceptada por la DIAN (con CUFE). El PDF sí puede descargarse mientras esté en borrador.",
+    severity: "warning",
+    quickAction: "none",
+    retryable: false,
+  },
   unhandled_error: {
     message: "Error no controlado del lado de Siigo. Si persiste, contacte a soporteapi@siigo.com.",
     severity: "error",

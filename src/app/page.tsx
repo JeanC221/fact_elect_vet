@@ -53,7 +53,7 @@ export default function HomePage() {
   const [annulTarget, setAnnulTarget] = useState<InvoiceHistoryRow | null>(null);
   const [isAnnulling, setIsAnnulling] = useState(false);
   const [annulError, setAnnulError] = useState<string | null>(null);
-  const [busyInvoiceId, setBusyInvoiceId] = useState<string | null>(null);
+  const [busyDownload, setBusyDownload] = useState<{ invoiceId: string; format: "pdf" | "xml" } | null>(null);
   const options = useEmissionOptions();
 
   useEffect(() => {
@@ -117,8 +117,9 @@ export default function HomePage() {
     [rows, invoicedConsultationIds],
   );
 
+  // 2. handleDownload completo
   const handleDownload = useCallback(async (invoiceId: string, format: "pdf" | "xml") => {
-    setBusyInvoiceId(invoiceId);
+    setBusyDownload({ invoiceId, format });
     try {
       const res = await fetch(`/api/invoices/${invoiceId}/${format}`);
       if (!res.ok) {
@@ -129,16 +130,17 @@ export default function HomePage() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `${invoiceId}.${format}`;
+      const readableName = history.find((e) => e.invoiceId === invoiceId)?.invoiceNumber ?? invoiceId;
+      a.download = `factura-${readableName}.${format}`;
       a.click();
       URL.revokeObjectURL(url);
-      showToast(`${format.toUpperCase()} de ${invoiceId} descargado con éxito.`);
+      showToast(`${format.toUpperCase()} de la factura ${readableName} descargado con éxito.`);
     } catch (error) {
       showToast(translateSiigoError(error).message);
     } finally {
-      setBusyInvoiceId(null);
+      setBusyDownload(null);
     }
-  }, [showToast]);
+  }, [showToast, history]);
 
   const handleAnnul = useCallback((invoiceId: string) => {
     const row = buildInvoiceHistory(history, rows).find((r) => r.invoiceId === invoiceId);
@@ -216,7 +218,7 @@ export default function HomePage() {
         {tab === "queue" ? (
           <ConsultationQueue rows={pendingRows} isRefreshing={isRefreshing} isInitialLoading={isInitialLoading} disableActions={disableActions} onRefresh={handleRefreshConsultations} onInvoiceClick={(id) => setSelectedId(id)} />
         ) : (
-          <InvoiceHistory entries={history} rows={rows} busyInvoiceId={busyInvoiceId} onDownload={handleDownload} onAnnul={handleAnnul} />
+          <InvoiceHistory entries={history} rows={rows} busyDownload={busyDownload} onDownload={handleDownload} onAnnul={handleAnnul} />
         )}
         <QuickEditDrawer detail={selectedDetail} isSubmitting={isSubmitting} errorMessage={translatedError?.message ?? null} errorDetail={translatedError?.detail ?? null} fallbackItemCode={options.fallbackItemCode} onClose={handleClose} onSubmit={handleSubmit} />
         <CreditNoteModal row={annulTarget} isSubmitting={isAnnulling} errorMessage={annulError} onClose={() => { if (!isAnnulling) setAnnulTarget(null); }} onConfirm={handleAnnulConfirm} />

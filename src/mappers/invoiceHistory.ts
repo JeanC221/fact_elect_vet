@@ -8,6 +8,8 @@ import type {
 /** Persisted emission record linking a Siigo invoice to its Provet consultation. */
 export interface InvoiceHistoryEntry {
   invoiceId: string;
+  /** Human-readable Siigo invoice number/name (e.g. the consecutive "1234" or "FV-1-1234"), when Siigo returned one. Used for downloaded filenames instead of the opaque GUID id. */
+  invoiceNumber?: string;
   cufe: string;
   status: InvoiceStatus;
   consultationId: string;
@@ -20,6 +22,7 @@ export interface InvoiceHistoryEntry {
 /** Zod schema for persisted history entries (runtime validation on load). */
 export const invoiceHistoryEntrySchema = z.object({
   invoiceId: z.string().trim().min(1),
+  invoiceNumber: z.string().trim().min(1).optional(),
   cufe: z.string(),
   status: z.enum(["Accepted", "Draft", "Rejected", "Annulled"]),
   consultationId: z.string().trim().min(1),
@@ -40,6 +43,7 @@ export function parseInvoiceHistory(stored: string): InvoiceHistoryEntry[] {
 /** Table view-model for the history table (joined with the consultation queue row). */
 export interface InvoiceHistoryRow {
   invoiceId: string;
+  invoiceNumber?: string;
   cufe: string;
   status: InvoiceStatus;
   consultationId: string;
@@ -79,6 +83,7 @@ export function toInvoiceHistoryEntry(
 ): InvoiceHistoryEntry {
   return {
     invoiceId: response.id,
+    invoiceNumber: response.number !== undefined ? String(response.number) : response.name,
     cufe: response.cufe,
     status: mapSiigoInvoiceStatus(response.status),
     consultationId,
@@ -98,6 +103,7 @@ export function buildInvoiceHistory(
     const r = rowMap.get(e.consultationId);
     return {
       invoiceId: e.invoiceId,
+      invoiceNumber: e.invoiceNumber,
       cufe: e.cufe,
       status: e.status,
       consultationId: e.consultationId,

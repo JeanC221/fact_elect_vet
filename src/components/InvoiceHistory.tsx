@@ -35,7 +35,7 @@ const COLUMNS = [
 interface InvoiceHistoryProps {
   entries: InvoiceHistoryEntry[];
   rows: ConsultationQueueRow[];
-  busyInvoiceId?: string | null;
+  busyDownload?: { invoiceId: string; format: "pdf" | "xml" } | null;
   onDownload?: (invoiceId: string, format: "pdf" | "xml") => void;
   onAnnul?: (invoiceId: string) => void;
 }
@@ -43,7 +43,7 @@ interface InvoiceHistoryProps {
 export function InvoiceHistory({
   entries,
   rows,
-  busyInvoiceId = null,
+  busyDownload = null,
   onDownload,
   onAnnul,
 }: InvoiceHistoryProps) {
@@ -100,7 +100,7 @@ export function InvoiceHistory({
               slice.map((r) => (
                 <tr key={r.invoiceId} className="border-b border-grid-line hover:bg-cool-grey">
                   <td className="px-3 py-2 font-medium text-slate-text" title={r.invoiceId}>
-                    {r.invoiceId}
+                    {r.invoiceNumber ?? r.invoiceId}
                     {r.cufe ? (
                       <div className="truncate font-normal text-2xs text-muted" title={r.cufe}>CUFE: {r.cufe.slice(0, 12)}…</div>
                     ) : (
@@ -118,11 +118,11 @@ export function InvoiceHistory({
                   <td className="border-l border-grid-line px-3 py-2"><StatusBadge status={r.status} /></td>
                   <td className="border-l border-grid-line px-3 py-2">
                     <div className="flex items-center gap-1">
-                      <button type="button" disabled={busyInvoiceId === r.invoiceId} onClick={() => onDownload?.(r.invoiceId, "pdf")} className="rounded-md border border-grid-line p-1 text-muted hover:bg-cool-grey hover:text-clinical-blue disabled:opacity-50" aria-label="Descargar PDF" title="Descargar PDF">
-                        {busyInvoiceId === r.invoiceId ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <FileText className="h-3.5 w-3.5" aria-hidden="true" />}
+                      <button type="button" disabled={busyDownload?.invoiceId === r.invoiceId} onClick={() => onDownload?.(r.invoiceId, "pdf")} className="rounded-md border border-grid-line p-1 text-muted hover:bg-cool-grey hover:text-clinical-blue disabled:opacity-50" aria-label="Descargar PDF" title="Descargar PDF">
+                        {busyDownload?.invoiceId === r.invoiceId && busyDownload.format === "pdf" ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <FileText className="h-3.5 w-3.5" aria-hidden="true" />}
                       </button>
-                      <button type="button" disabled={busyInvoiceId === r.invoiceId} onClick={() => onDownload?.(r.invoiceId, "xml")} className="rounded-md border border-grid-line p-1 text-muted hover:bg-cool-grey hover:text-clinical-blue disabled:opacity-50" aria-label="Descargar XML" title="Descargar XML">
-                        {busyInvoiceId === r.invoiceId ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <Code className="h-3.5 w-3.5" aria-hidden="true" />}
+                      <button type="button" disabled={busyDownload?.invoiceId === r.invoiceId || r.status !== "Accepted"} onClick={() => onDownload?.(r.invoiceId, "xml")} className="rounded-md border border-grid-line p-1 text-muted hover:bg-cool-grey hover:text-clinical-blue disabled:opacity-50" aria-label="Descargar XML" title={r.status === "Accepted" ? "Descargar XML" : "XML disponible solo tras ser aceptada por la DIAN"}>
+                        {busyDownload?.invoiceId === r.invoiceId && busyDownload.format === "xml" ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <Code className="h-3.5 w-3.5" aria-hidden="true" />}
                       </button>
                       {r.status === "Accepted" && onAnnul && (
                         <button type="button" onClick={() => onAnnul(r.invoiceId)} className="rounded-md border border-grid-line p-1 text-muted hover:bg-cool-grey hover:text-status-rejected-text" aria-label="Anular factura" title="Anular factura">
