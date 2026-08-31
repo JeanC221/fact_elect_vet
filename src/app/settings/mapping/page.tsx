@@ -89,7 +89,7 @@ export default function MappingPage() {
         if (stored) {
           try {
             const parsed = parseCatalogMapping(stored);
-            setMapping((m) => reconcileMapping({ ...parsed, payments: m.payments }, items, mockSiigoProducts, provetMethods, mockSiigoPaymentTypes));
+            setMapping((m) => reconcileMapping({ ...parsed, payments: m.payments }, items, siigoProducts, provetMethods, siigoPaymentTypes));
           } catch { /* corrupt blob → keep current */ }
         }
       } catch { /* network error → item list stays empty; user can still sync catalogs */ }

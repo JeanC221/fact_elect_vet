@@ -21,9 +21,9 @@ const callAt = (i: number): [string, RequestInit] =>
 
 describe("fetchPaymentTypes", () => {
   it("GETs /v1/payment-types?document_type=FV with Partner-Id + Authorization headers", async () => {
-    fetchMock.mockResolvedValue(fakeRes([{ id: 10948, name: "Efectivo", type: "cash" }]));
+    fetchMock.mockResolvedValue(fakeRes([{ id: 10948, name: "Efectivo", type: "cash", active: true }]));
     const result = await fetchPaymentTypes("tok-123", "PARTNER-01");
-    expect(result).toEqual([{ id: 10948, name: "Efectivo", type: "cash" }]);
+    expect(result).toEqual([{ id: 10948, name: "Efectivo", type: "cash", active: true }]);
     const [url, init] = callAt(0);
     expect(url).toBe("https://api.siigo.com/v1/payment-types?document_type=FV");
     expect(init.method).toBe("GET");
