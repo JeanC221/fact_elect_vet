@@ -9,6 +9,8 @@ const MAPPING_KEY = "fact_vet.catalogMapping";
 const CREDENTIALS_KEY = "fact_vet.credentialsConfig";
 export const SIIGO_PRODUCTS_KEY = "fact_vet.siigoProducts";
 export const SIIGO_PAYMENT_TYPES_KEY = "fact_vet.siigoPaymentTypes";
+export const SIIGO_DOCUMENT_TYPES_KEY = "fact_vet.siigoDocumentTypes";
+export const SIIGO_SELLERS_KEY = "fact_vet.siigoSellers";
 export const FALLBACK_ITEM_CODE_KEY = "fact_vet.fallbackItemCode";
 
 function readFallbackItemCode(): string | undefined {
@@ -33,6 +35,9 @@ const DEFAULT_MAPPING: CatalogMapping = {
   payments: [],
   version: 0,
   updatedAt: "1970-01-01T00:00:00.000Z",
+  documentTypeId: null,
+  creditNoteDocumentTypeId: null,
+  sellerId: null,
 };
 
 function readMode(): EnvironmentMode {
@@ -69,5 +74,17 @@ export function useEmissionOptions(): ProvetToSiigoOptions {
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
   }, []);
-  return { mapping, siigoProducts, mode, fallbackItemCode };
+  return {
+    mapping,
+    siigoProducts,
+    mode,
+    fallbackItemCode,
+    documentTypeId: mapping.documentTypeId ?? undefined,
+    sellerId: mapping.sellerId ?? undefined,
+  };
+}
+
+/** Active Siigo credit-note (NC) document type id from the saved mapping — undefined when not yet configured. */
+export function readCreditNoteDocumentTypeId(): number | undefined {
+  return readMapping().creditNoteDocumentTypeId ?? undefined;
 }

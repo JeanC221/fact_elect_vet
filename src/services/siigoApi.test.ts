@@ -158,6 +158,7 @@ const cnPayload = toCreditNotePayload(
   payload,
   { id: "INV-7751", cufe: "CUFE-abc123" },
   "billing_error",
+  { documentTypeId: 3001 },
 );
 const cnOkBody = { id: "NC-101", cufe: "NCUFE-xyz789", status: "Accepted" };
 

@@ -30,6 +30,25 @@ export const siigoPaymentTypeSchema = z.object({
   due_date: z.boolean().optional(),
 });
 
+export const siigoDocumentTypeCatalogEntrySchema = z.object({
+  id: z.number().int().positive(),
+  code: z.string().trim().min(1),
+  name: z.string().trim().min(1).transform(sanitizeText),
+  description: z.string().trim().optional(),
+  type: z.string().trim().min(1),
+  active: z.boolean(),
+}).passthrough();
+
+export const siigoSellerSchema = z.object({
+  id: z.number().int().positive(),
+  username: z.string().trim().min(1).optional(),
+  first_name: z.string().trim().min(1).transform(sanitizeText),
+  last_name: z.string().trim().min(1).transform(sanitizeText),
+  email: z.string().trim().optional(),
+  active: z.boolean(),
+  identification: z.string().trim().optional(),
+});
+
 /** Phone object shape Siigo expects nested under contacts[].phone (and customer-level phones[]). */
 export const siigoPhoneSchema = z.object({
   indicative: z.string().trim().max(5).optional(),
@@ -132,6 +151,8 @@ export const siigoErrorSchema = z.object({
 export type SiigoDocumentType = z.infer<typeof siigoDocumentTypeSchema>;
 export type SiigoProduct = z.infer<typeof siigoProductSchema>;
 export type SiigoPaymentType = z.infer<typeof siigoPaymentTypeSchema>;
+export type SiigoDocumentTypeCatalogEntry = z.infer<typeof siigoDocumentTypeCatalogEntrySchema>;
+export type SiigoSeller = z.infer<typeof siigoSellerSchema>;
 export type SiigoContact = z.infer<typeof siigoContactSchema>;
 export type SiigoCustomer = z.infer<typeof siigoCustomerSchema>;
 export type SiigoInvoiceItem = z.infer<typeof siigoInvoiceItemSchema>;

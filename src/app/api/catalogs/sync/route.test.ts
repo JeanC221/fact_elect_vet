@@ -9,10 +9,12 @@ vi.mock("@/services/siigoAuth", async () => {
 vi.mock("@/services/siigoCatalogs", () => ({
   fetchPaymentTypes: vi.fn(),
   fetchProducts: vi.fn(),
+  fetchAllDocumentTypes: vi.fn(),
+  fetchSellers: vi.fn(),
 }));
 
 import { getSiigoAccessToken, SiigoAuthError } from "@/services/siigoAuth";
-import { fetchPaymentTypes, fetchProducts } from "@/services/siigoCatalogs";
+import { fetchPaymentTypes, fetchProducts, fetchAllDocumentTypes, fetchSellers } from "@/services/siigoCatalogs";
 import { SiigoApiError } from "@/services/siigoApi";
 
 const validCreds = {
@@ -24,13 +26,19 @@ describe("POST /api/catalogs/sync", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(getSiigoAccessToken).mockResolvedValue({ accessToken: "tok", partnerId: "VETPARTNER01" });
+    vi.mocked(fetchAllDocumentTypes).mockResolvedValue([]);
+    vi.mocked(fetchSellers).mockResolvedValue([]);
   });
 
-  it("returns payment types + products on success", async () => {
+  it("returns payment types + products + documentTypes + sellers on success", async () => {
     const pts = [{ id: 10948, name: "Efectivo", type: "cash" as const, active: true }];
     const prods = [{ id: "PROD-001", code: "SERV-CG-01", name: "Consulta", price: 50000, tax_classification: "IVA_19" as const, unit_of_measure: "UND" }];
+    const docTypes = [{ id: 2372, code: "1", name: "Factura de venta", type: "FV", active: true }];
+    const sellers = [{ id: 916, first_name: "Pruebas Api", last_name: "Api", active: true }];
     vi.mocked(fetchPaymentTypes).mockResolvedValue(pts);
     vi.mocked(fetchProducts).mockResolvedValue(prods);
+    vi.mocked(fetchAllDocumentTypes).mockResolvedValue(docTypes);
+    vi.mocked(fetchSellers).mockResolvedValue(sellers);
     const req = new Request("http://localhost/api/catalogs/sync", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(validCreds),
     });
@@ -39,6 +47,8 @@ describe("POST /api/catalogs/sync", () => {
     expect(res.status).toBe(200);
     expect(json.paymentTypes).toEqual(pts);
     expect(json.products).toEqual(prods);
+    expect(json.documentTypes).toEqual(docTypes);
+    expect(json.sellers).toEqual(sellers);
   });
 
   it("returns 502 on SiigoAuthError", async () => {

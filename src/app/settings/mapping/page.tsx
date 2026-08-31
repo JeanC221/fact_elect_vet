@@ -17,8 +17,9 @@ import {
   type CatalogMapping as CatalogMappingState,
 } from "@/mappers/catalogMapping";
 import { mockSiigoPaymentTypes, mockSiigoProducts } from "@/mocks/siigo";
-import { SIIGO_PRODUCTS_KEY, SIIGO_PAYMENT_TYPES_KEY, FALLBACK_ITEM_CODE_KEY } from "@/hooks/useEmissionOptions";
-import type { SiigoPaymentType, SiigoProduct } from "@/schemas/siigo";
+import { SIIGO_PRODUCTS_KEY, SIIGO_PAYMENT_TYPES_KEY, SIIGO_DOCUMENT_TYPES_KEY, SIIGO_SELLERS_KEY, FALLBACK_ITEM_CODE_KEY } from "@/hooks/useEmissionOptions";
+import { EmissionSettings } from "@/components/EmissionSettings";
+import type { SiigoPaymentType, SiigoProduct, SiigoDocumentTypeCatalogEntry, SiigoSeller } from "@/schemas/siigo";
 import type { ConsultationQueueRow } from "@/mappers/consultationQueue";
 
 const STORAGE_KEY = "fact_vet.catalogMapping";
@@ -35,7 +36,7 @@ export default function MappingPage() {
   const [provetItems, setProvetItems] = useState<{ code: string; name: string }[]>([]);
   const provetMethods = FIXED_PROVET_PAYMENT_METHODS;
 
-  const [mapping, setMapping] = useState<CatalogMappingState>(() => ({ items: defaultItemMapping(provetItems, mockSiigoProducts), payments: defaultPaymentMapping(provetMethods, mockSiigoPaymentTypes), version: 0, updatedAt: new Date().toISOString() }));
+  const [mapping, setMapping] = useState<CatalogMappingState>(() => ({ items: defaultItemMapping(provetItems, mockSiigoProducts), payments: defaultPaymentMapping(provetMethods, mockSiigoPaymentTypes), version: 0, updatedAt: new Date().toISOString(), documentTypeId: null, creditNoteDocumentTypeId: null, sellerId: null }));
   const [dirty, setDirty] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -43,11 +44,15 @@ export default function MappingPage() {
 
   const [siigoProducts, setSiigoProducts] = useState<SiigoProduct[]>(mockSiigoProducts);
   const [siigoPaymentTypes, setSiigoPaymentTypes] = useState<SiigoPaymentType[]>(mockSiigoPaymentTypes);
+  const [siigoDocumentTypes, setSiigoDocumentTypes] = useState<SiigoDocumentTypeCatalogEntry[]>([]);
+  const [siigoSellers, setSiigoSellers] = useState<SiigoSeller[]>([]);
   const [fallbackItemCode, setFallbackItemCode] = useState<string>("");
 
   useEffect(() => {
     let liveProducts = mockSiigoProducts;
     let livePaymentTypes = mockSiigoPaymentTypes;
+    let liveDocumentTypes: SiigoDocumentTypeCatalogEntry[] = [];
+    let liveSellers: SiigoSeller[] = [];
     try {
       const rawProducts = window.localStorage.getItem(SIIGO_PRODUCTS_KEY);
       if (rawProducts) liveProducts = JSON.parse(rawProducts) as SiigoProduct[];
@@ -56,8 +61,18 @@ export default function MappingPage() {
       const rawPaymentTypes = window.localStorage.getItem(SIIGO_PAYMENT_TYPES_KEY);
       if (rawPaymentTypes) livePaymentTypes = JSON.parse(rawPaymentTypes) as SiigoPaymentType[];
     } catch { /* corrupt -> mocks */ }
+    try {
+      const rawDocTypes = window.localStorage.getItem(SIIGO_DOCUMENT_TYPES_KEY);
+      if (rawDocTypes) liveDocumentTypes = JSON.parse(rawDocTypes) as SiigoDocumentTypeCatalogEntry[];
+    } catch { /* corrupt -> empty, forces re-sync */ }
+    try {
+      const rawSellers = window.localStorage.getItem(SIIGO_SELLERS_KEY);
+      if (rawSellers) liveSellers = JSON.parse(rawSellers) as SiigoSeller[];
+    } catch { /* corrupt -> empty, forces re-sync */ }
     setSiigoProducts(liveProducts);
     setSiigoPaymentTypes(livePaymentTypes);
+    setSiigoDocumentTypes(liveDocumentTypes);
+    setSiigoSellers(liveSellers);
     setFallbackItemCode(window.localStorage.getItem(FALLBACK_ITEM_CODE_KEY) ?? "");
 
     const stored = window.localStorage.getItem(STORAGE_KEY);
@@ -87,6 +102,8 @@ export default function MappingPage() {
         setProvetItems(items);
         let currentProducts = mockSiigoProducts;
         let currentPaymentTypes = mockSiigoPaymentTypes;
+        let currentDocumentTypes: SiigoDocumentTypeCatalogEntry[] = [];
+        let currentSellers: SiigoSeller[] = [];
         try {
           const rawProducts = window.localStorage.getItem(SIIGO_PRODUCTS_KEY);
           if (rawProducts) currentProducts = JSON.parse(rawProducts) as SiigoProduct[];
@@ -95,13 +112,23 @@ export default function MappingPage() {
           const rawPaymentTypes = window.localStorage.getItem(SIIGO_PAYMENT_TYPES_KEY);
           if (rawPaymentTypes) currentPaymentTypes = JSON.parse(rawPaymentTypes) as SiigoPaymentType[];
         } catch { /* corrupt -> mocks */ }
+        try {
+          const rawDocTypes = window.localStorage.getItem(SIIGO_DOCUMENT_TYPES_KEY);
+          if (rawDocTypes) currentDocumentTypes = JSON.parse(rawDocTypes) as SiigoDocumentTypeCatalogEntry[];
+        } catch { /* corrupt -> empty */ }
+        try {
+          const rawSellers = window.localStorage.getItem(SIIGO_SELLERS_KEY);
+          if (rawSellers) currentSellers = JSON.parse(rawSellers) as SiigoSeller[];
+        } catch { /* corrupt -> empty */ }
         setSiigoProducts(currentProducts);
         setSiigoPaymentTypes(currentPaymentTypes);
+        setSiigoDocumentTypes(currentDocumentTypes);
+        setSiigoSellers(currentSellers);
         const stored = window.localStorage.getItem(STORAGE_KEY);
         if (stored) {
           try {
             const parsed = parseCatalogMapping(stored);
-            setMapping((m) => reconcileMapping({ ...parsed, payments: m.payments }, items, currentProducts, provetMethods, currentPaymentTypes));
+            setMapping((m) => reconcileMapping({ ...parsed, payments: m.payments }, items, currentProducts, provetMethods, currentPaymentTypes, currentDocumentTypes, currentSellers));
           } catch { /* corrupt blob → keep current */ }
         }
       } catch { /* network error → item list stays empty; user can still sync catalogs */ }
@@ -145,23 +172,44 @@ export default function MappingPage() {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(creds),
       });
-      const data = (await res.json()) as { paymentTypes?: SiigoPaymentType[]; products?: SiigoProduct[]; error?: { message?: string } };
-      if (!res.ok || !data.paymentTypes || !data.products) { setToast(data.error?.message ?? "Error al sincronizar"); setTimeout(() => setToast(null), 2500); return; }
-      const next = reconcileMapping(mapping, provetItems, data.products, provetMethods, data.paymentTypes);
+      const data = (await res.json()) as { paymentTypes?: SiigoPaymentType[]; products?: SiigoProduct[]; documentTypes?: SiigoDocumentTypeCatalogEntry[]; sellers?: SiigoSeller[]; error?: { message?: string } };
+      if (!res.ok || !data.paymentTypes || !data.products || !data.documentTypes || !data.sellers) { setToast(data.error?.message ?? "Error al sincronizar"); setTimeout(() => setToast(null), 2500); return; }
+      const next = reconcileMapping(mapping, provetItems, data.products, provetMethods, data.paymentTypes, data.documentTypes, data.sellers);
       setMapping(next);
       setSiigoProducts(data.products);
       setSiigoPaymentTypes(data.paymentTypes);
+      setSiigoDocumentTypes(data.documentTypes);
+      setSiigoSellers(data.sellers);
       window.localStorage.setItem(STORAGE_KEY, serializeCatalogMapping(next));
       window.localStorage.setItem(SIIGO_PRODUCTS_KEY, JSON.stringify(data.products));
       window.localStorage.setItem(SIIGO_PAYMENT_TYPES_KEY, JSON.stringify(data.paymentTypes));
+      window.localStorage.setItem(SIIGO_DOCUMENT_TYPES_KEY, JSON.stringify(data.documentTypes));
+      window.localStorage.setItem(SIIGO_SELLERS_KEY, JSON.stringify(data.sellers));
       window.dispatchEvent(new StorageEvent("storage", { key: STORAGE_KEY }));
       window.dispatchEvent(new StorageEvent("storage", { key: SIIGO_PRODUCTS_KEY }));
       window.dispatchEvent(new StorageEvent("storage", { key: SIIGO_PAYMENT_TYPES_KEY }));
+      window.dispatchEvent(new StorageEvent("storage", { key: SIIGO_DOCUMENT_TYPES_KEY }));
+      window.dispatchEvent(new StorageEvent("storage", { key: SIIGO_SELLERS_KEY }));
       setToast("Catalogos sincronizados en vivo");
       setTimeout(() => setToast(null), 2500);
     } catch { setToast("Error de red al sincronizar"); setTimeout(() => setToast(null), 2500); }
     finally { setIsSyncing(false); }
   }, [provetItems, provetMethods, mapping]);
+
+  const handleDocumentTypeChange = useCallback((id: number | null) => {
+    setMapping((p) => ({ ...p, documentTypeId: id }));
+    setDirty(true);
+  }, []);
+
+  const handleCreditNoteDocumentTypeChange = useCallback((id: number | null) => {
+    setMapping((p) => ({ ...p, creditNoteDocumentTypeId: id }));
+    setDirty(true);
+  }, []);
+
+  const handleSellerChange = useCallback((id: number | null) => {
+    setMapping((p) => ({ ...p, sellerId: id }));
+    setDirty(true);
+  }, []);
 
   return (
     <main className="flex h-screen w-screen flex-col gap-2 overflow-hidden bg-cool-grey p-2">
@@ -216,6 +264,16 @@ export default function MappingPage() {
             className="w-full rounded-md border border-grid-line px-2 py-1 text-sm"
           />
         </div>
+        <EmissionSettings
+          documentTypes={siigoDocumentTypes}
+          sellers={siigoSellers}
+          documentTypeId={mapping.documentTypeId}
+          creditNoteDocumentTypeId={mapping.creditNoteDocumentTypeId}
+          sellerId={mapping.sellerId}
+          onDocumentTypeChange={handleDocumentTypeChange}
+          onCreditNoteDocumentTypeChange={handleCreditNoteDocumentTypeChange}
+          onSellerChange={handleSellerChange}
+        />
         <CatalogMapping rows={itemRows} siigoProducts={siigoProducts} onSelect={handleItemSelect} isRefreshing={isSyncing} onSync={handleSyncCatalogs} />
         <PaymentMapping rows={paymentRows} siigoPaymentTypes={siigoPaymentTypes} onSelect={handlePaymentSelect} />
       </div>

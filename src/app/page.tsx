@@ -31,13 +31,22 @@ import { siigoInvoiceResponseSchema } from "@/schemas/siigo";
 import { translateSiigoError, retryWithBackoff, type TranslatedError, type QuickAction } from "@/services/errorTranslator";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { mockClients, mockConsultations, mockPatients } from "@/mocks/provet";
-import { useEmissionOptions } from "@/hooks/useEmissionOptions";
+import { useEmissionOptions, readCreditNoteDocumentTypeId } from "@/hooks/useEmissionOptions";
 import { useConsultationQueue } from "@/hooks/useConsultationQueue";
 
 type Tab = "queue" | "history";
 
 const TABS: { id: Tab; label: string }[] = [{ id: "queue", label: "Cola de Consultas" }, { id: "history", label: "Historial de Facturas" }];
 const HISTORY_STORAGE_KEY = "fact_vet.invoiceHistory";
+
+/** Reads the configured Siigo credit-note (NC) document type id, or undefined if not set — no hardcoded fallback (see MissingCreditNoteSettingError). */
+//function readCreditNoteDocTypeId(): number | undefined {
+//  try {
+//    const raw = window.localStorage.getItem(CREDIT_NOTE_DOCUMENT_TYPE_ID_KEY);
+//    const n = raw ? Number(raw) : NaN;
+//    return Number.isInteger(n) && n > 0 ? n : undefined;
+//  } catch { return undefined; }
+//}
 
 export default function HomePage() {
   const { rows, isInitialLoading, isRefreshing, fetchError: queueFetchError, clearFetchError, handleRefresh, setRowStatus } = useConsultationQueue();
@@ -58,9 +67,6 @@ export default function HomePage() {
   const [busyDownload, setBusyDownload] = useState<{ invoiceId: string; format: "pdf" | "xml" } | null>(null);
   const options = useEmissionOptions();
 
-  // Client-only hydration (after mount, no SSR/hydration risk): load
-  // persisted invoice history so already-emitted rows stay excluded from the
-  // queue across page reloads (see pendingRows below).
   useEffect(() => {
     const stored = window.localStorage.getItem(HISTORY_STORAGE_KEY);
     if (!stored) return;
@@ -68,8 +74,6 @@ export default function HomePage() {
     catch { /* corrupt blob → keep empty */ }
   }, []);
 
-  // Wraps setHistory to always persist to localStorage in the same step —
-  // every history mutation in this file goes through this, never setHistory directly.
   const updateHistory = useCallback((updater: (prev: InvoiceHistoryEntry[]) => InvoiceHistoryEntry[]) => {
     setHistory((prev) => {
       const next = updater(prev);
@@ -83,7 +87,6 @@ export default function HomePage() {
     if (!selectedId) return null;
     const detail = buildQuickEditDetail(mockConsultations, mockClients, mockPatients, selectedId, options.mapping);
     if (detail) return detail;
-
     const row = rows.find((r) => r.id === selectedId);
     if (!row) return null;
     const fallback: QuickEditDetail = {
@@ -115,7 +118,6 @@ export default function HomePage() {
   const disableActions = isInitialLoading || isRefreshing || isSubmitting;
   const displayError = translatedError ?? queueFetchError;
   const handleDismissError = useCallback(() => { setTranslatedError(null); clearFetchError(); }, [clearFetchError]);
-
   const invoicedConsultationIds = useMemo(
     () => new Set(history.map((e) => e.consultationId)),
     [history],
@@ -137,9 +139,6 @@ export default function HomePage() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      // Use the human-readable Siigo invoice number (e.g. "1234") instead of
-      // the opaque GUID id for the downloaded filename — falls back to the
-      // id only if Siigo never returned a number for this invoice.
       const readableName = history.find((e) => e.invoiceId === invoiceId)?.invoiceNumber ?? invoiceId;
       a.download = `factura-${readableName}.${format}`;
       a.click();
@@ -168,7 +167,7 @@ export default function HomePage() {
       const srcCon = mockConsultations.find((c) => c.id === annulTarget.consultationId);
       const original = buildInvoicePayloadFromQuickEdit(mockConsultations, mockClients, mockPatients, annulTarget.consultationId, { name: d.clientName, phone: d.phone, identificationType: d.identificationType, identificationNumber: d.identificationNumber, email: d.email, paymentMethod: srcCon?.payment_method ?? d.paymentMethodOptions[0]?.provetMethod ?? "", paidAmount: d.total }, options);
       if (!original) throw new Error("missing_source_data");
-      const cn = toCreditNotePayload(original, { id: annulTarget.invoiceId, cufe: annulTarget.cufe }, reason);
+      const cn = toCreditNotePayload(original, { id: annulTarget.invoiceId, cufe: annulTarget.cufe }, reason, { documentTypeId: readCreditNoteDocumentTypeId() });
       siigoCreditNoteSchema.parse(cn);
       const idemKey = generateIdempotencyKey();
       const response = await retryWithBackoff(() => submitCreditNote(cn, "", "", idemKey), { maxRetries: 5 });
@@ -201,7 +200,6 @@ export default function HomePage() {
       if (response.status === "Accepted") { setSelectedId(null); showToast(`Factura ${number} generada con éxito · CUFE: ${response.cufe}`); }
       else if (response.status === "Rejected") { setTranslatedError({ code: "rejected", message: "La DIAN rechazó la factura. Corrija los datos y reintente.", severity: "error", quickAction: "none", retryable: false }); }
       else {
-
         setSelectedId(null);
         showToast("Factura guardada como borrador en Siigo (pendiente de timbrar).");
       }
@@ -231,7 +229,7 @@ export default function HomePage() {
         ) : (
           <InvoiceHistory entries={history} rows={rows} busyDownload={busyDownload} onDownload={handleDownload} onAnnul={handleAnnul} onViewSnapshot={setSnapshotTarget} />
         )}
-        <QuickEditDrawer detail={selectedDetail} isSubmitting={isSubmitting} errorMessage={translatedError?.message ?? null} errorDetail={translatedError?.detail ?? null} fallbackItemCode={options.fallbackItemCode} onClose={handleClose} onSubmit={handleSubmit} />
+        <QuickEditDrawer detail={selectedDetail} isSubmitting={isSubmitting} errorMessage={translatedError?.message ?? null} errorDetail={translatedError?.detail ?? null} fallbackItemCode={options.fallbackItemCode} documentTypeId={options.documentTypeId} sellerId={options.sellerId} onClose={handleClose} onSubmit={handleSubmit} />
         <CreditNoteModal row={annulTarget} isSubmitting={isAnnulling} errorMessage={annulError} onClose={() => { if (!isAnnulling) setAnnulTarget(null); }} onConfirm={handleAnnulConfirm} />
         <InvoiceSnapshotDrawer row={snapshotTarget} onClose={() => setSnapshotTarget(null)} />
         {toast && (

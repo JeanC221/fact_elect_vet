@@ -2,8 +2,12 @@ import { z } from "zod";
 import {
   siigoProductSchema,
   siigoPaymentTypeSchema,
+  siigoDocumentTypeCatalogEntrySchema,
+  siigoSellerSchema,
   type SiigoProduct,
   type SiigoPaymentType,
+  type SiigoDocumentTypeCatalogEntry,
+  type SiigoSeller,
 } from "@/schemas/siigo";
 import { SiigoApiError } from "./siigoApi";
 
@@ -67,5 +71,31 @@ export async function fetchProducts(
 ): Promise<SiigoProduct[]> {
   const schema = siigoPaginatedSchema(siigoProductSchema);
   const page = await getFromSiigo("/v1/products", schema, accessToken, partnerId) as z.infer<typeof schema>;
+  return page.results;
+}
+
+export async function fetchDocumentTypes(
+  accessToken: string, partnerId: string, type: "FV" | "NC",
+): Promise<SiigoDocumentTypeCatalogEntry[]> {
+  const path = `/v1/document-types?type=${encodeURIComponent(type)}`;
+  const schema = z.array(siigoDocumentTypeCatalogEntrySchema);
+  return schema.parse(await getFromSiigo(path, schema, accessToken, partnerId));
+}
+
+export async function fetchAllDocumentTypes(
+  accessToken: string, partnerId: string,
+): Promise<SiigoDocumentTypeCatalogEntry[]> {
+  const [fv, nc] = await Promise.all([
+    fetchDocumentTypes(accessToken, partnerId, "FV"),
+    fetchDocumentTypes(accessToken, partnerId, "NC"),
+  ]);
+  return [...fv, ...nc];
+}
+/** Fetch active Siigo users/sellers (GET /v1/users — paginated: unwraps `results`). */
+export async function fetchSellers(
+  accessToken: string, partnerId: string,
+): Promise<SiigoSeller[]> {
+  const schema = siigoPaginatedSchema(siigoSellerSchema);
+  const page = await getFromSiigo("/v1/users", schema, accessToken, partnerId) as z.infer<typeof schema>;
   return page.results;
 }

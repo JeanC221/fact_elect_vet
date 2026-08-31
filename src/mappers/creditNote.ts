@@ -22,12 +22,17 @@ export const ANNULMENT_REASONS: { value: AnnulmentReason; label: string }[] = [
   { value: "other", label: "Otro" },
 ];
 
-/** Default Siigo credit-note document type id (Nota Crédito — sandbox placeholder, configurable). */
-export const DEFAULT_CREDIT_NOTE_DOCUMENT_TYPE_ID = 162;
+/** Thrown when the account's Siigo credit-note (NC) document type has not been configured in Ajustes → Mapeo. */
+export class MissingCreditNoteSettingError extends Error {
+  constructor() {
+    super("Falta configurar el tipo de comprobante (Nota Crédito) de Siigo. Vaya a Ajustes → Mapeo de Catálogo y sincronice/seleccione el valor antes de anular.");
+    this.name = "MissingCreditNoteSettingError";
+  }
+}
 
 /** Optional emission overrides for credit notes (mirrors ProvetToSiigoOptions). */
 export interface CreditNoteOptions {
-  /** Active Siigo credit-note document type id (default: DEFAULT_CREDIT_NOTE_DOCUMENT_TYPE_ID). */
+  /** Active Siigo credit-note document type id — required, throws MissingCreditNoteSettingError if not configured. */
   documentTypeId?: number;
 }
 
@@ -96,16 +101,16 @@ export const siigoCreditNoteResponseSchema = z.object({
 
 export type SiigoCreditNoteResponse = z.infer<typeof siigoCreditNoteResponseSchema>;
 
-/** Pure O(n): transform an accepted invoice into a DIAN-compliant credit note payload. */
 export function toCreditNotePayload(
   original: SiigoInvoicePayload,
   base: { id: string; cufe: string },
   reason: AnnulmentReason,
   options: CreditNoteOptions = {},
 ): SiigoCreditNotePayload {
+  if (options.documentTypeId === undefined) throw new MissingCreditNoteSettingError();
   const itemsTotal = original.items.reduce((s, i) => s + i.price * i.quantity, 0);
   return {
-    document: { id: options.documentTypeId ?? DEFAULT_CREDIT_NOTE_DOCUMENT_TYPE_ID },
+    document: { id: options.documentTypeId },
     base_document: base,
     customer: original.customer,
     items: original.items.map((i) => ({
@@ -120,7 +125,7 @@ export function toCreditNotePayload(
     })),
     total: -itemsTotal,
     reason,
-    stamp: { send: false },
-    mail: { send: false },
+    stamp: { send: true },
+    mail: { send: true },
   };
 }

@@ -142,8 +142,8 @@ export function ConsultationQueue({ rows, onInvoiceClick, isRefreshing, isInitia
                   <td className="border-l border-grid-line px-3 py-2 text-muted">
                     {formatDate(row.createdAt)}
                   </td>
-                  <td className="border-l border-grid-line px-3 py-2">
-                    <div className="flex flex-col items-start gap-1">
+                  <td className="border-l border-grid-line px-3 py-2 text-center">
+                    <div className="flex flex-col items-center gap-1">
                       <StatusBadge status={row.invoiceStatus} />
                       {row.provetStatus === "pending" && (
                         <span className="inline-flex items-center gap-0.5 text-2xs text-muted">
@@ -153,7 +153,7 @@ export function ConsultationQueue({ rows, onInvoiceClick, isRefreshing, isInitia
                       )}
                     </div>
                   </td>
-                  <td className="border-l border-grid-line px-3 py-2 text-right">
+                  <td className="border-l border-grid-line px-3 py-2 text-center">
                     <button
                       type="button"
                       onClick={() => {

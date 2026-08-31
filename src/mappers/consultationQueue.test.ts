@@ -19,8 +19,7 @@ import { mockSiigoProducts } from "@/mocks/siigo";
 const validFormValues: QuickEditFormValues = { name: "María García López", identificationType: "CC", identificationNumber: "1234567890", email: "nueva@mail.co", phone: "3105550101", paymentMethod: "Efectivo", paidAmount: 95200 };
 
 /** Dynamic catalog for emission — Task 4: payment ids resolve ONLY from options.mapping.payments. */
-const emitOpts: ProvetToSiigoOptions = { mapping: { items: [], payments: [{ provetMethod: "Tarjeta Crédito", siigoPaymentTypeId: 5636 }, { provetMethod: "Efectivo", siigoPaymentTypeId: 10948 }], version: 1, updatedAt: "2026-08-26T00:00:00.000Z" }, siigoProducts: mockSiigoProducts, mode: "sandbox" };
-
+const emitOpts: ProvetToSiigoOptions = { mapping: { items: [], payments: [{ provetMethod: "Tarjeta Crédito", siigoPaymentTypeId: 5636 }, { provetMethod: "Efectivo", siigoPaymentTypeId: 10948 }], version: 1, updatedAt: "2026-08-26T00:00:00.000Z", documentTypeId: 2372, creditNoteDocumentTypeId: 2379, sellerId: 62 }, siigoProducts: mockSiigoProducts, mode: "sandbox", documentTypeId: 2372, sellerId: 62 };
 /** Mapped catalog for Quick-Edit detail — only active mapped payments appear in the dropdown. */
 const testMapping: CatalogMapping = emitOpts.mapping;
 
@@ -110,7 +109,7 @@ describe("buildQuickEditDetail", () => {
 
 describe("buildPaymentOptions", () => {
   it("returns only non-null mapped payments", () => {
-    const mapping: CatalogMapping = { items: [], payments: [{ provetMethod: "Efectivo", siigoPaymentTypeId: 10948 }, { provetMethod: "Nequi", siigoPaymentTypeId: null }], version: 1, updatedAt: "2026-08-26T00:00:00.000Z" };
+    const mapping: CatalogMapping = { items: [], payments: [{ provetMethod: "Efectivo", siigoPaymentTypeId: 10948 }, { provetMethod: "Nequi", siigoPaymentTypeId: null }], version: 1, updatedAt: "2026-08-26T00:00:00.000Z", documentTypeId: null, creditNoteDocumentTypeId: null, sellerId: null };
     expect(buildPaymentOptions(mapping)).toEqual([{ provetMethod: "Efectivo", siigoPaymentTypeId: 10948 }]);
   });
   it("returns empty array when no mapping provided", () => {

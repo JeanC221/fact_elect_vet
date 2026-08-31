@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { Consultation } from "@/schemas/provet";
-import type { SiigoProduct, SiigoPaymentType } from "@/schemas/siigo";
+import type { SiigoProduct, SiigoPaymentType, SiigoDocumentTypeCatalogEntry, SiigoSeller } from "@/schemas/siigo";
 
 export const itemMappingSchema = z.object({
   provetCode: z.string().trim().min(1),
@@ -15,6 +15,12 @@ export const catalogMappingSchema = z.object({
   payments: z.array(paymentMappingSchema),
   version: z.number().int().nonnegative(),
   updatedAt: z.string().min(1),
+  /** Active Siigo invoice (FV) document type id — account-specific, set in Ajustes. */
+  documentTypeId: z.number().int().positive().nullable().default(null),
+  /** Active Siigo credit-note (NC) document type id — account-specific, set in Ajustes. */
+  creditNoteDocumentTypeId: z.number().int().positive().nullable().default(null),
+  /** Active Siigo seller/user id — account-specific, set in Ajustes. */
+  sellerId: z.number().int().positive().nullable().default(null),
 });
 export type ItemMapping = z.infer<typeof itemMappingSchema>;
 export type PaymentMapping = z.infer<typeof paymentMappingSchema>;
@@ -143,14 +149,28 @@ export function resolvePaymentTypeId(method: string, payments: PaymentMapping[])
 const fresh = <T extends string | number>(id: T | null, valid: Set<T>): T | null =>
   id !== null && valid.has(id) ? id : null;
 /** Reconcile persisted mapping vs current catalogs: drop gone provet entries, null stale siigo ids, add new. */
-export function reconcileMapping(mapping: CatalogMapping, provetItems: ProvetItemRef[], siigoProducts: SiigoProduct[], provetMethods: string[], siigoPaymentTypes: SiigoPaymentType[]): CatalogMapping {
+export function reconcileMapping(
+  mapping: CatalogMapping,
+  provetItems: ProvetItemRef[],
+  siigoProducts: SiigoProduct[],
+  provetMethods: string[],
+  siigoPaymentTypes: SiigoPaymentType[],
+  siigoDocumentTypes: SiigoDocumentTypeCatalogEntry[] = [],
+  siigoSellers: SiigoSeller[] = [],
+): CatalogMapping {
   const prodIds = new Set(siigoProducts.map((p) => p.id));
   const ptIds = new Set(siigoPaymentTypes.map((p) => p.id));
+  const fvIds = new Set(siigoDocumentTypes.filter((d) => d.type === "FV").map((d) => d.id));
+  const ncIds = new Set(siigoDocumentTypes.filter((d) => d.type === "NC").map((d) => d.id));
+  const sellerIds = new Set(siigoSellers.map((s) => s.id));
   const oldItem = new Map(mapping.items.map((m) => [m.provetCode, m.siigoProductId]));
   const oldPay = new Map(mapping.payments.map((m) => [m.provetMethod, m.siigoPaymentTypeId]));
   return {
     items: provetItems.map((it) => ({ provetCode: it.code, siigoProductId: fresh(oldItem.get(it.code) ?? null, prodIds) })),
     payments: provetMethods.map((m) => ({ provetMethod: m, siigoPaymentTypeId: fresh(oldPay.get(m) ?? null, ptIds) })),
+    documentTypeId: fresh(mapping.documentTypeId, fvIds),
+    creditNoteDocumentTypeId: fresh(mapping.creditNoteDocumentTypeId, ncIds),
+    sellerId: fresh(mapping.sellerId, sellerIds),
     version: mapping.version + 1,
     updatedAt: new Date().toISOString(),
   };

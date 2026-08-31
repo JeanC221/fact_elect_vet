@@ -43,7 +43,7 @@ export function NavBar() {
     <header className="flex items-center justify-between border-b border-grid-line bg-pure-white px-3 py-1">
       <div className="flex items-center gap-1">
         <span className="mr-2 text-sm font-semibold text-clinical-blue">
-          Facturación Electrónica Veterinaria
+          Facturación 38 Plus Hospital Veterinario
         </span>
         <nav className="flex gap-0.5">
           {NAV_ITEMS.filter((item) => !item.adminOnly || isAdmin).map(({ href, label, icon: Icon }) => {

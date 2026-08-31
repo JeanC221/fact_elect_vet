@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { credentialsSchema } from "@/mappers/credentials";
 import { getSiigoAccessToken, SiigoAuthError } from "@/services/siigoAuth";
-import { fetchProducts, fetchPaymentTypes } from "@/services/siigoCatalogs";
+import { fetchProducts, fetchPaymentTypes, fetchAllDocumentTypes, fetchSellers } from "@/services/siigoCatalogs";
 import { SiigoApiError } from "@/services/siigoApi";
 
 export const dynamic = "force-dynamic";
@@ -10,6 +10,8 @@ export const dynamic = "force-dynamic";
 const syncResponseSchema = z.object({
   paymentTypes: z.array(z.any()),
   products: z.array(z.any()),
+  documentTypes: z.array(z.any()),
+  sellers: z.array(z.any()),
 });
 
 /**
@@ -24,11 +26,13 @@ export async function POST(req: Request): Promise<NextResponse> {
     const { accessToken, partnerId } = await getSiigoAccessToken({
       username: creds.username, accessKey: creds.accessKey, partnerId: creds.partnerId,
     });
-    const [paymentTypes, products] = await Promise.all([
+    const [paymentTypes, products, documentTypes, sellers] = await Promise.all([
       fetchPaymentTypes(accessToken, partnerId),
       fetchProducts(accessToken, partnerId),
+      fetchAllDocumentTypes(accessToken, partnerId),
+      fetchSellers(accessToken, partnerId),
     ]);
-    return NextResponse.json(syncResponseSchema.parse({ paymentTypes, products }));
+    return NextResponse.json(syncResponseSchema.parse({ paymentTypes, products, documentTypes, sellers }));
   } catch (err) {
     //**console.error("SYNC CATCH:", err);
     if (err instanceof SiigoAuthError) {

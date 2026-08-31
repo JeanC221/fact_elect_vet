@@ -1,5 +1,7 @@
 import { SiigoApiError } from "./siigoApi";
 import { UnmappedPaymentMethodError } from "@/mappers/catalogMapping";
+import { MissingEmissionSettingError } from "@/mappers/provetToSiigo";
+import { MissingCreditNoteSettingError } from "@/mappers/creditNote";
 
 /** Action the user can take to resolve the error. */
 export type QuickAction =
@@ -164,6 +166,24 @@ export function translateSiigoError(error: unknown): TranslatedError {
       message: error.message,
       severity: "error",
       quickAction: "edit_payments",
+      retryable: false,
+    };
+  }
+  if (error instanceof MissingEmissionSettingError) {
+    return {
+      code: `missing_${error.setting}`,
+      message: error.message,
+      severity: "error",
+      quickAction: "none",
+      retryable: false,
+    };
+  }
+  if (error instanceof MissingCreditNoteSettingError) {
+    return {
+      code: "missing_credit_note_document_type",
+      message: error.message,
+      severity: "error",
+      quickAction: "none",
       retryable: false,
     };
   }

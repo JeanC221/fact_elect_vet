@@ -15,23 +15,29 @@ export interface ProvetToSiigoOptions {
   siigoProducts: SiigoProduct[];
   /** Environment mode — gates DIAN stamping via stampSendFor. */
   mode: EnvironmentMode;
-  /** Active Siigo invoice document type id (default: DEFAULT_DOCUMENT_TYPE_ID). */
+  /** Active Siigo invoice document type id — required, throws MissingEmissionSettingError if not configured in Ajustes. */
   documentTypeId?: number;
-  /** Active Siigo seller id (default: DEFAULT_SELLER_ID). */
+  /** Active Siigo seller id — required, throws MissingEmissionSettingError if not configured in Ajustes. */
   sellerId?: number;
   fallbackItemCode?: string;
 }
 
-/** Default Siigo invoice document type (Factura de Venta — explicit sandbox default, override via options.documentTypeId). */
-export const DEFAULT_DOCUMENT_TYPE_ID = 2372;
+/** Thrown when the account's Siigo document type or seller has not been configured in Ajustes → Mapeo. Never silently falls back to another account's id. */
+export class MissingEmissionSettingError extends Error {
+  readonly setting: "documentTypeId" | "sellerId";
+  constructor(setting: "documentTypeId" | "sellerId") {
+    const label = setting === "documentTypeId" ? "el tipo de comprobante (Factura de Venta)" : "el vendedor";
+    super(`Falta configurar ${label} de Siigo. Vaya a Ajustes → Mapeo de Catálogo y sincronice/seleccione el valor antes de emitir.`);
+    this.name = "MissingEmissionSettingError";
+    this.setting = setting;
+  }
+}
 
-/** Default Siigo seller id (explicit sandbox default — override via options.sellerId, never a credential). */
-export const DEFAULT_SELLER_ID = 62;
 export const DEFAULT_FALLBACK_ITEM_CODE = "FALLBACK-CVG-01";
 
 /** Empty-catalog default — emission REQUIRES an explicit dynamic payment mapping. */
 const DEFAULT_OPTIONS: ProvetToSiigoOptions = {
-  mapping: { items: [], payments: [], version: 0, updatedAt: "1970-01-01T00:00:00.000Z" },
+  mapping: { items: [], payments: [], version: 0, updatedAt: "1970-01-01T00:00:00.000Z", documentTypeId: null, creditNoteDocumentTypeId: null, sellerId: null },
   siigoProducts: [],
   mode: "sandbox",
 };
@@ -52,6 +58,8 @@ export function provetToSiigoInvoice(
 ): SiigoInvoicePayload {
   void patient; // reserved for future audit/logging
   const { mapping, siigoProducts, mode, documentTypeId, sellerId, fallbackItemCode } = options;
+  if (documentTypeId === undefined) throw new MissingEmissionSettingError("documentTypeId");
+  if (sellerId === undefined) throw new MissingEmissionSettingError("sellerId");
 
   const productIdByItemCode = new Map(
     mapping.items.map((m) => [m.provetCode, m.siigoProductId]),
@@ -67,10 +75,10 @@ export function provetToSiigoInvoice(
   const date = new Date().toISOString().slice(0, 10);
 
   return {
-    document: { id: documentTypeId ?? DEFAULT_DOCUMENT_TYPE_ID },
+    document: { id: documentTypeId },
     date,
     customer: buildSiigoCustomer(client),
-    seller: sellerId ?? DEFAULT_SELLER_ID,
+    seller: sellerId,
     items: sourceItems.map((item) => {
       const productId = productIdByItemCode.get(item.code);
       const product = productId ? productById.get(productId) : undefined;
@@ -83,6 +91,8 @@ export function provetToSiigoInvoice(
     }),
     payments: [{ id: paymentTypeId, value: paymentValue }],
     stamp: { send: stampSend },
-    mail: { send: stampSend },
+    // mail.send is independent of stamp.send/mode: the customer should get their invoice copy
+    // by email regardless of whether the invoice was stamped with the DIAN yet.
+    mail: { send: true },
   };
 }
