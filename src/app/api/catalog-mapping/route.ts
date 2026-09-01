@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { put, head } from "@vercel/blob";
+import { put, get, BlobNotFoundError } from "@vercel/blob";
 import { catalogMappingSchema, type CatalogMapping } from "@/mappers/catalogMapping";
 
 export const dynamic = "force-dynamic";
@@ -19,15 +19,14 @@ const EMPTY_MAPPING: CatalogMapping = {
 
 export async function GET(): Promise<NextResponse> {
   try {
-    const meta = await head(BLOB_PATHNAME).catch(() => null);
-    if (!meta) return NextResponse.json(EMPTY_MAPPING);
-    const res = await fetch(meta.url, { cache: "no-store" });
-    if (!res.ok) return NextResponse.json(EMPTY_MAPPING);
-    const raw = await res.json();
+    const result = await get(BLOB_PATHNAME, { access: "private" });
+    if (!result) return NextResponse.json(EMPTY_MAPPING);
+    const raw = await new Response(result.stream).json();
     const parsed = catalogMappingSchema.safeParse(raw);
     if (!parsed.success) return NextResponse.json(EMPTY_MAPPING);
     return NextResponse.json(parsed.data);
-  } catch {
+  } catch (err) {
+    if (err instanceof BlobNotFoundError) return NextResponse.json(EMPTY_MAPPING);
     return NextResponse.json(EMPTY_MAPPING);
   }
 }
@@ -41,7 +40,7 @@ export async function PUT(req: Request): Promise<NextResponse> {
       return NextResponse.json({ error: { code: "invalid_payload", message: `Mapeo inválido: ${detail}` } }, { status: 400 });
     }
     await put(BLOB_PATHNAME, JSON.stringify(parsed.data), {
-      access: "public",
+      access: "private",
       contentType: "application/json",
       allowOverwrite: true,
     });

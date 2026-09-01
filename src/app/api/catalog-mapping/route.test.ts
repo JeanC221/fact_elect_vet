@@ -1,14 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const putMock = vi.fn();
-const headMock = vi.fn();
+const { putMock, getMock, MockBlobNotFoundError } = vi.hoisted(() => {
+  class MockBlobNotFoundError extends Error {}
+  return { putMock: vi.fn(), getMock: vi.fn(), MockBlobNotFoundError };
+});
 vi.mock("@vercel/blob", () => ({
   put: (...args: unknown[]) => putMock(...args),
-  head: (...args: unknown[]) => headMock(...args),
+  get: (...args: unknown[]) => getMock(...args),
+  BlobNotFoundError: MockBlobNotFoundError,
 }));
-
-const fetchMock = vi.fn();
-vi.stubGlobal("fetch", fetchMock);
 
 import { GET, PUT } from "./route";
 
@@ -32,44 +32,58 @@ const EMPTY_MAPPING = {
   sellerId: null,
 };
 
+/** Build a fake Response-compatible ReadableStream carrying the given JSON body, matching get()'s `.stream` shape. */
+function streamOf(body: unknown): ReadableStream {
+  const bytes = new TextEncoder().encode(JSON.stringify(body));
+  return new ReadableStream({
+    start(controller) {
+      controller.enqueue(bytes);
+      controller.close();
+    },
+  });
+}
+
 beforeEach(() => {
   putMock.mockReset();
-  headMock.mockReset();
-  fetchMock.mockReset();
+  getMock.mockReset();
 });
 
 describe("GET /api/catalog-mapping", () => {
-  it("returns the empty default mapping when nothing has been saved yet (head() throws / not found)", async () => {
-    headMock.mockRejectedValue(new Error("not found"));
+  it("returns the empty default mapping when nothing has been saved yet (get() returns null)", async () => {
+    getMock.mockResolvedValue(null);
     const res = await GET();
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json).toEqual(EMPTY_MAPPING);
-    expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("fetches and returns the saved mapping when a blob exists", async () => {
-    headMock.mockResolvedValue({ url: "https://blob.example/catalog-mapping.json" });
-    fetchMock.mockResolvedValue({ ok: true, json: async () => validMapping });
+  it("returns the empty default mapping when get() throws BlobNotFoundError", async () => {
+    getMock.mockRejectedValue(new MockBlobNotFoundError("not found"));
+    const res = await GET();
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json).toEqual(EMPTY_MAPPING);
+  });
+
+  it("reads and returns the saved mapping from a private blob", async () => {
+    getMock.mockResolvedValue({ stream: streamOf(validMapping) });
     const res = await GET();
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json).toEqual(validMapping);
-    expect(fetchMock).toHaveBeenCalledWith("https://blob.example/catalog-mapping.json", { cache: "no-store" });
+    expect(getMock).toHaveBeenCalledWith("fact-vet/catalog-mapping.json", { access: "private" });
   });
 
   it("falls back to the empty default when the stored blob is schema-invalid", async () => {
-    headMock.mockResolvedValue({ url: "https://blob.example/catalog-mapping.json" });
-    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ items: "not-an-array" }) });
+    getMock.mockResolvedValue({ stream: streamOf({ items: "not-an-array" }) });
     const res = await GET();
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json).toEqual(EMPTY_MAPPING);
   });
 
-  it("falls back to the empty default when the blob fetch itself fails", async () => {
-    headMock.mockResolvedValue({ url: "https://blob.example/catalog-mapping.json" });
-    fetchMock.mockResolvedValue({ ok: false });
+  it("falls back to the empty default on any other read error", async () => {
+    getMock.mockRejectedValue(new Error("network blip"));
     const res = await GET();
     const json = await res.json();
     expect(res.status).toBe(200);
@@ -78,7 +92,7 @@ describe("GET /api/catalog-mapping", () => {
 });
 
 describe("PUT /api/catalog-mapping", () => {
-  it("validates and overwrites the shared blob on success", async () => {
+  it("validates and overwrites the private shared blob on success", async () => {
     putMock.mockResolvedValue({ url: "https://blob.example/catalog-mapping.json" });
     const req = new Request("http://localhost/api/catalog-mapping", {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(validMapping),
@@ -90,7 +104,7 @@ describe("PUT /api/catalog-mapping", () => {
     expect(putMock).toHaveBeenCalledWith(
       "fact-vet/catalog-mapping.json",
       JSON.stringify(validMapping),
-      expect.objectContaining({ access: "public", contentType: "application/json", allowOverwrite: true }),
+      expect.objectContaining({ access: "private", contentType: "application/json", allowOverwrite: true }),
     );
   });
 
