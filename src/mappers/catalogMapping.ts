@@ -148,7 +148,15 @@ export function resolvePaymentTypeId(method: string, payments: PaymentMapping[])
 }
 const fresh = <T extends string | number>(id: T | null, valid: Set<T>): T | null =>
   id !== null && valid.has(id) ? id : null;
-/** Reconcile persisted mapping vs current catalogs: drop gone provet entries, null stale siigo ids, add new. */
+/**
+ * Reconcile persisted mapping vs current catalogs: drop gone provet entries,
+ * null stale siigo ids, add new. `version` is intentionally carried through
+ * UNCHANGED — it is the server's optimistic-concurrency counter (see
+ * /api/catalog-mapping PUT), and a local-only reconcile (e.g. after a
+ * catalog sync that hasn't been saved yet) must not advance it. Advancing it
+ * here would make the next Guardar send a version number the server never
+ * issued, causing spurious 409 conflicts unrelated to any real concurrent edit.
+ */
 export function reconcileMapping(
   mapping: CatalogMapping,
   provetItems: ProvetItemRef[],
@@ -171,7 +179,7 @@ export function reconcileMapping(
     documentTypeId: fresh(mapping.documentTypeId, fvIds),
     creditNoteDocumentTypeId: fresh(mapping.creditNoteDocumentTypeId, ncIds),
     sellerId: fresh(mapping.sellerId, sellerIds),
-    version: mapping.version + 1,
+    version: mapping.version,
     updatedAt: new Date().toISOString(),
   };
 }

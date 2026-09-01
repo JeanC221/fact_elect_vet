@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { ArrowLeft, CheckCircle2, LogOut } from "lucide-react";
+import { ArrowLeft, AlertTriangle, CheckCircle2, LogOut } from "lucide-react";
 import Link from "next/link";
 import { logoutAction } from "@/app/actions";
 import { CredentialsForm } from "@/components/CredentialsForm";
@@ -32,12 +32,17 @@ export default function CredentialsPage() {
   const [configured, setConfigured] = useState<Record<string, boolean>>(emptyConfigured);
   const [loaded, setLoaded] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [readWarning, setReadWarning] = useState(false);
 
   useEffect(() => {
     (async () => {
       try {
         const res = await fetch("/api/emission-mode");
-        if (res.ok) {
+        if (res.status === 503) {
+          // Storage read genuinely failed — do NOT treat this as "confirmed
+          // sandbox". Fall through to the local cache below and warn.
+          setReadWarning(true);
+        } else if (res.ok) {
           const parsed = parseCredentialsConfig(JSON.stringify(await res.json()));
           setMode(parsed.mode);
           setConfigured(parsed.configured);
@@ -73,11 +78,8 @@ export default function CredentialsPage() {
         configured: nextConfigured,
         updatedAt: new Date().toISOString(),
       };
-      // Persist mode + configured flags locally (fast paint) and on the
-      // server (source of truth — no secret VALUES ever leave this browser).
+      
       window.localStorage.setItem(STORAGE_KEY, serializeCredentialsConfig(config));
-      window.localStorage.setItem("fact_vet.credentialsStore", JSON.stringify(values));
-      window.dispatchEvent(new StorageEvent("storage", { key: "fact_vet.credentialsStore" }));
       fetch("/api/emission-mode", {
         method: "PUT", headers: { "Content-Type": "application/json" },
         body: serializeCredentialsConfig(config),
@@ -142,6 +144,17 @@ export default function CredentialsPage() {
         </div>
       </header>
       <div className="scrollbar-thin flex h-[calc(100vh-64px)] flex-col gap-2 overflow-y-auto">
+        {readWarning && (
+          <div className="mx-auto flex w-full max-w-md items-start gap-2 rounded-md border border-status-draft-border bg-status-draft-bg px-3 py-2 text-xs text-status-draft-text">
+            <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+            <span>
+              No se pudo confirmar el modo de emisión actual en el servidor (almacenamiento no
+              disponible). Se está mostrando la última copia guardada en este dispositivo — puede
+              no coincidir con lo configurado desde otro equipo. Verifique antes de emitir facturas
+              en modo producción.
+            </span>
+          </div>
+        )}
         <section className="mx-auto w-full max-w-md rounded-md border border-grid-line bg-pure-white p-4">
           <p className="mb-3 text-xs text-muted">
             Los valores de las llaves se configuran en <code>.env</code> / capa cifrada (§2.1).

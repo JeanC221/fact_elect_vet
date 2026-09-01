@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowLeft, CheckCircle2, LogOut, Save } from "lucide-react";
+import { ArrowLeft, AlertTriangle, CheckCircle2, LogOut, Save } from "lucide-react";
 import Link from "next/link";
 import { logoutAction } from "@/app/actions";
 import { CatalogMapping } from "@/components/CatalogMapping";
@@ -48,6 +48,7 @@ export default function MappingPage() {
   const [siigoDocumentTypes, setSiigoDocumentTypes] = useState<SiigoDocumentTypeCatalogEntry[]>([]);
   const [siigoSellers, setSiigoSellers] = useState<SiigoSeller[]>([]);
   const [fallbackItemCode, setFallbackItemCode] = useState<string>("");
+  const [readWarning, setReadWarning] = useState(false);
 
   useEffect(() => {
     let liveProducts = mockSiigoProducts;
@@ -81,7 +82,12 @@ export default function MappingPage() {
     (async () => {
       try {
         const res = await fetch("/api/catalog-mapping");
-        if (res.ok) {
+        if (res.status === 503) {
+          // Storage read genuinely failed — do NOT treat this as "no mapping
+          // saved yet". Fall through to the local cache below and warn; the
+          // server's own version check on save still prevents a blind overwrite.
+          setReadWarning(true);
+        } else if (res.ok) {
           const serverMapping = catalogMappingSchema.parse(await res.json());
           setMapping((m) => ({ ...serverMapping, items: m.items.length ? m.items : serverMapping.items }));
           window.localStorage.setItem(STORAGE_KEY, serializeCatalogMapping(serverMapping));
@@ -179,13 +185,20 @@ export default function MappingPage() {
         body: serializeCatalogMapping(next),
       });
       if (!res.ok) {
-        const data = await res.json().catch(() => null);
+        const data = (await res.json().catch(() => null)) as { error?: { code?: string; message?: string }; current?: CatalogMappingState } | null;
+        // 409 = someone else saved a newer version while this device was editing.
+        // Pull their version into local state so the edits can be re-applied and
+        // retried, instead of leaving this device stuck retrying against a stale version forever.
+        if (res.status === 409 && data?.current) {
+          setMapping(data.current);
+        }
         setToast(data?.error?.message ?? "Error al guardar el mapeo en el servidor");
-        setTimeout(() => setToast(null), 3000);
+        setTimeout(() => setToast(null), 4000);
         return;
       }
-      window.localStorage.setItem(STORAGE_KEY, serializeCatalogMapping(next));
-      setMapping(next); setDirty(false); setToast("Mapeo guardado — visible para todos los dispositivos");
+      const saved = (await res.json()) as CatalogMappingState;
+      window.localStorage.setItem(STORAGE_KEY, serializeCatalogMapping(saved));
+      setMapping(saved); setDirty(false); setToast("Mapeo guardado — visible para todos los dispositivos");
       setTimeout(() => setToast(null), 2500);
     } catch {
       setToast("Error de red al guardar el mapeo");
@@ -196,16 +209,15 @@ export default function MappingPage() {
   const handleSyncCatalogs = useCallback(async () => {
     setIsSyncing(true);
     try {
-      const stored = window.localStorage.getItem("fact_vet.credentialsStore");
-      const body = stored ? stored : "{}";
       const res = await fetch("/api/catalogs/sync", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body,
+        body: "{}",
       });
       const data = (await res.json()) as { paymentTypes?: SiigoPaymentType[]; products?: SiigoProduct[]; documentTypes?: SiigoDocumentTypeCatalogEntry[]; sellers?: SiigoSeller[]; error?: { message?: string } };
       if (!res.ok || !data.paymentTypes || !data.products || !data.documentTypes || !data.sellers) { setToast(data.error?.message ?? "Error al sincronizar"); setTimeout(() => setToast(null), 2500); return; }
       const next = reconcileMapping(mapping, provetItems, data.products, provetMethods, data.paymentTypes, data.documentTypes, data.sellers);
       setMapping(next);
+      setDirty(true);
       setSiigoProducts(data.products);
       setSiigoPaymentTypes(data.paymentTypes);
       setSiigoDocumentTypes(data.documentTypes);
@@ -279,6 +291,17 @@ export default function MappingPage() {
         </div>
       </header>
       <div className="scrollbar-thin flex h-[calc(100vh-64px)] flex-col gap-2 overflow-y-auto">
+        {readWarning && (
+          <div className="flex items-start gap-2 rounded-md border border-status-draft-border bg-status-draft-bg px-3 py-2 text-xs text-status-draft-text">
+            <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+            <span>
+              No se pudo confirmar el mapeo más reciente en el servidor (almacenamiento no
+              disponible). Se está mostrando la última copia guardada en este dispositivo — puede
+              no incluir cambios hechos desde otro equipo. Al guardar, el servidor rechazará el
+              cambio si detecta una versión más nueva.
+            </span>
+          </div>
+        )}
         <div className="rounded-md border border-grid-line bg-pure-white p-3">
           <label className="block text-xs font-semibold text-slate-text">
             Código de ítem de respaldo (Siigo)

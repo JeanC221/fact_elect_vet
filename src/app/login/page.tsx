@@ -3,18 +3,14 @@ import { redirect } from "next/navigation";
 import { LoginForm } from "@/components/LoginForm";
 import { loginFormSchema, authErrorToSpanish, type LoginFormValues } from "@/mappers/auth";
 import { AuthError, authenticate, verifySessionToken } from "@/services/auth";
+import { isLockedOut, lockoutSecondsRemaining, recordFailure, recordSuccess } from "@/mappers/loginRateLimit";
+import { readRateLimitState, writeRateLimitState } from "@/services/loginRateLimitStore";
 import {
   SESSION_COOKIE_NAME,
   createRoleCookie,
   createSessionCookie,
 } from "@/services/sessionCookies";
 
-/**
- * Employee login route (server component).
- * Already-authenticated users are redirected to the dashboard ("/").
- * The inline `loginAction` server action validates credentials, issues a JWT,
- * and stores it in an HttpOnly/Secure(prod)/SameSite=Strict cookie.
- */
 export default async function LoginPage() {
   const token = cookies().get(SESSION_COOKIE_NAME)?.value;
   if (token && (await verifySessionToken(token))) {
@@ -25,6 +21,15 @@ export default async function LoginPage() {
     "use server";
     const parsed = loginFormSchema.safeParse(values);
     if (!parsed.success) return { error: authErrorToSpanish("invalid_credentials") };
+
+    const now = Date.now();
+    const rateState = await readRateLimitState(parsed.data.email);
+    if (isLockedOut(rateState, now)) {
+      const seconds = lockoutSecondsRemaining(rateState, now);
+      const minutes = Math.ceil(seconds / 60);
+      return { error: `Demasiados intentos fallidos. Espere ${minutes} minuto${minutes === 1 ? "" : "s"} e intente nuevamente.` };
+    }
+
     let sessionToken: string;
     let isAdmin: boolean;
     try {
@@ -32,9 +37,13 @@ export default async function LoginPage() {
       sessionToken = result.token;
       isAdmin = result.admin;
     } catch (error) {
+      if (error instanceof AuthError && error.code === "invalid_credentials") {
+        await writeRateLimitState(parsed.data.email, recordFailure(rateState, now));
+      }
       if (error instanceof AuthError) return { error: authErrorToSpanish(error.code) };
       return { error: authErrorToSpanish("default") };
     }
+    await writeRateLimitState(parsed.data.email, recordSuccess());
     // redirect() throws NEXT_REDIRECT — must stay outside the try/catch above.
     cookies().set(createSessionCookie(sessionToken));
     cookies().set(createRoleCookie(isAdmin));
@@ -55,4 +64,3 @@ export default async function LoginPage() {
     </main>
   );
 }
-

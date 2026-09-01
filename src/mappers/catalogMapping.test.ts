@@ -128,7 +128,7 @@ describe("reconcileMapping", () => {
     expect(r.payments).toHaveLength(methods.length);
     expect(r.payments.map((m) => m.provetMethod)).not.toContain("GONE-METHOD");
     expect(r.items.every((m) => m.siigoProductId === null)).toBe(true);
-    expect(r.version).toBe(2);
+    expect(r.version).toBe(1);
     expect(r.updatedAt).not.toBe("2026-01-01T00:00:00.000Z");
   });
 

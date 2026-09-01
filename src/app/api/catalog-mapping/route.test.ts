@@ -74,41 +74,72 @@ describe("GET /api/catalog-mapping", () => {
     expect(getMock).toHaveBeenCalledWith("fact-vet/catalog-mapping.json", { access: "private" });
   });
 
-  it("falls back to the empty default when the stored blob is schema-invalid", async () => {
+  it("falls back to the empty default with a 503 when the stored blob is schema-invalid (real problem, not first-run)", async () => {
     getMock.mockResolvedValue({ stream: streamOf({ items: "not-an-array" }) });
     const res = await GET();
     const json = await res.json();
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(503);
     expect(json).toEqual(EMPTY_MAPPING);
   });
 
-  it("falls back to the empty default on any other read error", async () => {
+  it("falls back to the empty default with a 503 on any other read error — never a silent 200 'no mapping saved' reading", async () => {
     getMock.mockRejectedValue(new Error("network blip"));
     const res = await GET();
     const json = await res.json();
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(503);
     expect(json).toEqual(EMPTY_MAPPING);
   });
 });
 
-describe("PUT /api/catalog-mapping", () => {
-  it("validates and overwrites the private shared blob on success", async () => {
+describe("PUT /api/catalog-mapping — optimistic concurrency", () => {
+  it("saves and bumps the version when the client's version matches the server's current version", async () => {
+    getMock.mockResolvedValue({ stream: streamOf(validMapping) }); // server currently at version:1
     putMock.mockResolvedValue({ url: "https://blob.example/catalog-mapping.json" });
     const req = new Request("http://localhost/api/catalog-mapping", {
-      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(validMapping),
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(validMapping), // sends version:1
     });
     const res = await PUT(req);
     const json = await res.json();
     expect(res.status).toBe(200);
-    expect(json).toEqual(validMapping);
+    expect(json.version).toBe(2); // bumped server-side
     expect(putMock).toHaveBeenCalledWith(
       "fact-vet/catalog-mapping.json",
-      JSON.stringify(validMapping),
+      JSON.stringify({ ...validMapping, version: 2 }),
       expect.objectContaining({ access: "private", contentType: "application/json", allowOverwrite: true }),
     );
   });
 
-  it("returns 400 for a schema-invalid mapping without calling put()", async () => {
+  it("saves the very first mapping when nothing exists yet (server version:0, client sends version:0)", async () => {
+    getMock.mockResolvedValue(null); // nothing saved -> EMPTY_MAPPING, version:0
+    putMock.mockResolvedValue({ url: "https://blob.example/catalog-mapping.json" });
+    const firstSave = { ...validMapping, version: 0 };
+    const req = new Request("http://localhost/api/catalog-mapping", {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(firstSave),
+    });
+    const res = await PUT(req);
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json.version).toBe(1);
+  });
+
+  it("returns 409 and the server's current mapping when the client's version is stale (another device already saved)", async () => {
+    // Server is already at version:2 (another device saved after this client last read version:1).
+    const serverCurrent = { ...validMapping, version: 2, updatedAt: "2026-08-31T05:00:00.000Z" };
+    getMock.mockResolvedValue({ stream: streamOf(serverCurrent) });
+    const staleClientPayload = { ...validMapping, version: 1 }; // this client still thinks it's version:1
+    const req = new Request("http://localhost/api/catalog-mapping", {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(staleClientPayload),
+    });
+    const res = await PUT(req);
+    const json = await res.json();
+    expect(res.status).toBe(409);
+    expect(json.error.code).toBe("version_conflict");
+    expect(json.error.message).toContain("Recargue la página");
+    expect(json.current).toEqual(serverCurrent);
+    expect(putMock).not.toHaveBeenCalled(); // never overwrites the newer server state
+  });
+
+  it("returns 400 for a schema-invalid mapping without calling get() version-check or put()", async () => {
     const req = new Request("http://localhost/api/catalog-mapping", {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ items: "nope" }),
     });
@@ -118,6 +149,7 @@ describe("PUT /api/catalog-mapping", () => {
   });
 
   it("returns 500 with a clear message when the Blob write itself fails", async () => {
+    getMock.mockResolvedValue({ stream: streamOf(validMapping) }); // version matches, passes OCC check
     putMock.mockRejectedValue(new Error("Blob store unavailable"));
     const req = new Request("http://localhost/api/catalog-mapping", {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(validMapping),
@@ -126,5 +158,17 @@ describe("PUT /api/catalog-mapping", () => {
     const json = await res.json();
     expect(res.status).toBe(500);
     expect(json.error.message).toContain("Blob store unavailable");
+  });
+
+  it("returns 503 and never writes when the version-check read itself fails — refuses to save blind over an unverified current state", async () => {
+    getMock.mockRejectedValue(new Error("network blip"));
+    const req = new Request("http://localhost/api/catalog-mapping", {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(validMapping),
+    });
+    const res = await PUT(req);
+    const json = await res.json();
+    expect(res.status).toBe(503);
+    expect(json.error.code).toBe("storage_unavailable");
+    expect(putMock).not.toHaveBeenCalled();
   });
 });
