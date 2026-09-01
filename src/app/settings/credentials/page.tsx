@@ -34,17 +34,30 @@ export default function CredentialsPage() {
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
-    const stored = window.localStorage.getItem(STORAGE_KEY);
-    if (stored) {
+    (async () => {
       try {
-        const parsed = parseCredentialsConfig(stored);
-        setMode(parsed.mode);
-        setConfigured(parsed.configured);
-      } catch {
-        // corrupt blob → keep seeded sandbox defaults
+        const res = await fetch("/api/emission-mode");
+        if (res.ok) {
+          const parsed = parseCredentialsConfig(JSON.stringify(await res.json()));
+          setMode(parsed.mode);
+          setConfigured(parsed.configured);
+          window.localStorage.setItem(STORAGE_KEY, serializeCredentialsConfig(parsed));
+          setLoaded(true);
+          return;
+        }
+      } catch { /* network error → fall back to local cache below */ }
+      const stored = window.localStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        try {
+          const parsed = parseCredentialsConfig(stored);
+          setMode(parsed.mode);
+          setConfigured(parsed.configured);
+        } catch {
+          // corrupt blob → keep seeded sandbox defaults
+        }
       }
-    }
-    setLoaded(true);
+      setLoaded(true);
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -60,12 +73,15 @@ export default function CredentialsPage() {
         configured: nextConfigured,
         updatedAt: new Date().toISOString(),
       };
-      // Persist mode + configured flags (display). Also persist the actual
-      // credential values so live health/catalog checks can POST them to the
-      // server routes (used in-memory only, never logged).
+      // Persist mode + configured flags locally (fast paint) and on the
+      // server (source of truth — no secret VALUES ever leave this browser).
       window.localStorage.setItem(STORAGE_KEY, serializeCredentialsConfig(config));
       window.localStorage.setItem("fact_vet.credentialsStore", JSON.stringify(values));
       window.dispatchEvent(new StorageEvent("storage", { key: "fact_vet.credentialsStore" }));
+      fetch("/api/emission-mode", {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: serializeCredentialsConfig(config),
+      }).catch(() => { /* offline/network error — local state already updated */ });
       setMode(nextMode);
       setConfigured(nextConfigured);
       setToast(`Credenciales validadas — modo ${nextMode === "production" ? "Producción" : "Sandbox"}`);

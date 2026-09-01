@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { parseCatalogMapping, catalogMappingSchema, type CatalogMapping } from "@/mappers/catalogMapping";
-import { parseCredentialsConfig, type EnvironmentMode } from "@/mappers/credentials";
+import { parseCredentialsConfig, environmentModeSchema, type EnvironmentMode } from "@/mappers/credentials";
 import { mockSiigoProducts } from "@/mocks/siigo";
 import type { ProvetToSiigoOptions } from "@/mappers/provetToSiigo";
 import type { SiigoProduct } from "@/schemas/siigo";
@@ -70,6 +70,18 @@ async function fetchServerMapping(): Promise<CatalogMapping | null> {
   }
 }
 
+/** Server (Blob) is the source of truth for the emission mode (sandbox/production) — never contains secrets. Falls back to the local cache on network failure. */
+async function fetchServerMode(): Promise<EnvironmentMode | null> {
+  try {
+    const res = await fetch("/api/emission-mode");
+    if (!res.ok) return null;
+    const raw = await res.json();
+    return environmentModeSchema.parse(raw.mode);
+  } catch {
+    return null;
+  }
+}
+
 export function useEmissionOptions(): ProvetToSiigoOptions {
   const [mode, setMode] = useState<EnvironmentMode>(readMode);
   const [mapping, setMapping] = useState<CatalogMapping>(readLocalMapping);
@@ -79,10 +91,13 @@ export function useEmissionOptions(): ProvetToSiigoOptions {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const server = await fetchServerMapping();
-      if (cancelled || !server) return;
-      setMapping(server);
-      try { localStorage.setItem(MAPPING_KEY, JSON.stringify(server)); } catch { /* storage full/unavailable */ }
+      const [server, serverMode] = await Promise.all([fetchServerMapping(), fetchServerMode()]);
+      if (cancelled) return;
+      if (server) {
+        setMapping(server);
+        try { localStorage.setItem(MAPPING_KEY, JSON.stringify(server)); } catch { /* storage full/unavailable */ }
+      }
+      if (serverMode) setMode(serverMode);
     })();
     return () => { cancelled = true; };
   }, []);

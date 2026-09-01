@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { z } from "zod";
 import { CheckCircle2 } from "lucide-react";
 import { NavBar } from "@/components/NavBar";
 import { ConsultationQueue } from "@/components/ConsultationQueue";
@@ -22,6 +23,7 @@ import {
   mapSiigoInvoiceStatus,
   serializeInvoiceHistory,
   parseInvoiceHistory,
+  invoiceHistoryEntrySchema,
   type InvoiceHistoryEntry,
   type InvoiceHistoryRow,
 } from "@/mappers/invoiceHistory";
@@ -39,20 +41,8 @@ type Tab = "queue" | "history";
 const TABS: { id: Tab; label: string }[] = [{ id: "queue", label: "Cola de Consultas" }, { id: "history", label: "Historial de Facturas" }];
 const HISTORY_STORAGE_KEY = "fact_vet.invoiceHistory";
 
-/** Reads the configured Siigo credit-note (NC) document type id, or undefined if not set — no hardcoded fallback (see MissingCreditNoteSettingError). */
-//function readCreditNoteDocTypeId(): number | undefined {
-//  try {
-//    const raw = window.localStorage.getItem(CREDIT_NOTE_DOCUMENT_TYPE_ID_KEY);
-//    const n = raw ? Number(raw) : NaN;
-//    return Number.isInteger(n) && n > 0 ? n : undefined;
-//  } catch { return undefined; }
-//}
-
 export default function HomePage() {
   const { rows, isInitialLoading, isRefreshing, fetchError: queueFetchError, clearFetchError, handleRefresh, setRowStatus } = useConsultationQueue();
-  // Always starts empty so server-rendered markup and the client's first
-  // render match exactly (localStorage doesn't exist during SSR) — hydrated
-  // from localStorage in the useEffect below, after mount.
   const [history, setHistory] = useState<InvoiceHistoryEntry[]>([]);
   const [tab, setTab] = useState<Tab>("queue");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -68,10 +58,26 @@ export default function HomePage() {
   const options = useEmissionOptions();
 
   useEffect(() => {
-    const stored = window.localStorage.getItem(HISTORY_STORAGE_KEY);
-    if (!stored) return;
-    try { setHistory(parseInvoiceHistory(stored)); }
-    catch { /* corrupt blob → keep empty */ }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/invoice-history");
+        if (!cancelled && res.ok) {
+          const raw = await res.json();
+          const server = z.array(invoiceHistoryEntrySchema).parse(raw);
+          setHistory(server);
+          try { window.localStorage.setItem(HISTORY_STORAGE_KEY, serializeInvoiceHistory(server)); }
+          catch { /* storage full/unavailable — server copy is already the state */ }
+          return;
+        }
+      } catch { /* network error → fall back to local cache below */ }
+      if (cancelled) return;
+      const stored = window.localStorage.getItem(HISTORY_STORAGE_KEY);
+      if (!stored) return;
+      try { setHistory(parseInvoiceHistory(stored)); }
+      catch { /* corrupt blob → keep empty */ }
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   const updateHistory = useCallback((updater: (prev: InvoiceHistoryEntry[]) => InvoiceHistoryEntry[]) => {
@@ -79,6 +85,12 @@ export default function HomePage() {
       const next = updater(prev);
       try { window.localStorage.setItem(HISTORY_STORAGE_KEY, serializeInvoiceHistory(next)); }
       catch { /* localStorage unavailable/full — history still updates in memory */ }
+      // Fire-and-forget: push the full array to the server so every device
+      // sees this invoice/annulment. UI already reflects `next` optimistically.
+      fetch("/api/invoice-history", {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: serializeInvoiceHistory(next),
+      }).catch(() => { /* offline/network error — local state + cache still updated */ });
       return next;
     });
   }, []);
