@@ -116,16 +116,16 @@ export default function HomePage() {
     };
   }, [refreshHistoryIfIdle]);
 
-  const updateHistory = useCallback((updater: (prev: InvoiceHistoryEntry[]) => InvoiceHistoryEntry[]) => {
+  const updateHistory = useCallback((updater: (prev: InvoiceHistoryEntry[]) => InvoiceHistoryEntry[], changedEntries: InvoiceHistoryEntry[]) => {
     setHistory((prev) => {
       const next = updater(prev);
       try { window.localStorage.setItem(HISTORY_STORAGE_KEY, serializeInvoiceHistory(next)); }
       catch { /* localStorage unavailable/full — history still updates in memory */ }
-      // Fire-and-forget: push the full array to the server so every device
-      // sees this invoice/annulment. UI already reflects `next` optimistically.
+      // Fire-and-forget: push only the changed entries; the server merges by
+      // invoiceId. UI already reflects `next` optimistically.
       fetch("/api/invoice-history", {
         method: "PUT", headers: { "Content-Type": "application/json" },
-        body: serializeInvoiceHistory(next),
+        body: JSON.stringify({ entries: z.array(invoiceHistoryEntrySchema).parse(changedEntries) }),
       }).catch(() => { /* offline/network error — local state + cache still updated */ });
       return next;
     });
@@ -219,11 +219,16 @@ export default function HomePage() {
       siigoCreditNoteSchema.parse(cn);
       const idemKey = generateIdempotencyKey();
       const response = await retryWithBackoff(() => submitCreditNote(cn, "", "", idemKey), { maxRetries: 5 });
-      updateHistory((prev) => prev.map((e) => e.invoiceId === annulTarget.invoiceId ? { ...e, status: "Annulled" as InvoiceStatus, observations: `Anulada vía nota crédito ${response.id}` } : e).concat({ invoiceId: response.id, cufe: response.cufe, status: "Accepted" as InvoiceStatus, consultationId: annulTarget.consultationId, paymentMethod: annulTarget.paymentMethod, observations: `Nota crédito que anula ${annulTarget.invoiceId}`, emittedAt: new Date() }));
+      const creditNoteEntry: InvoiceHistoryEntry = { invoiceId: response.id, cufe: response.cufe, status: "Accepted" as InvoiceStatus, consultationId: annulTarget.consultationId, paymentMethod: annulTarget.paymentMethod, observations: `Nota crédito que anula ${annulTarget.invoiceId}`, emittedAt: new Date() };
+      const annulledOriginal: InvoiceHistoryEntry = { ...(history.find((e) => e.invoiceId === annulTarget.invoiceId) as InvoiceHistoryEntry), status: "Annulled" as InvoiceStatus, observations: `Anulada vía nota crédito ${response.id}` };
+      updateHistory(
+        (prev) => prev.map((e) => e.invoiceId === annulTarget.invoiceId ? annulledOriginal : e).concat(creditNoteEntry),
+        [annulledOriginal, creditNoteEntry],
+      );
       setAnnulTarget(null);
       showToast(`Nota crédito ${response.id} generada · Factura ${annulTarget.invoiceId} anulada`);
     } catch (error) { setAnnulError(translateSiigoError(error).message); } finally { setIsAnnulling(false); }
-  }, [annulTarget, showToast, updateHistory]);
+  }, [annulTarget, showToast, updateHistory, history]);
 
   const handleSubmit = useCallback(async (values: QuickEditFormValues) => {
     if (!selectedId) return;
@@ -243,7 +248,8 @@ export default function HomePage() {
         return siigoInvoiceResponseSchema.parse(data);
       }, { maxRetries: 5, onRetry: (n) => setRetryAttempt(n) });
       setRowStatus(selectedId, mapSiigoInvoiceStatus(response.status));
-      updateHistory((prev) => [...prev, toInvoiceHistoryEntry(response, selectedId, new Date(), values.paymentMethod, values)]);
+      const newEntry = toInvoiceHistoryEntry(response, selectedId, new Date(), values.paymentMethod, values);
+      updateHistory((prev) => [...prev, newEntry], [newEntry]);
       const number = response.number ?? response.id;
       if (response.status === "Accepted") { setSelectedId(null); showToast(`Factura ${number} generada con éxito · CUFE: ${response.cufe}`); }
       else if (response.status === "Rejected") { setTranslatedError({ code: "rejected", message: "La DIAN rechazó la factura. Corrija los datos y reintente.", severity: "error", quickAction: "none", retryable: false }); }

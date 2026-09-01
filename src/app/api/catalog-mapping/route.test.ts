@@ -1,13 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { putMock, getMock, MockBlobNotFoundError } = vi.hoisted(() => {
-  class MockBlobNotFoundError extends Error {}
-  return { putMock: vi.fn(), getMock: vi.fn(), MockBlobNotFoundError };
-});
-vi.mock("@vercel/blob", () => ({
-  put: (...args: unknown[]) => putMock(...args),
-  get: (...args: unknown[]) => getMock(...args),
-  BlobNotFoundError: MockBlobNotFoundError,
+const { queryMock } = vi.hoisted(() => ({ queryMock: vi.fn() }));
+vi.mock("@/services/db", () => ({
+  getPool: () => ({ query: queryMock }),
 }));
 
 import { GET, PUT } from "./route";
@@ -32,58 +27,42 @@ const EMPTY_MAPPING = {
   sellerId: null,
 };
 
-/** Build a fake Response-compatible ReadableStream carrying the given JSON body, matching get()'s `.stream` shape. */
-function streamOf(body: unknown): ReadableStream {
-  const bytes = new TextEncoder().encode(JSON.stringify(body));
-  return new ReadableStream({
-    start(controller) {
-      controller.enqueue(bytes);
-      controller.close();
-    },
-  });
+/** Build a fake pg row matching what the SELECT/UPDATE...RETURNING queries return. */
+function rowOf(mapping: typeof validMapping) {
+  return {
+    items: mapping.items,
+    payments: mapping.payments,
+    version: mapping.version,
+    document_type_id: mapping.documentTypeId,
+    credit_note_document_type_id: mapping.creditNoteDocumentTypeId,
+    seller_id: mapping.sellerId,
+    updated_at: new Date(mapping.updatedAt),
+  };
 }
 
 beforeEach(() => {
-  putMock.mockReset();
-  getMock.mockReset();
+  queryMock.mockReset();
 });
 
 describe("GET /api/catalog-mapping", () => {
-  it("returns the empty default mapping when nothing has been saved yet (get() returns null)", async () => {
-    getMock.mockResolvedValue(null);
+  it("returns the empty default mapping when no row exists yet", async () => {
+    queryMock.mockResolvedValue({ rowCount: 0, rows: [] });
     const res = await GET();
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json).toEqual(EMPTY_MAPPING);
   });
 
-  it("returns the empty default mapping when get() throws BlobNotFoundError", async () => {
-    getMock.mockRejectedValue(new MockBlobNotFoundError("not found"));
-    const res = await GET();
-    const json = await res.json();
-    expect(res.status).toBe(200);
-    expect(json).toEqual(EMPTY_MAPPING);
-  });
-
-  it("reads and returns the saved mapping from a private blob", async () => {
-    getMock.mockResolvedValue({ stream: streamOf(validMapping) });
+  it("reads and returns the saved mapping", async () => {
+    queryMock.mockResolvedValue({ rowCount: 1, rows: [rowOf(validMapping)] });
     const res = await GET();
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json).toEqual(validMapping);
-    expect(getMock).toHaveBeenCalledWith("fact-vet/catalog-mapping.json", { access: "private" });
   });
 
-  it("falls back to the empty default with a 503 when the stored blob is schema-invalid (real problem, not first-run)", async () => {
-    getMock.mockResolvedValue({ stream: streamOf({ items: "not-an-array" }) });
-    const res = await GET();
-    const json = await res.json();
-    expect(res.status).toBe(503);
-    expect(json).toEqual(EMPTY_MAPPING);
-  });
-
-  it("falls back to the empty default with a 503 on any other read error — never a silent 200 'no mapping saved' reading", async () => {
-    getMock.mockRejectedValue(new Error("network blip"));
+  it("falls back to the empty default with a 503 on any read error — never a silent 200 'no mapping saved' reading", async () => {
+    queryMock.mockRejectedValue(new Error("network blip"));
     const res = await GET();
     const json = await res.json();
     expect(res.status).toBe(503);
@@ -93,25 +72,24 @@ describe("GET /api/catalog-mapping", () => {
 
 describe("PUT /api/catalog-mapping — optimistic concurrency", () => {
   it("saves and bumps the version when the client's version matches the server's current version", async () => {
-    getMock.mockResolvedValue({ stream: streamOf(validMapping) }); // server currently at version:1
-    putMock.mockResolvedValue({ url: "https://blob.example/catalog-mapping.json" });
+    // The atomic UPDATE...WHERE version=$6 RETURNING succeeds and comes back with version already bumped to 2.
+    queryMock.mockResolvedValueOnce({ rowCount: 1, rows: [rowOf({ ...validMapping, version: 2 })] });
     const req = new Request("http://localhost/api/catalog-mapping", {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(validMapping), // sends version:1
     });
     const res = await PUT(req);
     const json = await res.json();
     expect(res.status).toBe(200);
-    expect(json.version).toBe(2); // bumped server-side
-    expect(putMock).toHaveBeenCalledWith(
-      "fact-vet/catalog-mapping.json",
-      JSON.stringify({ ...validMapping, version: 2 }),
-      expect.objectContaining({ access: "private", contentType: "application/json", allowOverwrite: true }),
-    );
+    expect(json.version).toBe(2);
+    expect(queryMock).toHaveBeenCalledTimes(1);
+    const [sql, params] = queryMock.mock.calls[0];
+    expect(sql).toMatch(/UPDATE catalog_mapping/);
+    expect(sql).toMatch(/WHERE id = 1 AND version = \$6/);
+    expect(params[5]).toBe(1); // client's version passed as the WHERE check
   });
 
-  it("saves the very first mapping when nothing exists yet (server version:0, client sends version:0)", async () => {
-    getMock.mockResolvedValue(null); // nothing saved -> EMPTY_MAPPING, version:0
-    putMock.mockResolvedValue({ url: "https://blob.example/catalog-mapping.json" });
+  it("saves the very first mapping when the row is still at version:0", async () => {
+    queryMock.mockResolvedValueOnce({ rowCount: 1, rows: [rowOf({ ...validMapping, version: 1 })] });
     const firstSave = { ...validMapping, version: 0 };
     const req = new Request("http://localhost/api/catalog-mapping", {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(firstSave),
@@ -123,9 +101,11 @@ describe("PUT /api/catalog-mapping — optimistic concurrency", () => {
   });
 
   it("returns 409 and the server's current mapping when the client's version is stale (another device already saved)", async () => {
-    // Server is already at version:2 (another device saved after this client last read version:1).
+    // UPDATE...WHERE version=$6 matches nothing (rowCount 0) because the row is already past the client's version.
     const serverCurrent = { ...validMapping, version: 2, updatedAt: "2026-08-31T05:00:00.000Z" };
-    getMock.mockResolvedValue({ stream: streamOf(serverCurrent) });
+    queryMock
+      .mockResolvedValueOnce({ rowCount: 0, rows: [] }) // UPDATE finds no matching row
+      .mockResolvedValueOnce({ rowCount: 1, rows: [rowOf(serverCurrent)] }); // follow-up SELECT for `current`
     const staleClientPayload = { ...validMapping, version: 1 }; // this client still thinks it's version:1
     const req = new Request("http://localhost/api/catalog-mapping", {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(staleClientPayload),
@@ -136,32 +116,33 @@ describe("PUT /api/catalog-mapping — optimistic concurrency", () => {
     expect(json.error.code).toBe("version_conflict");
     expect(json.error.message).toContain("Recargue la página");
     expect(json.current).toEqual(serverCurrent);
-    expect(putMock).not.toHaveBeenCalled(); // never overwrites the newer server state
+    expect(queryMock).toHaveBeenCalledTimes(2); // UPDATE attempt + reconciliation SELECT, never a second write
   });
 
-  it("returns 400 for a schema-invalid mapping without calling get() version-check or put()", async () => {
+  it("returns 400 for a schema-invalid mapping without touching the database", async () => {
     const req = new Request("http://localhost/api/catalog-mapping", {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ items: "nope" }),
     });
     const res = await PUT(req);
     expect(res.status).toBe(400);
-    expect(putMock).not.toHaveBeenCalled();
+    expect(queryMock).not.toHaveBeenCalled();
   });
 
-  it("returns 500 with a clear message when the Blob write itself fails", async () => {
-    getMock.mockResolvedValue({ stream: streamOf(validMapping) }); // version matches, passes OCC check
-    putMock.mockRejectedValue(new Error("Blob store unavailable"));
+  it("returns 500 with a clear message when the UPDATE itself fails", async () => {
+    queryMock.mockRejectedValueOnce(new Error("connection terminated"));
     const req = new Request("http://localhost/api/catalog-mapping", {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(validMapping),
     });
     const res = await PUT(req);
     const json = await res.json();
     expect(res.status).toBe(500);
-    expect(json.error.message).toContain("Blob store unavailable");
+    expect(json.error.message).toContain("connection terminated");
   });
 
-  it("returns 503 and never writes when the version-check read itself fails — refuses to save blind over an unverified current state", async () => {
-    getMock.mockRejectedValue(new Error("network blip"));
+  it("returns 503 when rowCount is 0 and the reconciliation read itself also fails", async () => {
+    queryMock
+      .mockResolvedValueOnce({ rowCount: 0, rows: [] }) // UPDATE finds no matching row
+      .mockRejectedValueOnce(new Error("network blip")); // reconciliation SELECT fails too
     const req = new Request("http://localhost/api/catalog-mapping", {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(validMapping),
     });
@@ -169,6 +150,5 @@ describe("PUT /api/catalog-mapping — optimistic concurrency", () => {
     const json = await res.json();
     expect(res.status).toBe(503);
     expect(json.error.code).toBe("storage_unavailable");
-    expect(putMock).not.toHaveBeenCalled();
   });
 });
