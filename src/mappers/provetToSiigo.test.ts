@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   provetToSiigoInvoice,
+  MissingEmissionSettingError,
   type ProvetToSiigoOptions,
 } from "./provetToSiigo";
 import { UnmappedPaymentMethodError, type CatalogMapping } from "@/mappers/catalogMapping";
@@ -24,12 +25,15 @@ const baseMapping: CatalogMapping = {
   ],
   version: 1,
   updatedAt: "2026-08-26T00:00:00.000Z",
+  documentTypeId: 2372,
+  creditNoteDocumentTypeId: 2379,
+  sellerId: 62,
 };
 
 const opts = (
   mode: EnvironmentMode = "sandbox",
   mapping: CatalogMapping = baseMapping,
-): ProvetToSiigoOptions => ({ mapping, siigoProducts: mockSiigoProducts, mode });
+): ProvetToSiigoOptions => ({ mapping, siigoProducts: mockSiigoProducts, mode, documentTypeId: 2372, sellerId: 62 });
 
 const map = (i: number, o: ProvetToSiigoOptions = opts()) =>
   provetToSiigoInvoice(mockConsultations[i], mockClients[i], mockPatients[i], o);
@@ -110,10 +114,17 @@ describe("provetToSiigoInvoice", () => {
     expect(() => map(0, opts("sandbox", nullMethod))).toThrow(/método de pago sin mapeo/i);
   });
 
-  it("throws UnmappedPaymentMethodError when options are omitted (empty default catalog)", () => {
+  it("throws MissingEmissionSettingError when options are omitted (documentTypeId/sellerId not configured)", () => {
     expect(() =>
       provetToSiigoInvoice(mockConsultations[0], mockClients[0], mockPatients[0]),
-    ).toThrow(UnmappedPaymentMethodError);
+    ).toThrow(MissingEmissionSettingError);
+  });
+
+  it("throws MissingEmissionSettingError('sellerId') specifically when only documentTypeId is configured", () => {
+    const partial: ProvetToSiigoOptions = { mapping: baseMapping, siigoProducts: mockSiigoProducts, mode: "sandbox", documentTypeId: 2372 };
+    expect(() =>
+      provetToSiigoInvoice(mockConsultations[0], mockClients[0], mockPatients[0], partial),
+    ).toThrow(/vendedor/i);
   });
 
   it("overrides the document type id and seller via options", () => {

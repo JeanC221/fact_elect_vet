@@ -17,12 +17,17 @@ const baseMapping: CatalogMapping = {
   ],
   version: 1,
   updatedAt: "2026-08-26T00:00:00.000Z",
+  documentTypeId: 2372,
+  creditNoteDocumentTypeId: 2379,
+  sellerId: 62,
 };
 
 const opts = (over: Partial<ProvetToSiigoOptions> = {}): ProvetToSiigoOptions => ({
   mapping: baseMapping,
   siigoProducts: mockSiigoProducts,
   mode: "sandbox",
+  documentTypeId: 2372,
+  sellerId: 62,
   ...over,
 });
 
