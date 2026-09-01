@@ -167,7 +167,7 @@ export default function HomePage() {
       const srcCon = mockConsultations.find((c) => c.id === annulTarget.consultationId);
       const original = buildInvoicePayloadFromQuickEdit(mockConsultations, mockClients, mockPatients, annulTarget.consultationId, { name: d.clientName, phone: d.phone, identificationType: d.identificationType, identificationNumber: d.identificationNumber, email: d.email, paymentMethod: srcCon?.payment_method ?? d.paymentMethodOptions[0]?.provetMethod ?? "", paidAmount: d.total }, options);
       if (!original) throw new Error("missing_source_data");
-      const cn = toCreditNotePayload(original, { id: annulTarget.invoiceId, cufe: annulTarget.cufe }, reason, { documentTypeId: readCreditNoteDocumentTypeId() });
+      const cn = toCreditNotePayload(original, { id: annulTarget.invoiceId, cufe: annulTarget.cufe }, reason, { documentTypeId: await readCreditNoteDocumentTypeId() });
       siigoCreditNoteSchema.parse(cn);
       const idemKey = generateIdempotencyKey();
       const response = await retryWithBackoff(() => submitCreditNote(cn, "", "", idemKey), { maxRetries: 5 });

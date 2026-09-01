@@ -14,6 +14,7 @@ import {
   parseCatalogMapping,
   reconcileMapping,
   serializeCatalogMapping,
+  catalogMappingSchema,
   type CatalogMapping as CatalogMappingState,
 } from "@/mappers/catalogMapping";
 import { mockSiigoPaymentTypes, mockSiigoProducts } from "@/mocks/siigo";
@@ -75,15 +76,29 @@ export default function MappingPage() {
     setSiigoSellers(liveSellers);
     setFallbackItemCode(window.localStorage.getItem(FALLBACK_ITEM_CODE_KEY) ?? "");
 
-    const stored = window.localStorage.getItem(STORAGE_KEY);
-    if (stored) {
+    // Server (Blob) is the source of truth for the mapping — shared across every
+    // device/browser. localStorage is only a fast local cache for offline reads.
+    (async () => {
       try {
-        const parsed = parseCatalogMapping(stored);
-        setMapping((m) => ({ ...parsed, items: m.items.length ? m.items : parsed.items }));
+        const res = await fetch("/api/catalog-mapping");
+        if (res.ok) {
+          const serverMapping = catalogMappingSchema.parse(await res.json());
+          setMapping((m) => ({ ...serverMapping, items: m.items.length ? m.items : serverMapping.items }));
+          window.localStorage.setItem(STORAGE_KEY, serializeCatalogMapping(serverMapping));
+          setLoaded(true);
+          return;
+        }
+      } catch { /* network error → fall back to local cache below */ }
+      const stored = window.localStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        try {
+          const parsed = parseCatalogMapping(stored);
+          setMapping((m) => ({ ...parsed, items: m.items.length ? m.items : parsed.items }));
+        }
+        catch { /* corrupt blob → keep seeded defaults */ }
       }
-      catch { /* corrupt blob → keep seeded defaults */ }
-    }
-    setLoaded(true);
+      setLoaded(true);
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -156,10 +171,26 @@ export default function MappingPage() {
     window.dispatchEvent(new StorageEvent("storage", { key: FALLBACK_ITEM_CODE_KEY }));
   }, []);
 
-  const handleSave = useCallback(() => {
+  const handleSave = useCallback(async () => {
     const next: CatalogMappingState = { ...mapping, updatedAt: new Date().toISOString() };
-    window.localStorage.setItem(STORAGE_KEY, serializeCatalogMapping(next));
-    setMapping(next); setDirty(false); setToast("Mapeo guardado"); setTimeout(() => setToast(null), 2500);
+    try {
+      const res = await fetch("/api/catalog-mapping", {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: serializeCatalogMapping(next),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        setToast(data?.error?.message ?? "Error al guardar el mapeo en el servidor");
+        setTimeout(() => setToast(null), 3000);
+        return;
+      }
+      window.localStorage.setItem(STORAGE_KEY, serializeCatalogMapping(next));
+      setMapping(next); setDirty(false); setToast("Mapeo guardado — visible para todos los dispositivos");
+      setTimeout(() => setToast(null), 2500);
+    } catch {
+      setToast("Error de red al guardar el mapeo");
+      setTimeout(() => setToast(null), 2500);
+    }
   }, [mapping]);
 
   const handleSyncCatalogs = useCallback(async () => {

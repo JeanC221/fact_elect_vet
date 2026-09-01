@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { parseCatalogMapping, type CatalogMapping } from "@/mappers/catalogMapping";
+import { parseCatalogMapping, catalogMappingSchema, type CatalogMapping } from "@/mappers/catalogMapping";
 import { parseCredentialsConfig, type EnvironmentMode } from "@/mappers/credentials";
 import { mockSiigoProducts } from "@/mocks/siigo";
 import type { ProvetToSiigoOptions } from "@/mappers/provetToSiigo";
@@ -49,7 +49,8 @@ function readMode(): EnvironmentMode {
   return "sandbox";
 }
 
-function readMapping(): CatalogMapping {
+/** Local-cache-only read — used as the initial synchronous value and as a fallback if the server fetch fails. */
+function readLocalMapping(): CatalogMapping {
   if (typeof window === "undefined") return DEFAULT_MAPPING;
   try {
     const raw = localStorage.getItem(MAPPING_KEY);
@@ -58,15 +59,37 @@ function readMapping(): CatalogMapping {
   return DEFAULT_MAPPING;
 }
 
+/** Server (Blob) is the source of truth for the mapping — shared across every device. Falls back to the local cache on network failure. */
+async function fetchServerMapping(): Promise<CatalogMapping | null> {
+  try {
+    const res = await fetch("/api/catalog-mapping");
+    if (!res.ok) return null;
+    return catalogMappingSchema.parse(await res.json());
+  } catch {
+    return null;
+  }
+}
+
 export function useEmissionOptions(): ProvetToSiigoOptions {
   const [mode, setMode] = useState<EnvironmentMode>(readMode);
-  const [mapping, setMapping] = useState<CatalogMapping>(readMapping);
+  const [mapping, setMapping] = useState<CatalogMapping>(readLocalMapping);
   const [siigoProducts, setSiigoProducts] = useState<SiigoProduct[]>(readProducts);
   const [fallbackItemCode, setFallbackItemCode] = useState<string | undefined>(readFallbackItemCode);
 
   useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const server = await fetchServerMapping();
+      if (cancelled || !server) return;
+      setMapping(server);
+      try { localStorage.setItem(MAPPING_KEY, JSON.stringify(server)); } catch { /* storage full/unavailable */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
     const onStorage = (e: StorageEvent) => {
-      if (e.key === MAPPING_KEY) setMapping(readMapping());
+      if (e.key === MAPPING_KEY) setMapping(readLocalMapping());
       if (e.key === CREDENTIALS_KEY) setMode(readMode());
       if (e.key === SIIGO_PRODUCTS_KEY) setSiigoProducts(readProducts());
       if (e.key === FALLBACK_ITEM_CODE_KEY) setFallbackItemCode(readFallbackItemCode());
@@ -84,7 +107,9 @@ export function useEmissionOptions(): ProvetToSiigoOptions {
   };
 }
 
-/** Active Siigo credit-note (NC) document type id from the saved mapping — undefined when not yet configured. */
-export function readCreditNoteDocumentTypeId(): number | undefined {
-  return readMapping().creditNoteDocumentTypeId ?? undefined;
+/** Active Siigo credit-note (NC) document type id — reads the server (shared) mapping first, falls back to the local cache. */
+export async function readCreditNoteDocumentTypeId(): Promise<number | undefined> {
+  const server = await fetchServerMapping();
+  if (server) return server.creditNoteDocumentTypeId ?? undefined;
+  return readLocalMapping().creditNoteDocumentTypeId ?? undefined;
 }
