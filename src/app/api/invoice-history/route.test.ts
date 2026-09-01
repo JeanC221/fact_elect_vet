@@ -1,13 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { putMock, getMock, MockBlobNotFoundError } = vi.hoisted(() => {
-  class MockBlobNotFoundError extends Error {}
-  return { putMock: vi.fn(), getMock: vi.fn(), MockBlobNotFoundError };
-});
-vi.mock("@vercel/blob", () => ({
-  put: (...args: unknown[]) => putMock(...args),
-  get: (...args: unknown[]) => getMock(...args),
-  BlobNotFoundError: MockBlobNotFoundError,
+const { queryMock, connectMock, clientQueryMock, clientReleaseMock } = vi.hoisted(() => ({
+  queryMock: vi.fn(),
+  connectMock: vi.fn(),
+  clientQueryMock: vi.fn(),
+  clientReleaseMock: vi.fn(),
+}));
+vi.mock("@/services/db", () => ({
+  getPool: () => ({
+    query: queryMock,
+    connect: connectMock,
+  }),
 }));
 
 import { GET, PUT } from "./route";
@@ -23,60 +26,60 @@ const entryB = {
   emittedAt: "2026-08-31T01:00:00.000Z",
 };
 
-function streamOf(body: unknown): ReadableStream {
-  const bytes = new TextEncoder().encode(JSON.stringify(body));
-  return new ReadableStream({ start(controller) { controller.enqueue(bytes); controller.close(); } });
+/** Build a fake pg row matching what the SELECT query returns. */
+function rowOf(entry: typeof entryA | typeof entryB | { invoiceId: string; invoiceNumber?: string; cufe: string; status: "Accepted" | "Draft" | "Rejected" | "Annulled"; consultationId: string; paymentMethod: string; emittedAt: string; observations?: string }, createdAt: string) {
+  return {
+    invoice_id: entry.invoiceId,
+    invoice_number: entry.invoiceNumber ?? null,
+    cufe: entry.cufe,
+    status: entry.status,
+    consultation_id: entry.consultationId,
+    payment_method: entry.paymentMethod,
+    observations: "observations" in entry ? (entry as { observations?: string }).observations ?? null : null,
+    emitted_at: new Date(entry.emittedAt),
+    form_snapshot: null,
+    created_at: new Date(createdAt),
+  };
 }
 
 beforeEach(() => {
-  putMock.mockReset();
-  getMock.mockReset();
+  queryMock.mockReset();
+  connectMock.mockReset();
+  clientQueryMock.mockReset();
+  clientReleaseMock.mockReset();
+  connectMock.mockResolvedValue({ query: clientQueryMock, release: clientReleaseMock });
+  clientQueryMock.mockResolvedValue({ rowCount: 1, rows: [] }); // default: BEGIN/INSERT/COMMIT all succeed
 });
 
 describe("GET /api/invoice-history", () => {
-  it("returns an empty array when nothing has been saved yet", async () => {
-    getMock.mockResolvedValue(null);
+  it("returns an empty array when no rows exist yet", async () => {
+    queryMock.mockResolvedValue({ rowCount: 0, rows: [] });
     const res = await GET();
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json).toEqual([]);
   });
 
-  it("returns an empty array when get() throws BlobNotFoundError", async () => {
-    getMock.mockRejectedValue(new MockBlobNotFoundError("not found"));
-    const res = await GET();
-    const json = await res.json();
-    expect(json).toEqual([]);
-  });
-
-  it("reads and returns the saved history from a private blob", async () => {
-    getMock.mockResolvedValue({ stream: streamOf([entryA]) });
+  it("reads and returns the saved history in insertion order", async () => {
+    queryMock.mockResolvedValue({ rowCount: 1, rows: [rowOf(entryA, "2026-08-31T00:00:00.000Z")] });
     const res = await GET();
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json).toEqual([entryA]);
-    expect(getMock).toHaveBeenCalledWith("fact-vet/invoice-history.json", { access: "private" });
   });
 
-  it("falls back to an empty array when the stored blob is schema-invalid", async () => {
-    getMock.mockResolvedValue({ stream: streamOf([{ invoiceId: "" }]) });
+  it("returns 503 (not a silent 200 empty array) when the read genuinely fails", async () => {
+    queryMock.mockRejectedValue(new Error("network blip"));
     const res = await GET();
     const json = await res.json();
-    expect(json).toEqual([]);
-  });
-
-  it("falls back to an empty array on any other read error", async () => {
-    getMock.mockRejectedValue(new Error("network blip"));
-    const res = await GET();
-    const json = await res.json();
+    expect(res.status).toBe(503);
     expect(json).toEqual([]);
   });
 });
 
 describe("PUT /api/invoice-history", () => {
   it("upserts a single entry into an empty history", async () => {
-    getMock.mockResolvedValue(null);
-    putMock.mockResolvedValue({ url: "https://blob.example/invoice-history.json" });
+    queryMock.mockResolvedValueOnce({ rowCount: 1, rows: [rowOf(entryA, "2026-08-31T00:00:00.000Z")] }); // confirmation read after write
     const req = new Request("http://localhost/api/invoice-history", {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entries: [entryA] }),
     });
@@ -84,16 +87,17 @@ describe("PUT /api/invoice-history", () => {
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json).toEqual([entryA]);
-    expect(putMock).toHaveBeenCalledWith(
-      "fact-vet/invoice-history.json",
-      JSON.stringify([entryA]),
-      expect.objectContaining({ access: "private", contentType: "application/json", allowOverwrite: true }),
-    );
+    expect(clientQueryMock).toHaveBeenCalledWith("BEGIN");
+    expect(clientQueryMock).toHaveBeenCalledWith(expect.stringMatching(/INSERT INTO invoices/), expect.arrayContaining([entryA.invoiceId]));
+    expect(clientQueryMock).toHaveBeenCalledWith("COMMIT");
   });
 
   it("merges a new entry alongside an existing one written by another device — never overwrites it", async () => {
-    getMock.mockResolvedValue({ stream: streamOf([entryA]) });
-    putMock.mockResolvedValue({ url: "https://blob.example/invoice-history.json" });
+    // Confirmation read reflects both rows after the upsert; entryA keeps its original created_at (earlier), entryB is newer.
+    queryMock.mockResolvedValueOnce({
+      rowCount: 2,
+      rows: [rowOf(entryA, "2026-08-31T00:00:00.000Z"), rowOf(entryB, "2026-08-31T01:00:00.000Z")],
+    });
     const req = new Request("http://localhost/api/invoice-history", {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entries: [entryB] }),
     });
@@ -101,17 +105,15 @@ describe("PUT /api/invoice-history", () => {
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json).toEqual([entryA, entryB]);
-    expect(putMock).toHaveBeenCalledWith(
-      "fact-vet/invoice-history.json",
-      JSON.stringify([entryA, entryB]),
-      expect.objectContaining({ access: "private" }),
-    );
   });
 
-  it("updates an existing entry in place by invoiceId (e.g. annulment status change) without touching others", async () => {
-    getMock.mockResolvedValue({ stream: streamOf([entryA, entryB]) });
-    putMock.mockResolvedValue({ url: "https://blob.example/invoice-history.json" });
+  it("updates an existing entry in place by invoiceId (e.g. annulment status change) without moving its position", async () => {
     const annulled = { ...entryA, status: "Annulled" as const, observations: "Anulada vía nota crédito NC-1" };
+    // created_at for entryA's row is untouched by ON CONFLICT DO UPDATE, so it still sorts before entryB.
+    queryMock.mockResolvedValueOnce({
+      rowCount: 2,
+      rows: [rowOf(annulled, "2026-08-31T00:00:00.000Z"), rowOf(entryB, "2026-08-31T01:00:00.000Z")],
+    });
     const req = new Request("http://localhost/api/invoice-history", {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entries: [annulled] }),
     });
@@ -122,8 +124,7 @@ describe("PUT /api/invoice-history", () => {
   });
 
   it("accepts the single-entry shorthand shape", async () => {
-    getMock.mockResolvedValue(null);
-    putMock.mockResolvedValue({ url: "https://blob.example/invoice-history.json" });
+    queryMock.mockResolvedValueOnce({ rowCount: 1, rows: [rowOf(entryA, "2026-08-31T00:00:00.000Z")] });
     const req = new Request("http://localhost/api/invoice-history", {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entry: entryA }),
     });
@@ -133,13 +134,13 @@ describe("PUT /api/invoice-history", () => {
     expect(json).toEqual([entryA]);
   });
 
-  it("returns 400 for a schema-invalid body without calling put()", async () => {
+  it("returns 400 for a schema-invalid body without opening a transaction", async () => {
     const req = new Request("http://localhost/api/invoice-history", {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entries: [{ invoiceId: "" }] }),
     });
     const res = await PUT(req);
     expect(res.status).toBe(400);
-    expect(putMock).not.toHaveBeenCalled();
+    expect(connectMock).not.toHaveBeenCalled();
   });
 
   it("returns 400 for a raw array body (old pre-merge contract is no longer accepted)", async () => {
@@ -148,21 +149,27 @@ describe("PUT /api/invoice-history", () => {
     });
     const res = await PUT(req);
     expect(res.status).toBe(400);
-    expect(putMock).not.toHaveBeenCalled();
+    expect(connectMock).not.toHaveBeenCalled();
   });
 
-  it("returns 500 when the Blob write fails", async () => {
-    getMock.mockResolvedValue(null);
-    putMock.mockRejectedValue(new Error("Blob store unavailable"));
+  it("rolls back and returns 500 when the INSERT fails mid-transaction", async () => {
+    clientQueryMock.mockReset();
+    clientQueryMock
+      .mockResolvedValueOnce({}) // BEGIN
+      .mockRejectedValueOnce(new Error("constraint violation")); // INSERT fails
     const req = new Request("http://localhost/api/invoice-history", {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entries: [entryA] }),
     });
     const res = await PUT(req);
+    const json = await res.json();
     expect(res.status).toBe(500);
+    expect(json.error.message).toContain("constraint violation");
+    expect(clientQueryMock).toHaveBeenCalledWith("ROLLBACK");
+    expect(clientReleaseMock).toHaveBeenCalled();
   });
 
-  it("returns 503 and never writes when the pre-merge read itself fails — refuses to merge on top of an unverified base (would silently wipe the real history)", async () => {
-    getMock.mockRejectedValue(new Error("network blip"));
+  it("returns 503 when the write succeeds but the confirmation read fails — never claims the write itself failed", async () => {
+    queryMock.mockRejectedValueOnce(new Error("network blip")); // confirmation read after a successful write
     const req = new Request("http://localhost/api/invoice-history", {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entries: [entryA] }),
     });
@@ -170,16 +177,6 @@ describe("PUT /api/invoice-history", () => {
     const json = await res.json();
     expect(res.status).toBe(503);
     expect(json.error.code).toBe("storage_unavailable");
-    expect(putMock).not.toHaveBeenCalled();
-  });
-});
-
-describe("GET /api/invoice-history — storage failure visibility", () => {
-  it("returns 503 (not a silent 200 empty array) when the read genuinely fails", async () => {
-    getMock.mockRejectedValue(new Error("network blip"));
-    const res = await GET();
-    const json = await res.json();
-    expect(res.status).toBe(503);
-    expect(json).toEqual([]);
+    expect(clientQueryMock).toHaveBeenCalledWith("COMMIT"); // the write itself did succeed
   });
 });
