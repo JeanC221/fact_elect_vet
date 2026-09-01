@@ -43,13 +43,6 @@ export interface UseConsultationQueueResult {
   clearFetchError: () => void;
 }
 
-/**
- * Live Provet consultation queue with cross-navigation persistence.
- * Hydrates from sessionStorage on mount (so / <-> /settings navigation keeps
- * fetched rows), auto-fetches /api/consultations on mount, and only falls back
- * to static mock rows on an explicit network error. Loading flags keep action
- * buttons disabled during API calls to prevent UI lockups.
- */
 export function useConsultationQueue(): UseConsultationQueueResult {
   const [rows, setRows] = useState<ConsultationQueueRow[]>([]);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
@@ -108,6 +101,26 @@ export function useConsultationQueue(): UseConsultationQueueResult {
   }, [revalidate]);
 
   const handleRefresh = useCallback(() => revalidate(false), [revalidate]);
+
+  useEffect(() => {
+    const POLL_MS = 20_000;
+    const interval = setInterval(() => {
+      if (document.visibilityState === "visible") void revalidate(false);
+    }, POLL_MS);
+    return () => clearInterval(interval);
+  }, [revalidate]);
+
+  useEffect(() => {
+    const onFocusOrVisible = () => {
+      if (document.visibilityState === "visible") void revalidate(false);
+    };
+    window.addEventListener("focus", onFocusOrVisible);
+    document.addEventListener("visibilitychange", onFocusOrVisible);
+    return () => {
+      window.removeEventListener("focus", onFocusOrVisible);
+      document.removeEventListener("visibilitychange", onFocusOrVisible);
+    };
+  }, [revalidate]);
 
   const setRowStatus = useCallback((id: string, status: InvoiceStatus) => {
     const next = rowsRef.current.map((r) =>

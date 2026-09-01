@@ -57,28 +57,64 @@ export default function HomePage() {
   const [busyDownload, setBusyDownload] = useState<{ invoiceId: string; format: "pdf" | "xml" } | null>(null);
   const options = useEmissionOptions();
 
+  const fetchHistoryFromServer = useCallback(async (): Promise<InvoiceHistoryEntry[] | null> => {
+    try {
+      const res = await fetch("/api/invoice-history", { cache: "no-store" });
+      if (!res.ok) return null;
+      return z.array(invoiceHistoryEntrySchema).parse(await res.json());
+    } catch {
+      return null;
+    }
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      try {
-        const res = await fetch("/api/invoice-history");
-        if (!cancelled && res.ok) {
-          const raw = await res.json();
-          const server = z.array(invoiceHistoryEntrySchema).parse(raw);
-          setHistory(server);
-          try { window.localStorage.setItem(HISTORY_STORAGE_KEY, serializeInvoiceHistory(server)); }
-          catch { /* storage full/unavailable — server copy is already the state */ }
-          return;
-        }
-      } catch { /* network error → fall back to local cache below */ }
+      const server = await fetchHistoryFromServer();
       if (cancelled) return;
+      if (server) {
+        setHistory(server);
+        try { window.localStorage.setItem(HISTORY_STORAGE_KEY, serializeInvoiceHistory(server)); }
+        catch { /* storage full/unavailable — server copy is already the state */ }
+        return;
+      }
       const stored = window.localStorage.getItem(HISTORY_STORAGE_KEY);
       if (!stored) return;
       try { setHistory(parseInvoiceHistory(stored)); }
       catch { /* corrupt blob → keep empty */ }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [fetchHistoryFromServer]);
+
+  const refreshHistoryIfIdle = useCallback(async () => {
+    if (isSubmitting || isAnnulling) return;
+    const server = await fetchHistoryFromServer();
+    if (!server) return;
+    setHistory(server);
+    try { window.localStorage.setItem(HISTORY_STORAGE_KEY, serializeInvoiceHistory(server)); }
+    catch { /* storage full/unavailable */ }
+  }, [fetchHistoryFromServer, isSubmitting, isAnnulling]);
+
+  useEffect(() => {
+    const POLL_MS = 20_000;
+    const interval = setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      void refreshHistoryIfIdle();
+    }, POLL_MS);
+    return () => clearInterval(interval);
+  }, [refreshHistoryIfIdle]);
+
+  useEffect(() => {
+    const onFocusOrVisible = () => {
+      if (document.visibilityState === "visible") void refreshHistoryIfIdle();
+    };
+    window.addEventListener("focus", onFocusOrVisible);
+    document.addEventListener("visibilitychange", onFocusOrVisible);
+    return () => {
+      window.removeEventListener("focus", onFocusOrVisible);
+      document.removeEventListener("visibilitychange", onFocusOrVisible);
+    };
+  }, [refreshHistoryIfIdle]);
 
   const updateHistory = useCallback((updater: (prev: InvoiceHistoryEntry[]) => InvoiceHistoryEntry[]) => {
     setHistory((prev) => {
