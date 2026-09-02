@@ -103,7 +103,8 @@ export function useConsultationQueue(): UseConsultationQueueResult {
   const handleRefresh = useCallback(() => revalidate(false), [revalidate]);
 
   useEffect(() => {
-    const POLL_MS = 20_000;
+    const configured = Number(process.env.NEXT_PUBLIC_QUEUE_POLL_MS);
+    const POLL_MS = Number.isFinite(configured) && configured >= 5_000 ? configured : 20_000;
     const interval = setInterval(() => {
       if (document.visibilityState === "visible") void revalidate(false);
     }, POLL_MS);

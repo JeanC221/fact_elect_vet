@@ -96,6 +96,10 @@ export const provetConsultationItemRawSchema = z
     price_with_vat: z.coerce.number().catch(0),
     vat_percentage: z.coerce.number().default(0),
     hide_on_consultation: z.boolean().catch(false),
+    type_code: z.coerce.number().nullable().catch(null),
+    usage_size: z.coerce.number().nullable().catch(null),
+    usage_type: z.coerce.number().nullable().catch(null),
+    is_dispense_fee_item: z.boolean().catch(false),
   })
   .passthrough();
 

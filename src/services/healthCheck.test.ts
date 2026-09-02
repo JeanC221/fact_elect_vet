@@ -125,6 +125,19 @@ describe("checkHealth", () => {
     const provetCall = fetchMock.mock.calls.find((c: unknown[]) => String(c[0]).includes("provet")) as [string, RequestInit];
     expect(provetCall[1].headers).toEqual({ "x-api-key": "provet-key-001" });
   });
+  it("reports Provet offline without guessing a URL when PROVET_BASE_URL is unset", async () => {
+    delete process.env.SIIGO_SANDBOX_MODE;
+    delete process.env.PROVET_BASE_URL;
+    process.env.PROVET_API_KEY = "provet-key-001";
+    fetchMock.mockResolvedValue(fakeRes(true));
+    vi.mocked(getSiigoAccessToken).mockResolvedValue({ accessToken: "tok", partnerId: "pid" });
+    const report = await checkHealth();
+    const provet = report.services.find((s) => s.name === "provet");
+    expect(provet?.state).toBe("offline");
+    expect(provet?.detail).toContain("PROVET_BASE_URL");
+    expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining("provetcloud.com"), expect.anything());
+    delete process.env.PROVET_API_KEY;
+  });
   it("propagates Siigo offline to DIAN and overall", async () => {
     delete process.env.SIIGO_SANDBOX_MODE;
     fetchMock.mockResolvedValue(fakeRes(true));

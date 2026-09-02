@@ -74,7 +74,9 @@ function deriveDian(siigo: ServiceHealth): ServiceHealth {
   };
 }
 
-const PROVET_BASE_URL = process.env.PROVET_BASE_URL ?? "https://api.provetcloud.com";
+function provetBaseUrl(): string | null {
+  return process.env.PROVET_BASE_URL ?? null;
+}
 
 /** Determine if the app is running in sandbox mode (SIIGO_SANDBOX_MODE=true). */
 function isSandbox(): boolean {
@@ -116,17 +118,23 @@ export async function checkSiigoHealth(credentials?: SiigoCredentials): Promise<
   }
 }
 
-/**
- * Ping Provet (x-api-key) and Siigo (OAuth) in parallel, derive DIAN from Siigo.
- * In sandbox mode returns mock data instead of hitting external APIs.
- */
 export async function checkHealth(credentials?: SiigoCredentials): Promise<HealthReport> {
   if (isSandbox()) return mockHealthReport();
 
   const provetApiKey = process.env.PROVET_API_KEY;
   const provetHeaders = provetApiKey ? { "x-api-key": provetApiKey } : undefined;
+  const provetUrl = provetBaseUrl();
   const [provet, siigo] = await Promise.all([
-    checkService("provet", PROVET_BASE_URL, fetch, provetHeaders),
+    provetUrl
+      ? checkService("provet", provetUrl, fetch, provetHeaders)
+      : Promise.resolve<ServiceHealth>({
+          name: "provet",
+          label: LABELS.provet,
+          state: "offline",
+          latencyMs: null,
+          detail: "Variable de entorno PROVET_BASE_URL no configurada.",
+          checkedAt: new Date().toISOString(),
+        }),
     checkSiigoHealth(credentials),
   ]);
   const dian = deriveDian(siigo);

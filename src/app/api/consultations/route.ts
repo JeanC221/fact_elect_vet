@@ -13,6 +13,18 @@ import { buildQueueFromProvet } from "@/mappers/provetToQueue";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * Rate limits are enforced per endpoint (not globally) per Provet's docs
+ * (developers.provetcloud.com/restapi/ratelimit.html), so firing these 6
+ * calls in parallel does not itself exceed any single endpoint's budget.
+ * The unresolved risk is the per-call WEIGHT: a custom page_size counts as
+ * `ceil(requested_page_size / endpoint_default_page_size)` requests against
+ * that endpoint's limit. page_size=1000 (see provetApi.ts) could weigh
+ * several requests per call if an endpoint's default is low — the exact
+ * defaults are only published in each endpoint's own Provet REST API Schema
+ * page, which requires production credentials to inspect. Once confirmed,
+ * revisit NEXT_PUBLIC_QUEUE_POLL_MS (useConsultationQueue.ts) accordingly.
+ */
 export async function GET(): Promise<NextResponse> {
   try {
     const token = await getProvetAccessToken();

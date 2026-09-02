@@ -47,8 +47,8 @@ function requireEnv(name: string): string {
  * Client Credentials Grant (POST PROVET_TOKEN_URL, form-urlencoded).
  * Tokens are cached in memory and renewed 60s before expiry.
  *
- * The returned opaque token is meant to be sent as the `?access_token=`
- * query parameter on Provet REST resource requests (see provetApi.ts).
+ * The returned opaque token is meant to be sent as an `Authorization: Bearer`
+ * header on Provet REST resource requests (see provetApi.ts).
  */
 export async function getProvetAccessToken(): Promise<string> {
   const tokenUrl = requireEnv("PROVET_TOKEN_URL");

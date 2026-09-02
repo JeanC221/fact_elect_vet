@@ -64,6 +64,9 @@ Edit `.env.local` with your actual values:
 | `PROVET_API_KEY` | Provet Cloud API key | `your-api-key` |
 | `PROVET_CLINIC_ID` | Provet clinic identifier | `12345` |
 | `PROVET_BASE_URL` | Provet API endpoint | `https://api.provetcloud.com` |
+| `PROVET_BASE_URL` | Provet API endpoint (must include the tenant's `provet_id`; no safe default exists) | `https://provetcloud.com/12345/api/0.1` (EU) or `https://us.provetcloud.com/12345/api/0.1` (US) |
+| `PROVET_SYNC_WINDOW_DAYS` | Days back to sync via `modified__gte` (avoids silent truncation once the clinic has >1000 recent records) | `30` (default if unset) |
+| `NEXT_PUBLIC_QUEUE_POLL_MS` | Consultation queue auto-refresh interval in ms — each refresh triggers 6 Provet calls in parallel. Rate-limit weight per call is `ceil(page_size/endpoint_default)`, currently unconfirmed per endpoint (needs production credentials, see Provet REST API Schema) | `20000` (default if unset; raise if real limits are tight) |
 
 ### 3. Run Development Server
 

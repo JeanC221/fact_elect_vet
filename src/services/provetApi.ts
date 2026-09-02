@@ -17,7 +17,46 @@ export class ProvetApiError extends Error {
   }
 }
 
-const BASE = process.env.PROVET_BASE_URL ?? "https://api.provetcloud.com";
+function requireBaseUrl(): string {
+  const value = process.env.PROVET_BASE_URL;
+  if (!value) {
+    throw new ProvetApiError(
+      "missing_config",
+      "Variable de entorno PROVET_BASE_URL no configurada.",
+    );
+  }
+  return value;
+}
+
+function syncWindowDays(): number {
+  const raw = process.env.PROVET_SYNC_WINDOW_DAYS;
+  const parsed = raw ? Number(raw) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 30;
+}
+
+/** Format a Date as Provet's documented filter format: `YYYY-MM-DD hh:mm+00:00` (UTC). */
+function toProvetDateParam(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}+00:00`;
+}
+
+function modifiedSinceParam(): string {
+  const since = new Date(Date.now() - syncWindowDays() * 24 * 60 * 60 * 1000);
+  return toProvetDateParam(since);
+}
+
+const MAX_PAGES = 50;
+const MAX_429_RETRIES = 4;
+const BACKOFF_BASE_MS = 500;
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+function retryDelayMs(res: Response, attempt: number): number {
+  const header = res.headers?.get?.("Retry-After") ?? res.headers?.get?.("retry-after");
+  const seconds = header ? Number(header) : NaN;
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+  return BACKOFF_BASE_MS * 2 ** attempt;
+}
 
 async function fetchProvetPage<S extends z.ZodTypeAny>(
   path: string,
@@ -27,24 +66,32 @@ async function fetchProvetPage<S extends z.ZodTypeAny>(
 ): Promise<{ results: z.infer<S>[]; next: string | null }> {
   const url =
     pageUrl ??
-    `${BASE}${path}?access_token=${encodeURIComponent(token)}&page=1&page_size=100&ordering=-modified`;
+    `${requireBaseUrl()}${path}?page=1&page_size=1000&ordering=-modified&modified__gte=${encodeURIComponent(modifiedSinceParam())}`;
   let res: Response;
-  try {
-    res = await fetch(url, { headers: { Accept: "application/json" } });
-  } catch {
-    throw new ProvetApiError(
-      "service_unavailable",
-      `No se pudo contactar la API de Provet (${path}).`,
-    );
+  for (let attempt = 0; ; attempt++) {
+    try {
+      res = await fetch(url, {
+        headers: { Accept: "application/json", Authorization: `Bearer ${token}` },
+      });
+    } catch {
+      throw new ProvetApiError(
+        "service_unavailable",
+        `No se pudo contactar la API de Provet (${path}).`,
+      );
+    }
+    if (res.status === 429 && attempt < MAX_429_RETRIES) {
+      await sleep(retryDelayMs(res, attempt));
+      continue;
+    }
+    break;
   }
   if (!res.ok) {
     throw new ProvetApiError(
-      res.status === 401 ? "auth_failed" : "request_failed",
+      res.status === 401 ? "auth_failed" : res.status === 429 ? "requests_limit" : "request_failed",
       `Provet ${path} falló (HTTP ${res.status}).`,
     );
   }
   const parsedJson = await res.json();
-  console.info(`[DEBUG] fetchProvetPage path="${path}" first result:`, JSON.stringify(parsedJson?.results?.[0]));
   const parsed = provetPaginatedSchema(schema).safeParse(parsedJson);
   if (!parsed.success) {
     throw new ProvetApiError("parse_failed", `Respuesta de Provet ${path} con formato inesperado.`);
@@ -52,9 +99,24 @@ async function fetchProvetPage<S extends z.ZodTypeAny>(
   return { results: parsed.data.results, next: parsed.data.next };
 }
 
-/** Fetch the first (most-recent) page of each Provet resource. */
 async function firstPage<S extends z.ZodTypeAny>(path: string, token: string, schema: S): Promise<z.infer<S>[]> {
-  return (await fetchProvetPage(path, token, schema, null)).results;
+  const all: z.infer<S>[] = [];
+  let pageUrl: string | null = null;
+  for (let i = 0; i < MAX_PAGES; i++) {
+    const { results, next }: { results: z.infer<S>[]; next: string | null } = await fetchProvetPage(
+      path,
+      token,
+      schema,
+      pageUrl,
+    );
+    all.push(...results);
+    if (!next) return all;
+    pageUrl = next;
+  }
+  throw new ProvetApiError(
+    "too_many_pages",
+    `Provet ${path} superó ${MAX_PAGES} páginas sin terminar — posible cadena "next" inválida.`,
+  );
 }
 
 export const fetchConsultations = (token: string) =>
