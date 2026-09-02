@@ -65,7 +65,14 @@ export function QuickEditDrawer({ detail, isSubmitting, errorMessage, errorDetai
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/40" onMouseDown={(e) => { if (e.target === e.currentTarget && !isSubmitting) onClose(); }}>
-      <aside className="scrollbar-thin flex h-full w-[480px] max-w-full flex-col overflow-y-auto border-l border-grid-line bg-pure-white">
+      <aside className="relative scrollbar-thin flex h-full w-[480px] max-w-full flex-col overflow-y-auto border-l border-grid-line bg-pure-white">
+        {isSubmitting && (
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-pure-white/90 backdrop-blur-sm">
+            <Loader2 className="h-10 w-10 animate-spin text-clinical-blue" />
+            <p className="text-sm font-semibold text-slate-text">Emitiendo factura a la DIAN…</p>
+            <p className="max-w-xs text-center text-xs text-muted">Esto puede tardar unos segundos. No cierre esta ventana.</p>
+          </div>
+        )}
         <header className="flex items-center justify-between border-b border-grid-line px-4 py-3">
           <h2 className="text-base font-semibold text-slate-text">Edición Rápida · {detail.id}</h2>
           <button type="button" onClick={onClose} disabled={isSubmitting} aria-label="Cerrar" className="rounded-md p-1 text-muted hover:bg-cool-grey disabled:opacity-40"><X className="h-4 w-4" /></button>
