@@ -19,6 +19,15 @@ export interface InvoiceHistoryEntry {
   paymentMethod: string;
   observations?: string;
   emittedAt: Date;
+  /**
+   * Patient name at the moment of emission. Captured separately from
+   * formSnapshot (which mirrors the editable client fields only) because the
+   * patient is read-only in the Quick-Edit drawer. Like formSnapshot, this is
+   * the source of truth for the history view — an invoice must keep showing
+   * its real patient even after the source consultation ages out of Provet's
+   * sync window (PROVET_SYNC_WINDOW_DAYS) and is no longer in the live queue.
+   */
+  patientName?: string;
   /** Exact Quick-Edit form values confirmed by staff at the moment of emission — the read-only "eye" view in the history table shows this verbatim, not a reconstruction from the current consultation state (which may have since changed). */
   formSnapshot?: QuickEditFormValues;
 }
@@ -33,6 +42,7 @@ export const invoiceHistoryEntrySchema = z.object({
   paymentMethod: z.string().default(""),
   observations: z.string().optional(),
   emittedAt: z.coerce.date(),
+  patientName: z.string().trim().min(1).optional(),
   formSnapshot: quickEditFormSchema.optional(),
 });
 
@@ -87,6 +97,7 @@ export function toInvoiceHistoryEntry(
   emittedAt: Date,
   paymentMethod: string = "",
   formSnapshot?: QuickEditFormValues,
+  patientName?: string,
 ): InvoiceHistoryEntry {
   return {
     invoiceId: response.id,
@@ -97,6 +108,7 @@ export function toInvoiceHistoryEntry(
     paymentMethod,
     observations: response.observations,
     emittedAt,
+    patientName,
     formSnapshot,
   };
 }
@@ -109,16 +121,24 @@ export function buildInvoiceHistory(
   const rowMap = new Map(rows.map((r) => [r.id, r]));
   return entries.map((e) => {
     const r = rowMap.get(e.consultationId);
+    // formSnapshot/patientName are frozen at emission time and are the
+    // source of truth for a historical invoice — an already-emitted invoice
+    // must keep showing correct client/patient/total data even once its
+    // source consultation ages out of Provet's sync window and disappears
+    // from the live queue. The live row is only used as a fallback for
+    // entries persisted before this field existed (formSnapshot === undefined).
     return {
       invoiceId: e.invoiceId,
       invoiceNumber: e.invoiceNumber,
       cufe: e.cufe,
       status: e.status,
       consultationId: e.consultationId,
-      clientName: r?.clientName ?? "Cliente desconocido",
-      clientDoc: r?.clientDoc ?? "—",
-      patientName: r?.patientName ?? "Paciente desconocido",
-      total: r?.total ?? 0,
+      clientName: e.formSnapshot?.name ?? r?.clientName ?? "Cliente desconocido",
+      clientDoc: e.formSnapshot
+        ? `${e.formSnapshot.identificationType} ${e.formSnapshot.identificationNumber}`
+        : r?.clientDoc ?? "—",
+      patientName: e.patientName ?? r?.patientName ?? "Paciente desconocido",
+      total: e.formSnapshot?.paidAmount ?? r?.total ?? 0,
       paymentMethod: e.paymentMethod || "Pendiente",
       emittedAt: e.emittedAt,
       formSnapshot: e.formSnapshot,

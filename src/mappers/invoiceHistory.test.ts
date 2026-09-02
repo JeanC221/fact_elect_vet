@@ -53,11 +53,20 @@ describe("buildInvoiceHistory", () => {
     expect(historyRows[0].clientName).toBe("María García López");
     expect(historyRows[0].invoiceId).toBe("INV-7751");
   });
-  it("falls back gracefully for unknown consultations", () => {
+  it("falls back gracefully for unknown consultations (no snapshot: legacy entries predating formSnapshot)", () => {
     const rows = buildInvoiceHistory([mk(0, "CON-NOPE")], queueRows);
     expect(rows[0].clientName).toBe("Cliente desconocido");
     expect(rows[0].clientDoc).toBe("—");
     expect(rows[0].total).toBe(0);
+  });
+  it("uses the frozen formSnapshot/patientName instead of 'desconocido' when the source consultation is no longer in the live queue (e.g. aged out of Provet's sync window)", () => {
+    const snapshot = { name: "Marge Simpson", identificationType: "CC" as const, identificationNumber: "2112121212", email: "marge@example.com", phone: "3105550101", paymentMethod: "Tarjeta Crédito", paidAmount: 35 };
+    const entry = toInvoiceHistoryEntry(mockSiigoInvoiceResponses[0], "CON-2021-ANCIENT", new Date("2026-08-15"), "Tarjeta Crédito", snapshot, "Bart Simpson");
+    const rows = buildInvoiceHistory([entry], queueRows); // queueRows has no "CON-2021-ANCIENT" — simulates an aged-out consultation
+    expect(rows[0].clientName).toBe("Marge Simpson");
+    expect(rows[0].clientDoc).toBe("CC 2112121212");
+    expect(rows[0].patientName).toBe("Bart Simpson");
+    expect(rows[0].total).toBe(35);
   });
 });
 

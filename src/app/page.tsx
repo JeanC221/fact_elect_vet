@@ -279,7 +279,7 @@ export default function HomePage() {
         if (!res.ok) throw new SiigoApiError(data.error?.code ?? "default", data.error?.message ?? "Error al generar la nota crédito.");
         return data as { id: string; cufe: string; status: "Accepted"; observations?: string };
       }, { maxRetries: 5 });
-      const creditNoteEntry: InvoiceHistoryEntry = { invoiceId: response.id, cufe: response.cufe, status: "Accepted" as InvoiceStatus, consultationId: annulTarget.consultationId, paymentMethod: annulTarget.paymentMethod, observations: `Nota crédito que anula ${annulTarget.invoiceId}`, emittedAt: new Date() };
+      const creditNoteEntry: InvoiceHistoryEntry = { invoiceId: response.id, cufe: response.cufe, status: "Accepted" as InvoiceStatus, consultationId: annulTarget.consultationId, paymentMethod: annulTarget.paymentMethod, observations: `Nota crédito que anula ${annulTarget.invoiceId}`, emittedAt: new Date(), patientName: annulTarget.patientName, formSnapshot: annulTarget.formSnapshot };
       const annulledOriginal: InvoiceHistoryEntry = { ...(history.find((e) => e.invoiceId === annulTarget.invoiceId) as InvoiceHistoryEntry), status: "Annulled" as InvoiceStatus, observations: `Anulada vía nota crédito ${response.id}` };
       updateHistory(
         (prev) => prev.map((e) => e.invoiceId === annulTarget.invoiceId ? annulledOriginal : e).concat(creditNoteEntry),
@@ -312,7 +312,7 @@ export default function HomePage() {
         return siigoInvoiceResponseSchema.parse(data);
       }, { maxRetries: 5, onRetry: (n) => setRetryAttempt(n) });
       setRowStatus(selectedId, mapSiigoInvoiceStatus(response.status));
-      const newEntry = toInvoiceHistoryEntry(response, selectedId, new Date(), values.paymentMethod, values);
+      const newEntry = toInvoiceHistoryEntry(response, selectedId, new Date(), values.paymentMethod, values, selectedDetail?.patientName);
       updateHistory((prev) => [...prev, newEntry], [newEntry]);
       const number = response.number ?? response.id;
       if (response.status === "Accepted") { setSelectedId(null); showToast(`Factura ${number} generada con éxito · CUFE: ${response.cufe}`); }
