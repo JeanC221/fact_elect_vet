@@ -23,16 +23,30 @@ function createPool(): Pool {
       "DATABASE_URL no está configurada. Defínela en .env.local (desarrollo) o en las variables de entorno de Vercel (producción).",
     );
   }
+  // Supabase's pooler presents a certificate chain that Node's default trust
+  // store does NOT recognize in serverless runtimes (confirmed in production:
+  // `Error: self-signed certificate in certificate chain` from pg-pool with
+  // plain `ssl: true`). This is a widely-reported Supabase+serverless issue,
+  // not a MITM condition — see https://supabase.com/docs/guides/platform/ssl-enforcement.
+  // The correct fix is supplying Supabase's own CA root explicitly (verified
+  // TLS, not disabled verification): Supabase dashboard → Project Settings →
+  // Database → SSL Configuration → Download Certificate Authority (CA)
+  // certificate. Paste its full contents (including the BEGIN/END lines) into
+  // the SUPABASE_DB_CA_CERT environment variable in Vercel.
+  //
+  // Do NOT set `rejectUnauthorized: false` — that disables certificate
+  // verification entirely and exposes the connection to MITM interception.
+  const caCert = process.env.SUPABASE_DB_CA_CERT;
+  if (!caCert) {
+    throw new Error(
+      "SUPABASE_DB_CA_CERT no está configurada. Descarga el certificado CA desde Supabase " +
+        "(Project Settings → Database → SSL Configuration → Download Certificate Authority (CA) certificate) " +
+        "y pega su contenido completo (incluyendo las líneas BEGIN/END) en esa variable de entorno.",
+    );
+  }
   return new Pool({
     connectionString,
-    // Supabase's pooler (port 6543) presents a valid, publicly verifiable
-    // certificate — `ssl: true` (the pg default) verifies it normally. Do
-    // NOT set `rejectUnauthorized: false`: that disables certificate
-    // verification entirely and exposes the connection to MITM interception.
-    // If a runtime ever reports a certificate-chain error against Supabase,
-    // fix it by supplying Supabase's CA root explicitly, not by disabling
-    // verification.
-    ssl: true,
+    ssl: { rejectUnauthorized: true, ca: caCert },
     max: 5,
   });
 }
