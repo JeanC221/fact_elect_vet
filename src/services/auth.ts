@@ -9,10 +9,14 @@ export type { SessionPayload } from "@/services/jwt";
 /**
  * Employee/admin credential and role layer. Authenticates against two
  * independent env credential sets:
- *   - Receptionist: EMPLOYEE_EMAIL + EMPLOYEE_PASSWORD  -> admin=false
- *   - Administrator: ADMIN_EMAIL  + ADMIN_PASSWORD       -> admin=true
- * Passwords are stored as plain text in .env.local, hashed at runtime
- * with SHA-256 (Web Crypto) and compared in constant time.
+ *   - Receptionist: EMPLOYEE_EMAIL + EMPLOYEE_PASSWORD_HASH -> admin=false
+ *   - Administrator: ADMIN_EMAIL  + ADMIN_PASSWORD_HASH      -> admin=true
+ * The environment stores only the SHA-256 hash of each password (base64url),
+ * never the plaintext password itself — so anyone with read access to the
+ * Vercel project's environment variables (dashboard, `vercel env pull`, a
+ * misconfigured Preview scope) sees an irreversible hash, not the real
+ * operational password used by clinic staff. Generate a hash with:
+ *   node -e "crypto.subtle.digest('SHA-256', new TextEncoder().encode('yourPassword')).then(d => console.log(Buffer.from(d).toString('base64url')))"
  *
  * Security (per 01_PROJECT_REQUIREMENTS section 2):
  *   - Credentials sourced exclusively from environment variables.
@@ -57,19 +61,19 @@ export async function authenticate(email: string, password: string): Promise<Aut
     throw new AuthError("missing_credentials", "JWT_SECRET no configurado.");
   }
   const adminEmail = process.env.ADMIN_EMAIL;
-  const adminPlain = process.env.ADMIN_PASSWORD;
+  const adminHash = process.env.ADMIN_PASSWORD_HASH;
   const employeeEmail = process.env.EMPLOYEE_EMAIL;
-  const employeePlain = process.env.EMPLOYEE_PASSWORD;
-  const hasAdmin = !!adminEmail && !!adminPlain;
-  const hasEmployee = !!employeeEmail && !!employeePlain;
+  const employeeHash = process.env.EMPLOYEE_PASSWORD_HASH;
+  const hasAdmin = !!adminEmail && !!adminHash;
+  const hasEmployee = !!employeeEmail && !!employeeHash;
   if (!hasAdmin && !hasEmployee) {
     throw new AuthError("missing_credentials");
   }
   const inputHash = await sha256(password);
-  if (hasAdmin && emailMatches(adminEmail, email) && timingSafeEqual(inputHash, await sha256(adminPlain!))) {
+  if (hasAdmin && emailMatches(adminEmail, email) && timingSafeEqual(inputHash, adminHash!)) {
     return { token: await signSessionToken({ email: adminEmail!, admin: true }), admin: true };
   }
-  if (hasEmployee && emailMatches(employeeEmail, email) && timingSafeEqual(inputHash, await sha256(employeePlain!))) {
+  if (hasEmployee && emailMatches(employeeEmail, email) && timingSafeEqual(inputHash, employeeHash!)) {
     return { token: await signSessionToken({ email: employeeEmail!, admin: false }), admin: false };
   }
   throw new AuthError("invalid_credentials");
