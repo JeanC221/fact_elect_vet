@@ -6,6 +6,7 @@ import { invoiceHistoryEntrySchema, type InvoiceHistoryEntry } from "@/mappers/i
 export const dynamic = "force-dynamic";
 
 const EMPTY_HISTORY: InvoiceHistoryEntry[] = [];
+void EMPTY_HISTORY; // kept for quick revert after debugging
 
 const putBodySchema = z.union([
   z.object({ entries: z.array(invoiceHistoryEntrySchema) }),
@@ -49,10 +50,16 @@ export async function GET(): Promise<NextResponse> {
     );
     const entries = result.rows.map(rowToEntry);
     const parsed = z.array(invoiceHistoryEntrySchema).safeParse(entries);
-    if (!parsed.success) return NextResponse.json(EMPTY_HISTORY, { status: 503 });
+    if (!parsed.success) {
+      // TEMP DEBUG — remove after diagnosing the production 503.
+      return NextResponse.json({ __debug: "zod_validation_failed", issues: parsed.error.issues, sampleRow: entries[0] ?? null }, { status: 503 });
+    }
     return NextResponse.json(parsed.data);
-  } catch {
-    return NextResponse.json(EMPTY_HISTORY, { status: 503 });
+  } catch (err) {
+    // TEMP DEBUG — remove after diagnosing the production 503.
+    const message = err instanceof Error ? err.message : String(err);
+    const stack = err instanceof Error ? err.stack : undefined;
+    return NextResponse.json({ __debug: "exception_thrown", message, stack }, { status: 503 });
   }
 }
 
