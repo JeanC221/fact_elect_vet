@@ -6,7 +6,6 @@ import { invoiceHistoryEntrySchema, type InvoiceHistoryEntry } from "@/mappers/i
 export const dynamic = "force-dynamic";
 
 const EMPTY_HISTORY: InvoiceHistoryEntry[] = [];
-void EMPTY_HISTORY; // kept for quick revert after debugging
 
 const putBodySchema = z.union([
   z.object({ entries: z.array(invoiceHistoryEntrySchema) }),
@@ -22,6 +21,7 @@ interface InvoiceRow {
   payment_method: string;
   observations: string | null;
   emitted_at: Date;
+  patient_name: string | null;
   form_snapshot: unknown;
   created_at: Date;
 }
@@ -36,6 +36,7 @@ function rowToEntry(row: InvoiceRow): InvoiceHistoryEntry {
     paymentMethod: row.payment_method,
     observations: row.observations ?? undefined,
     emittedAt: row.emitted_at,
+    patientName: row.patient_name ?? undefined,
     formSnapshot: (row.form_snapshot ?? undefined) as InvoiceHistoryEntry["formSnapshot"],
   };
 }
@@ -46,20 +47,14 @@ export async function GET(): Promise<NextResponse> {
     // created_at ASC preserves original insertion order — matches the old
     // Blob array's append order and what the UI/tests expect.
     const result = await pool.query<InvoiceRow>(
-      "SELECT invoice_id, invoice_number, cufe, status, consultation_id, payment_method, observations, emitted_at, form_snapshot, created_at FROM invoices ORDER BY created_at ASC",
+      "SELECT invoice_id, invoice_number, cufe, status, consultation_id, payment_method, observations, emitted_at, patient_name, form_snapshot, created_at FROM invoices ORDER BY created_at ASC",
     );
     const entries = result.rows.map(rowToEntry);
     const parsed = z.array(invoiceHistoryEntrySchema).safeParse(entries);
-    if (!parsed.success) {
-      // TEMP DEBUG — remove after diagnosing the production 503.
-      return NextResponse.json({ __debug: "zod_validation_failed", issues: parsed.error.issues, sampleRow: entries[0] ?? null }, { status: 503 });
-    }
+    if (!parsed.success) return NextResponse.json(EMPTY_HISTORY, { status: 503 });
     return NextResponse.json(parsed.data);
-  } catch (err) {
-    // TEMP DEBUG — remove after diagnosing the production 503.
-    const message = err instanceof Error ? err.message : String(err);
-    const stack = err instanceof Error ? err.stack : undefined;
-    return NextResponse.json({ __debug: "exception_thrown", message, stack }, { status: 503 });
+  } catch {
+    return NextResponse.json(EMPTY_HISTORY, { status: 503 });
   }
 }
 
@@ -83,8 +78,8 @@ export async function PUT(req: Request): Promise<NextResponse> {
     await client.query("BEGIN");
     for (const entry of incoming) {
       await client.query(
-        `INSERT INTO invoices (invoice_id, invoice_number, cufe, status, consultation_id, payment_method, observations, emitted_at, form_snapshot)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        `INSERT INTO invoices (invoice_id, invoice_number, cufe, status, consultation_id, payment_method, observations, emitted_at, patient_name, form_snapshot)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          ON CONFLICT (invoice_id) DO UPDATE SET
            invoice_number = EXCLUDED.invoice_number,
            cufe = EXCLUDED.cufe,
@@ -93,6 +88,7 @@ export async function PUT(req: Request): Promise<NextResponse> {
            payment_method = EXCLUDED.payment_method,
            observations = EXCLUDED.observations,
            emitted_at = EXCLUDED.emitted_at,
+           patient_name = EXCLUDED.patient_name,
            form_snapshot = EXCLUDED.form_snapshot`,
         [
           entry.invoiceId,
@@ -103,6 +99,7 @@ export async function PUT(req: Request): Promise<NextResponse> {
           entry.paymentMethod,
           entry.observations ?? null,
           entry.emittedAt,
+          entry.patientName ?? null,
           entry.formSnapshot ? JSON.stringify(entry.formSnapshot) : null,
         ],
       );
@@ -118,7 +115,7 @@ export async function PUT(req: Request): Promise<NextResponse> {
 
   try {
     const result = await pool.query<InvoiceRow>(
-      "SELECT invoice_id, invoice_number, cufe, status, consultation_id, payment_method, observations, emitted_at, form_snapshot, created_at FROM invoices ORDER BY created_at ASC",
+      "SELECT invoice_id, invoice_number, cufe, status, consultation_id, payment_method, observations, emitted_at, patient_name, form_snapshot, created_at FROM invoices ORDER BY created_at ASC",
     );
     return NextResponse.json(result.rows.map(rowToEntry));
   } catch {

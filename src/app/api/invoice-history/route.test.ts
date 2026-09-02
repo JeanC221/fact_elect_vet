@@ -27,7 +27,7 @@ const entryB = {
 };
 
 /** Build a fake pg row matching what the SELECT query returns. */
-function rowOf(entry: typeof entryA | typeof entryB | { invoiceId: string; invoiceNumber?: string; cufe: string; status: "Accepted" | "Draft" | "Rejected" | "Annulled"; consultationId: string; paymentMethod: string; emittedAt: string; observations?: string }, createdAt: string) {
+function rowOf(entry: typeof entryA | typeof entryB | { invoiceId: string; invoiceNumber?: string; cufe: string; status: "Accepted" | "Draft" | "Rejected" | "Annulled"; consultationId: string; paymentMethod: string; emittedAt: string; observations?: string; patientName?: string }, createdAt: string) {
   return {
     invoice_id: entry.invoiceId,
     invoice_number: entry.invoiceNumber ?? null,
@@ -37,6 +37,7 @@ function rowOf(entry: typeof entryA | typeof entryB | { invoiceId: string; invoi
     payment_method: entry.paymentMethod,
     observations: "observations" in entry ? (entry as { observations?: string }).observations ?? null : null,
     emitted_at: new Date(entry.emittedAt),
+    patient_name: "patientName" in entry ? (entry as { patientName?: string }).patientName ?? null : null,
     form_snapshot: null,
     created_at: new Date(createdAt),
   };
@@ -132,6 +133,20 @@ describe("PUT /api/invoice-history", () => {
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json).toEqual([entryA]);
+  });
+
+  it("persists and returns patientName (frozen at emission time, must not be lost on write/read)", async () => {
+    const entryWithPatient = { ...entryA, patientName: "Bart Simpson" };
+    queryMock.mockResolvedValueOnce({ rowCount: 1, rows: [rowOf(entryWithPatient, "2026-08-31T00:00:00.000Z")] });
+    const req = new Request("http://localhost/api/invoice-history", {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entry: entryWithPatient }),
+    });
+    const res = await PUT(req);
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json[0].patientName).toBe("Bart Simpson");
+    // The INSERT must actually carry patient_name through to Postgres, not just accept it in memory.
+    expect(clientQueryMock).toHaveBeenCalledWith(expect.stringMatching(/patient_name/), expect.arrayContaining(["Bart Simpson"]));
   });
 
   it("returns 400 for a schema-invalid body without opening a transaction", async () => {
