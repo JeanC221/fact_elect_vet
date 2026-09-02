@@ -25,10 +25,14 @@ function createPool(): Pool {
   }
   return new Pool({
     connectionString,
-    // Supabase's pooled connection (port 6543) terminates TLS with a cert
-    // chain not always present in serverless runtimes' trust store; this
-    // matches Supabase's own documented client config for that endpoint.
-    ssl: { rejectUnauthorized: false },
+    // Supabase's pooler (port 6543) presents a valid, publicly verifiable
+    // certificate — `ssl: true` (the pg default) verifies it normally. Do
+    // NOT set `rejectUnauthorized: false`: that disables certificate
+    // verification entirely and exposes the connection to MITM interception.
+    // If a runtime ever reports a certificate-chain error against Supabase,
+    // fix it by supplying Supabase's CA root explicitly, not by disabling
+    // verification.
+    ssl: true,
     max: 5,
   });
 }

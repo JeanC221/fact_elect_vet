@@ -7,6 +7,16 @@ import { buildSiigoCustomer } from "@/mappers/customerNormalizer";
 /** Round strictly to 2 decimals (DIAN cent precision) — defeats float drift (e.g. 7763.980000000001). */
 const round2 = (n: number): number => Number(Math.round(Number(`${n}e2`)) + "e-2");
 
+/**
+ * Today's date as YYYY-MM-DD in Colombia time (UTC-5, no DST year-round).
+ * `Date#toISOString()` returns UTC, which is already the next calendar day
+ * in Colombia for roughly 7pm–midnight COT — DIAN invoice dates would then
+ * silently record the wrong day for any consultation billed that evening.
+ */
+function todayInColombia(): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Bogota" }).format(new Date());
+}
+
 /** Dynamic emission context supplied by the caller (Settings UI state). */
 export interface ProvetToSiigoOptions {
   /** User-editable catalog mapping — governs payments and product codes. */
@@ -72,7 +82,7 @@ export function provetToSiigoInvoice(
     const fallbackItem = { name: "Consulta Veterinaria General", code: fallbackItemCode ?? DEFAULT_FALLBACK_ITEM_CODE, quantity: 1, unit_price: Math.max(consultation.total || 1, 1), tax_rate: 0, discount: 0 };
   const sourceItems = consultation.items.length > 0 ? consultation.items : [fallbackItem];
   const paymentValue = sumLineTotals(sourceItems);
-  const date = new Date().toISOString().slice(0, 10);
+  const date = todayInColombia();
 
   return {
     document: { id: documentTypeId },

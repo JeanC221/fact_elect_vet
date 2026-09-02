@@ -59,8 +59,16 @@ function extractSiigoError(body: unknown): ExtractedSiigoError | null {
   return null;
 }
 
-/** Build a SiigoApiError from a failed HTTP response. Always surfaces Siigo's raw code + message when present. */
-async function toSiigoError(res: Response): Promise<SiigoApiError> {
+/**
+ * Build a SiigoApiError from a failed HTTP response. Always surfaces Siigo's
+ * raw code + message when present. Tries the legacy flat {code,message}
+ * shape first (some Siigo endpoints and most of this file's tests use it),
+ * then falls back to Siigo's documented real error envelope
+ * {Status, Errors:[{Code,Message}]}. Exported so siigoCatalogs.ts (and any
+ * other caller hitting Siigo directly) shares one error-parsing
+ * implementation instead of a second one that only understands the flat shape.
+ */
+export async function toSiigoError(res: Response): Promise<SiigoApiError> {
   const fallback = STATUS_ERROR_CODES[res.status] ?? "default";
   let rawBody: unknown;
   try {

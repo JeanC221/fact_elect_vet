@@ -28,7 +28,7 @@ import {
   type InvoiceHistoryRow,
 } from "@/mappers/invoiceHistory";
 import { toCreditNotePayload, siigoCreditNoteSchema, type AnnulmentReason } from "@/mappers/creditNote";
-import { generateIdempotencyKey, SiigoApiError, submitCreditNote } from "@/services/siigoApi";
+import { generateIdempotencyKey, SiigoApiError } from "@/services/siigoApi";
 import { siigoInvoiceResponseSchema } from "@/schemas/siigo";
 import { translateSiigoError, retryWithBackoff, type TranslatedError, type QuickAction } from "@/services/errorTranslator";
 import { ErrorBanner } from "@/components/ErrorBanner";
@@ -164,6 +164,11 @@ export default function HomePage() {
   }, [handleRefresh, showToast]);
 
   const disableActions = isInitialLoading || isRefreshing || isSubmitting;
+  // Blocks emission (both invoice submit and credit-note annul) until the
+  // server-confirmed emission mode has loaded — see EmissionOptionsResult.isModeReady.
+  // Reusing the drawer/modal's existing isSubmitting/isAnnulling-driven disabled
+  // state keeps this a one-line gate instead of a new prop through both components.
+  const modeNotReady = !options.isModeReady;
   const displayError = translatedError ?? queueFetchError;
   const handleDismissError = useCallback(() => { setTranslatedError(null); clearFetchError(); }, [clearFetchError]);
   const invoicedConsultationIds = useMemo(
@@ -208,17 +213,72 @@ export default function HomePage() {
 
   const handleAnnulConfirm = useCallback(async (reason: AnnulmentReason) => {
     if (!annulTarget) return;
+    if (modeNotReady) { setAnnulError("Verificando el modo de emisión configurado (sandbox/producción)... Intente de nuevo en un momento."); return; }
     setIsAnnulling(true); setAnnulError(null);
     try {
-      const d = buildQuickEditDetail(mockConsultations, mockClients, mockPatients, annulTarget.consultationId, options.mapping);
-      if (!d) throw new Error("missing_source_data");
-      const srcCon = mockConsultations.find((c) => c.id === annulTarget.consultationId);
-      const original = buildInvoicePayloadFromQuickEdit(mockConsultations, mockClients, mockPatients, annulTarget.consultationId, { name: d.clientName, phone: d.phone, identificationType: d.identificationType, identificationNumber: d.identificationNumber, email: d.email, paymentMethod: srcCon?.payment_method ?? d.paymentMethodOptions[0]?.provetMethod ?? "", paidAmount: d.total }, options);
+      // Same real-data-first, synthetic-fallback strategy as selectedDetail/handleSubmit:
+      // try the real Provet-backed consultation first, and only fall back to a
+      // synthetic reconstruction (from the queue row + the exact form values
+      // confirmed by staff at emission time) when the consultation isn't in the
+      // in-memory Provet cache. Never falls back to the unrelated `mockConsultations`
+      // fixture, which never matches a real Provet id.
+      const row = rows.find((r) => r.id === annulTarget.consultationId);
+      const fallbackDetail: QuickEditDetail | undefined = row
+        ? {
+            id: row.id,
+            clientName: row.clientName,
+            identificationType: row.identificationType,
+            identificationNumber: row.identificationNumber,
+            email: row.email,
+            phone: row.phone,
+            patientName: row.patientName,
+            paymentMethod: "",
+            paymentMethodOptions: buildPaymentOptions(options.mapping),
+            total: row.total,
+            items: row.items,
+            createdAt: row.createdAt,
+          }
+        : annulTarget.formSnapshot
+        ? {
+            id: annulTarget.consultationId,
+            clientName: annulTarget.formSnapshot.name,
+            identificationType: annulTarget.formSnapshot.identificationType,
+            identificationNumber: annulTarget.formSnapshot.identificationNumber,
+            email: annulTarget.formSnapshot.email,
+            phone: annulTarget.formSnapshot.phone,
+            patientName: annulTarget.patientName,
+            paymentMethod: "",
+            paymentMethodOptions: buildPaymentOptions(options.mapping),
+            total: annulTarget.total,
+            items: [],
+            createdAt: annulTarget.emittedAt,
+          }
+        : undefined;
+      if (!fallbackDetail) throw new Error("missing_source_data");
+      const formValues: QuickEditFormValues = annulTarget.formSnapshot ?? {
+        name: fallbackDetail.clientName,
+        identificationType: fallbackDetail.identificationType,
+        identificationNumber: fallbackDetail.identificationNumber,
+        email: fallbackDetail.email,
+        phone: fallbackDetail.phone,
+        paymentMethod: annulTarget.paymentMethod || fallbackDetail.paymentMethodOptions[0]?.provetMethod || "",
+        paidAmount: fallbackDetail.total,
+      };
+      const original = buildInvoicePayloadFromQuickEdit(mockConsultations, mockClients, mockPatients, annulTarget.consultationId, formValues, options, fallbackDetail);
       if (!original) throw new Error("missing_source_data");
       const cn = toCreditNotePayload(original, { id: annulTarget.invoiceId, cufe: annulTarget.cufe }, reason, { documentTypeId: await readCreditNoteDocumentTypeId() });
       siigoCreditNoteSchema.parse(cn);
       const idemKey = generateIdempotencyKey();
-      const response = await retryWithBackoff(() => submitCreditNote(cn, "", "", idemKey), { maxRetries: 5 });
+      const response = await retryWithBackoff(async () => {
+        const res = await fetch("/api/credit-notes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Idempotency-Key": idemKey },
+          body: JSON.stringify(cn),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new SiigoApiError(data.error?.code ?? "default", data.error?.message ?? "Error al generar la nota crédito.");
+        return data as { id: string; cufe: string; status: "Accepted"; observations?: string };
+      }, { maxRetries: 5 });
       const creditNoteEntry: InvoiceHistoryEntry = { invoiceId: response.id, cufe: response.cufe, status: "Accepted" as InvoiceStatus, consultationId: annulTarget.consultationId, paymentMethod: annulTarget.paymentMethod, observations: `Nota crédito que anula ${annulTarget.invoiceId}`, emittedAt: new Date() };
       const annulledOriginal: InvoiceHistoryEntry = { ...(history.find((e) => e.invoiceId === annulTarget.invoiceId) as InvoiceHistoryEntry), status: "Annulled" as InvoiceStatus, observations: `Anulada vía nota crédito ${response.id}` };
       updateHistory(
@@ -228,10 +288,14 @@ export default function HomePage() {
       setAnnulTarget(null);
       showToast(`Nota crédito ${response.id} generada · Factura ${annulTarget.invoiceId} anulada`);
     } catch (error) { setAnnulError(translateSiigoError(error).message); } finally { setIsAnnulling(false); }
-  }, [annulTarget, showToast, updateHistory, history]);
+  }, [annulTarget, showToast, updateHistory, history, rows, options]);
 
   const handleSubmit = useCallback(async (values: QuickEditFormValues) => {
     if (!selectedId) return;
+    if (modeNotReady) {
+      setTranslatedError({ code: "mode_not_ready", message: "Verificando el modo de emisión configurado (sandbox/producción)... Intente de nuevo en un momento.", severity: "warning", quickAction: "none", retryable: true });
+      return;
+    }
     setIsSubmitting(true); setTranslatedError(null); setRetryAttempt(0);
     try {
       const payload = buildInvoicePayloadFromQuickEdit(mockConsultations, mockClients, mockPatients, selectedId, values, options, selectedDetail ?? undefined);

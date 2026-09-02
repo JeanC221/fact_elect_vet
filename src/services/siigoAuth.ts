@@ -74,9 +74,24 @@ function resolveCreds(creds?: SiigoCredentials): SiigoCredentials {
   };
 }
 
-/** Cache key derived from partnerId so per-credential tokens don't collide. */
-function cacheKeyFor(partnerId: string): string {
-  return `siigo:${partnerId}`;
+/**
+ * Cache key derived from the full credential triple (partnerId + username +
+ * accessKey), not just partnerId. Keying on partnerId alone means rotating a
+ * compromised access key while keeping the same Partner-Id would silently
+ * reuse the previous key's still-valid cached token — a credentials/health
+ * check against the new key could then pass without Siigo ever having seen
+ * it. The key material itself is never logged; only a short, non-reversible
+ * hash goes into the in-memory cache key.
+ */
+function cacheKeyFor(partnerId: string, username: string, accessKey: string): string {
+  // FNV-1a — fast, deterministic, non-cryptographic; only used to avoid
+  // storing raw credentials as a Map key, not as a security boundary.
+  let hash = 0x811c9dc5;
+  for (const ch of `${username}:${accessKey}`) {
+    hash ^= ch.charCodeAt(0);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return `siigo:${partnerId}:${(hash >>> 0).toString(16)}`;
 }
 
 /**
@@ -89,7 +104,7 @@ export async function getSiigoAccessToken(
 ): Promise<SiigoAuthResult> {
   const baseUrl = siigoBaseUrl();
   const { username, accessKey, partnerId } = resolveCreds(credentials);
-  const key = cacheKeyFor(partnerId);
+  const key = cacheKeyFor(partnerId, username, accessKey);
 
   const now = Date.now();
   const cached = tokenCache.get(key);

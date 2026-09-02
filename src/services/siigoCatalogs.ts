@@ -9,21 +9,11 @@ import {
   type SiigoDocumentTypeCatalogEntry,
   type SiigoSeller,
 } from "@/schemas/siigo";
-import { SiigoApiError } from "./siigoApi";
+import { SiigoApiError, toSiigoError } from "./siigoApi";
 
 /** Base URL for the Siigo Nube API (override via SIIGO_API_BASE_URL env var). */
 function siigoBaseUrl(): string {
   return process.env.SIIGO_API_BASE_URL ?? "https://api.siigo.com";
-}
-
-/** Build a SiigoApiError from a failed HTTP response (never exposes raw traces). */
-async function toSiigoError(res: Response): Promise<SiigoApiError> {
-  const fallback = res.status === 429 ? "requests_limit" : res.status === 503 ? "service_unavailable" : "default";
-  try {
-    const body = await res.json() as { code?: string; message?: string };
-    if (body?.code && body?.message) return new SiigoApiError(body.code, body.message, res.status);
-  } catch { /* non-JSON body */ }
-  return new SiigoApiError(fallback, `Siigo request failed with HTTP ${res.status}.`, res.status);
 }
 
 /** Shared GET with Partner-Id + Authorization headers; Zod-validates the response. */

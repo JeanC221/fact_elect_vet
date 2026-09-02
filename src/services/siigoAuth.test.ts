@@ -128,4 +128,18 @@ describe("getSiigoAccessToken (explicit credentials)", () => {
     expect(r.accessToken).toBe("tok-a");
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
+
+  it("does NOT reuse a cached token when the access key is rotated under the same Partner-Id (health-check must hit /auth for real)", async () => {
+    fetchMock.mockResolvedValue(fakeRes({ access_token: "tok-old-key" }));
+    const first = await getSiigoAccessToken({ username: "api-user", accessKey: "OLD-KEY", partnerId: "VET-PARTNER-01" });
+    expect(first.accessToken).toBe("tok-old-key");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // Same partnerId, rotated accessKey: must hit /auth again, not silently
+    // reuse the still-valid token cached for the old key.
+    fetchMock.mockResolvedValue(fakeRes({ access_token: "tok-new-key" }));
+    const second = await getSiigoAccessToken({ username: "api-user", accessKey: "NEW-KEY", partnerId: "VET-PARTNER-01" });
+    expect(second.accessToken).toBe("tok-new-key");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
 });

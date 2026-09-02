@@ -82,8 +82,23 @@ async function fetchServerMode(): Promise<EnvironmentMode | null> {
   }
 }
 
-export function useEmissionOptions(): ProvetToSiigoOptions {
+/** ProvetToSiigoOptions plus a readiness flag for the multi-device emission-mode race. */
+export interface EmissionOptionsResult extends ProvetToSiigoOptions {
+  /**
+   * False until the server's emission mode (source of truth — shared across
+   * every device) has been confirmed, either successfully or via an explicit
+   * failed request. Callers that gate real DIAN emission on `mode` should
+   * also require `isModeReady` — otherwise a device with no localStorage
+   * history (new device, cleared cache) can emit in the `mode` default
+   * ("sandbox") before the real server-configured mode has loaded, silently
+   * skipping DIAN stamping for that invoice.
+   */
+  isModeReady: boolean;
+}
+
+export function useEmissionOptions(): EmissionOptionsResult {
   const [mode, setMode] = useState<EnvironmentMode>(readMode);
+  const [isModeReady, setIsModeReady] = useState(false);
   const [mapping, setMapping] = useState<CatalogMapping>(readLocalMapping);
   const [siigoProducts, setSiigoProducts] = useState<SiigoProduct[]>(readProducts);
   const [fallbackItemCode, setFallbackItemCode] = useState<string | undefined>(readFallbackItemCode);
@@ -98,6 +113,10 @@ export function useEmissionOptions(): ProvetToSiigoOptions {
         try { localStorage.setItem(MAPPING_KEY, JSON.stringify(server)); } catch { /* storage full/unavailable */ }
       }
       if (serverMode) setMode(serverMode);
+      // Mark ready even when serverMode is null (request failed): the UI must
+      // stop trusting the optimistic localStorage default either way, and
+      // surface a retry/blocked state rather than silently emit in the wrong mode.
+      setIsModeReady(true);
     })();
     return () => { cancelled = true; };
   }, []);
@@ -116,6 +135,7 @@ export function useEmissionOptions(): ProvetToSiigoOptions {
     mapping,
     siigoProducts,
     mode,
+    isModeReady,
     fallbackItemCode,
     documentTypeId: mapping.documentTypeId ?? undefined,
     sellerId: mapping.sellerId ?? undefined,

@@ -137,7 +137,7 @@ const ERROR_TRANSLATIONS: Record<string, TranslationEntry> = {
   },
   service_unavailable: {
     message:
-      "El servicio DIAN no está disponible. La factura se guardará como borrador.",
+      "El servicio de Siigo/DIAN no respondió tras varios intentos. La factura NO fue enviada ni se generó ningún borrador — no se perdió el intento, pero debe reintentar manualmente cuando el servicio esté disponible.",
     severity: "warning",
     quickAction: "save_draft",
     retryable: true,

@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, CheckCircle2, RefreshCw, X } from "lucide-react";
+import { AlertTriangle, RefreshCw, X } from "lucide-react";
 import type {
   QuickAction,
   TranslatedError,
@@ -61,12 +61,16 @@ export function ErrorBanner({
 
   if (!error) return null;
 
-  const isDraftSuccess = error.quickAction === "save_draft";
-  const Icon = isDraftSuccess ? CheckCircle2 : error.severity === "warning" ? RefreshCw : AlertTriangle;
+  // "save_draft" (service_unavailable) means Siigo never accepted the
+  // request after retries — nothing was created, no draft exists anywhere.
+  // This is a failure to surface clearly, not a success state: it must never
+  // render with the success (green/check) styling used elsewhere in the app
+  // for a real Siigo-confirmed draft.
+  const Icon = error.severity === "warning" ? RefreshCw : AlertTriangle;
   const label = ACTION_LABELS[error.quickAction];
 
   return (
-    <div className={`${BASE} ${isDraftSuccess ? STYLES.success : STYLES[error.severity]}`}>
+    <div className={`${BASE} ${STYLES[error.severity]}`}>
       <Icon className="mt-0.5 h-3 w-3 shrink-0" />
       <div className="flex flex-1 flex-wrap items-center gap-2">
         <span className="flex-1">
@@ -85,7 +89,7 @@ export function ErrorBanner({
           </button>
         )}
         {error.quickAction === "save_draft" && (
-          <span className="font-semibold">Borrador en cola</span>
+          <span className="font-semibold">No enviada — reintentar</span>
         )}
       </div>
       <button
