@@ -161,7 +161,12 @@ async function fetchInvoiceFile(
 ): Promise<Blob> {
   let res: Response;
   try {
-    res = await fetch(`${SIIGO_API_BASE_URL}/v1/invoices/${invoiceId}/${format}`, {
+    // Percent-encode the id even though callers are expected to validate it
+    // first (see the route handler's invoiceIdSchema). This is the actual URL
+    // sink, and it is reachable from any future caller: a raw `/` or `?` here
+    // would silently retarget the request at a different Siigo resource. For
+    // a well-formed id this encoding is a no-op.
+    res = await fetch(`${SIIGO_API_BASE_URL}/v1/invoices/${encodeURIComponent(invoiceId)}/${format}`, {
       method: "GET",
       headers: { "Partner-Id": partnerId, Authorization: `Bearer ${accessToken}` },
     });

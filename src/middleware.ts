@@ -13,8 +13,17 @@ import { SESSION_COOKIE_NAME } from "@/services/sessionCookies";
  * "/settings/credentials"): it's the endpoint that actually flips the account
  * into DIAN production stamping, so it must be server-enforced, not just
  * hidden by the UI.
+ *
+ * "/api/invoice-claims" likewise: releasing an emission claim removes the
+ * only server-side guard against stamping a second DIAN document for the same
+ * consultation, so it must never be reachable by the employee role.
  */
-const ADMIN_ONLY_PREFIXES = ["/settings/credentials", "/settings/mapping", "/api/emission-mode"];
+const ADMIN_ONLY_PREFIXES = [
+  "/settings/credentials",
+  "/settings/mapping",
+  "/api/emission-mode",
+  "/api/invoice-claims",
+];
 
 export async function middleware(req: NextRequest): Promise<NextResponse> {
   const token = req.cookies.get(SESSION_COOKIE_NAME)?.value;

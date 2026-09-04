@@ -4,6 +4,9 @@ import {
   writeQueueCache,
   buildInitialRows,
   decideAfterFetch,
+  readLastPollAt,
+  markPolled,
+  shouldPollNow,
 } from "./consultationQueueCache";
 import type { ConsultationQueueRow } from "@/mappers/consultationQueue";
 
@@ -118,5 +121,55 @@ describe("decideAfterFetch", () => {
     const live = [row({ id: "NEW-1" })];
     const out = decideAfterFetch(live, prev, false, mockRows);
     expect(out.map((r) => r.id)).toEqual(["NEW-1"]);
+  });
+});
+describe("cross-tab poll throttle", () => {
+  const MIN = 20_000;
+
+  it("allows the very first poll when no stamp exists", () => {
+    expect(readLastPollAt(fakeStorage())).toBeNull();
+    expect(shouldPollNow(null, 1_000_000, MIN)).toBe(true);
+  });
+
+  it("blocks a second poll fired inside the interval (interval + focus + visibilitychange on one device)", () => {
+    const store = fakeStorage();
+    markPolled(1_000_000, store);
+    expect(readLastPollAt(store)).toBe(1_000_000);
+    // focus fires 5ms later, then visibilitychange 6ms later: both suppressed.
+    expect(shouldPollNow(readLastPollAt(store), 1_000_005, MIN)).toBe(false);
+    expect(shouldPollNow(readLastPollAt(store), 1_000_006, MIN)).toBe(false);
+  });
+
+  it("allows a poll again once the interval has elapsed", () => {
+    const store = fakeStorage();
+    markPolled(1_000_000, store);
+    expect(shouldPollNow(readLastPollAt(store), 1_000_000 + MIN - 1, MIN)).toBe(false);
+    expect(shouldPollNow(readLastPollAt(store), 1_000_000 + MIN, MIN)).toBe(true);
+  });
+
+  it("shares the stamp across tabs on the same device (localStorage, not per-tab sessionStorage)", () => {
+    const sharedDevice = fakeStorage();
+    // Tab A claims the slot.
+    expect(shouldPollNow(readLastPollAt(sharedDevice), 500_000, MIN)).toBe(true);
+    markPolled(500_000, sharedDevice);
+    // Tab B, reading the same localStorage, backs off instead of duplicating
+    // 6 more Provet calls.
+    expect(shouldPollNow(readLastPollAt(sharedDevice), 500_100, MIN)).toBe(false);
+  });
+
+  it("fails OPEN on a corrupt stamp — a bad value must never wedge the queue into never refreshing", () => {
+    const store = fakeStorage();
+    store.setItem("fact_vet.lastQueuePoll", "no-soy-un-numero");
+    expect(readLastPollAt(store)).toBeNull();
+    expect(shouldPollNow(null, 1_000_000, MIN)).toBe(true);
+  });
+
+  it("fails OPEN on a future-dated stamp (clock skew)", () => {
+    expect(shouldPollNow(9_999_999_999, 1_000_000, MIN)).toBe(true);
+  });
+
+  it("returns null and no-ops when storage is unavailable (privacy mode)", () => {
+    expect(readLastPollAt(null)).toBeNull();
+    expect(() => markPolled(1_000, null)).not.toThrow();
   });
 });

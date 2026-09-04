@@ -269,4 +269,18 @@ describe("fetchInvoicePdf / fetchInvoiceXml", () => {
     fetchMock.mockRejectedValue(new TypeError("fetch failed"));
     await expect(fetchInvoiceXml("INV-7751", "t", "PARTNER1")).rejects.toMatchObject({ name: "SiigoApiError", code: "service_unavailable" });
   });
+
+  it("percent-encodes the invoice id so it cannot retarget the request at another Siigo resource", async () => {
+    fetchMock.mockResolvedValue(fileRes(fileBody(btoa("PDF-DATA"))));
+    await fetchInvoicePdf("../../users?x=1", "t", "PARTNER1");
+    const url = callAt(0)[0] as string;
+    expect(url).toBe(`${SIIGO_API_BASE_URL}/v1/invoices/..%2F..%2Fusers%3Fx%3D1/pdf`);
+    expect(url).not.toContain("/users?");
+  });
+
+  it("leaves a well-formed id untouched (encoding is a no-op for the expected character class)", async () => {
+    fetchMock.mockResolvedValue(fileRes(fileBody(btoa("PDF-DATA"))));
+    await fetchInvoicePdf("5bb7d6d6-9c74-4b5f-9d0e-7f9c1a2b3c4d", "t", "PARTNER1");
+    expect(callAt(0)[0]).toBe(`${SIIGO_API_BASE_URL}/v1/invoices/5bb7d6d6-9c74-4b5f-9d0e-7f9c1a2b3c4d/pdf`);
+  });
 });
