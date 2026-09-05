@@ -29,7 +29,8 @@ function requireBaseUrl(): string {
   return value;
 }
 
-function syncWindowDays(): number {
+/** Days of history the queue is scoped to. Exported so the API can report it. */
+export function syncWindowDays(): number {
   const raw = process.env.PROVET_SYNC_WINDOW_DAYS;
   const parsed = raw ? Number(raw) : NaN;
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 30;

@@ -8,6 +8,7 @@ import {
   fetchPhoneNumbers,
   fetchConsultationItems,
   fetchInvoiceRows,
+  syncWindowDays,
   ProvetApiError,
 } from "@/services/provetApi";
 import { buildQueueFromProvet } from "@/mappers/provetToQueue";
@@ -55,7 +56,21 @@ export async function GET(): Promise<NextResponse> {
     const rows = buildQueueFromProvet(
       consultations, clients, patients, invoices, phoneNumbers, consultationItems, invoiceRows,
     );
-    return NextResponse.json({ rows, count: rows.length });
+    // `meta` exists so an empty queue is never ambiguous. Provet returning
+    // zero consultations looks identical, on screen, to "nothing left to
+    // invoice" — and a misconfigured PROVET_SYNC_WINDOW_DAYS produces exactly
+    // that (a 30-day window against a tenant whose data is older returns 0 on
+    // every endpoint). Reporting what was actually fetched, and over what
+    // window, lets the UI say which of the two it is instead of showing a
+    // silent blank list.
+    return NextResponse.json({
+      rows,
+      count: rows.length,
+      meta: {
+        provetConsultations: consultations.length,
+        syncWindowDays: syncWindowDays(),
+      },
+    });
   } catch (err) {
     const code = err instanceof ProvetAuthError || err instanceof ProvetApiError ? err.code : "unknown";
     const message = err instanceof Error ? err.message : "Error desconocido al consultar Provet.";
