@@ -124,10 +124,22 @@ const ERROR_TRANSLATIONS: Record<string, TranslationEntry> = {
     retryable: false,
   },
   unhandled_error: {
-    message: "Error no controlado del lado de Siigo. Si persiste, contacte a soporteapi@siigo.com.",
+    // The server now reconciles this against Siigo before surfacing it, so by
+    // the time the staff member sees it the document has been confirmed absent
+    // and a retry has already failed too.
+    message:
+      "Siigo falló de forma inesperada y, tras verificar, la factura no llegó a generarse. " +
+      "Intente nuevamente en unos minutos; si persiste, contacte a soporteapi@siigo.com.",
     severity: "error",
     quickAction: "none",
-    retryable: true,
+    retryable: false,
+  },
+  ambiguous_reconciliation: {
+    message:
+      "Se encontró más de una factura para esta consulta en Siigo. Revise cuál es la correcta y anule la sobrante con una nota crédito.",
+    severity: "error",
+    quickAction: "none",
+    retryable: false,
   },
   requests_limit: {
     message: "Servidor de facturación ocupado. Reintento automático en curso...",

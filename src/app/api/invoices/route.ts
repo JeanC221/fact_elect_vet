@@ -1,8 +1,14 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { siigoInvoicePayloadSchema } from "@/schemas/siigo";
+import { siigoInvoicePayloadSchema, type SiigoInvoiceResponse } from "@/schemas/siigo";
 import { getSiigoAccessToken, SiigoAuthError } from "@/services/siigoAuth";
 import { generateIdempotencyKey, SiigoApiError, submitInvoice } from "@/services/siigoApi";
+import {
+  buildEmissionMarker,
+  buildObservations,
+  reconcileInvoice,
+  AmbiguousReconciliationError,
+} from "@/services/invoiceReconciliation";
 import {
   acquireInvoiceClaim,
   claimConflictMessage,
@@ -30,15 +36,23 @@ const invoiceRequestSchema = z.object({
  *
  * Only a 4xx tells us that: the request was refused at validation time, before
  * any document was written. A timeout, a dropped socket or a 5xx tells us
- * nothing — the invoice may well have been stamped and the response lost on
- * the way back. Releasing the claim in those cases is precisely how a
- * duplicate DIAN document gets created on the retry, so they keep the claim
- * and force a human to check Siigo Nube first.
+ * nothing on its own — which is what reconciliation is for.
  */
 function provablyCreatedNothing(err: unknown): boolean {
   if (!(err instanceof SiigoApiError)) return false;
   return typeof err.status === "number" && err.status >= 400 && err.status < 500;
 }
+
+/**
+ * Give Siigo a moment to make a just-created document visible to the list
+ * endpoint. Configurable so tests can drop it to 0 and so it can be tuned in
+ * production without a code change.
+ */
+function reconcileDelayMs(): number {
+  const configured = Number(process.env.SIIGO_RECONCILE_DELAY_MS);
+  return Number.isFinite(configured) && configured >= 0 ? configured : 2_000;
+}
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 export async function POST(req: Request): Promise<NextResponse> {
   let consultationId: string | null = null;
@@ -48,7 +62,13 @@ export async function POST(req: Request): Promise<NextResponse> {
     const { consultationId: id, payload } = invoiceRequestSchema.parse(body);
     consultationId = id;
 
-    const idempotencyKey = req.headers.get("X-Idempotency-Key") ?? generateIdempotencyKey();
+    // One emission attempt = one marker, reused across the internal retry so
+    // reconciliation stays stable. The Idempotency-Key, by contrast, must be
+    // fresh on the retry: Siigo records a key even when the request fails and
+    // rejects its reuse with 400 documents_service (verified against the API).
+    const emissionKey = req.headers.get("X-Idempotency-Key") ?? generateIdempotencyKey();
+    const marker = buildEmissionMarker(emissionKey);
+    const markedPayload = { ...payload, observations: buildObservations(consultationId, emissionKey) };
 
     // Authenticate BEFORE claiming: an auth failure is unrelated to this
     // consultation and must not leave a claim behind that blocks the retry.
@@ -56,10 +76,43 @@ export async function POST(req: Request): Promise<NextResponse> {
 
     // Atomic claim. If another device already holds this consultation, we
     // never reach Siigo — the losing request stops here, not after stamping.
-    await acquireInvoiceClaim(consultationId, idempotencyKey);
+    await acquireInvoiceClaim(consultationId, emissionKey);
     claimHeld = true;
 
-    const response = await submitInvoice(payload, accessToken, partnerId, idempotencyKey);
+    let response: SiigoInvoiceResponse;
+    try {
+      response = await submitInvoice(markedPayload, accessToken, partnerId, emissionKey);
+    } catch (first) {
+      if (provablyCreatedNothing(first)) throw first;
+
+      // Ambiguous failure. Measured on the Siigo sandbox, POST /v1/invoices
+      // returns HTTP 500 on ~1 request in 10 with an identical payload. Do not
+      // guess: ask Siigo whether the document exists.
+      await sleep(reconcileDelayMs());
+      const existing = await reconcileInvoice(marker, accessToken, partnerId);
+      if (existing) {
+        // It was created; only the response was lost. Report success.
+        await markClaimEmitted(consultationId, existing.id);
+        return NextResponse.json(existing);
+      }
+
+      // Siigo answered and the document is genuinely absent, so exactly one
+      // more attempt is safe. A NEW key is required (see above); the marker
+      // stays the same so the second reconciliation still matches.
+      try {
+        response = await submitInvoice(markedPayload, accessToken, partnerId, generateIdempotencyKey());
+      } catch (second) {
+        if (provablyCreatedNothing(second)) throw second;
+        await sleep(reconcileDelayMs());
+        const afterRetry = await reconcileInvoice(marker, accessToken, partnerId);
+        if (afterRetry) {
+          await markClaimEmitted(consultationId, afterRetry.id);
+          return NextResponse.json(afterRetry);
+        }
+        throw second;
+      }
+    }
+
     await markClaimEmitted(consultationId, response.id);
     return NextResponse.json(response);
   } catch (err) {
@@ -79,11 +132,23 @@ export async function POST(req: Request): Promise<NextResponse> {
           await markClaimUnknown(consultationId, reason);
         }
       } catch (claimErr) {
-        // Never let claim bookkeeping mask the original Siigo error.
         console.error("[claims] no se pudo actualizar el claim de la consulta", consultationId, claimErr);
       }
     }
 
+    if (err instanceof AmbiguousReconciliationError) {
+      return NextResponse.json(
+        {
+          error: {
+            code: "ambiguous_reconciliation",
+            message:
+              "Se encontró más de una factura con la misma marca de emisión para esta consulta. " +
+              "Revise en Siigo Nube cuál es la correcta y anule la sobrante con una nota crédito antes de continuar.",
+          },
+        },
+        { status: 409 },
+      );
+    }
     if (err instanceof SiigoAuthError) {
       return NextResponse.json(
         { error: { code: err.code, message: "Error de autenticacion con Siigo." } },

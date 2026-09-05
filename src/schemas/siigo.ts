@@ -143,6 +143,14 @@ export const siigoInvoicePayloadSchema = z.object({
   seller: z.number().int().positive(),
   items: z.array(siigoInvoiceItemSchema).min(1),
   payments: z.array(siigoPaymentSchema).min(1),
+  /**
+   * Free-text note stored on the Siigo document and returned by
+   * GET /v1/invoices. Carries the emission marker that makes reconciliation
+   * possible after an ambiguous failure — Siigo offers no other way to ask
+   * "does a document already exist for this consultation?". Also gives the
+   * clinic traceability back to Provet inside their own Siigo Nube.
+   */
+  observations: z.string().max(500).optional(),
   stamp: z.object({ send: z.boolean().default(false) }),
   mail: z.object({ send: z.boolean().default(false) }),
 });
