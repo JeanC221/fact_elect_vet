@@ -64,10 +64,12 @@ async function fetchProvetPage<S extends z.ZodTypeAny>(
   token: string,
   schema: S,
   pageUrl: string | null,
+  windowed: boolean,
 ): Promise<{ results: z.infer<S>[]; next: string | null }> {
   const url =
     pageUrl ??
-    `${requireBaseUrl()}${path}?page=1&page_size=1000&ordering=-modified&modified__gte=${encodeURIComponent(modifiedSinceParam())}`;
+    `${requireBaseUrl()}${path}?page=1&page_size=1000&ordering=-modified` +
+      (windowed ? `&modified__gte=${encodeURIComponent(modifiedSinceParam())}` : "");
   let res: Response;
   for (let attempt = 0; ; attempt++) {
     try {
@@ -100,7 +102,34 @@ async function fetchProvetPage<S extends z.ZodTypeAny>(
   return { results: parsed.data.results, next: parsed.data.next };
 }
 
-async function firstPage<S extends z.ZodTypeAny>(path: string, token: string, schema: S): Promise<z.infer<S>[]> {
+/**
+ * Fetch every page of a Provet collection.
+ *
+ * `windowed` controls the `modified__gte` date filter, and it belongs to
+ * exactly ONE resource: `consultation`. That is what the queue is scoped by —
+ * "show me recent consultations" is a real requirement.
+ *
+ * Applying the same filter to the child resources is a silent under-billing
+ * bug. A consultation edited yesterday can have invoice lines, a client record
+ * or a patient record last modified months earlier. Filtering those by their
+ * OWN `modified` date drops them, and the consultation then renders in the
+ * queue with an incomplete item list (billed short) or an unresolved client
+ * ("Cliente desconocido") — with nothing on screen indicating anything is
+ * missing. Measured against the live tenant: a 2000-day window returned 178
+ * of 223 invoicerows and 166 of 199 consultationitems.
+ *
+ * The API offers no usable parent filter (`?consultation=38` on
+ * /consultationitem is silently ignored and returns the full set), so children
+ * are fetched whole and joined in memory. The MAX_PAGES ceiling below caps
+ * that at 50,000 records and throws when exceeded — loudly, rather than
+ * returning a truncated set that would look like valid data.
+ */
+async function firstPage<S extends z.ZodTypeAny>(
+  path: string,
+  token: string,
+  schema: S,
+  windowed = false,
+): Promise<z.infer<S>[]> {
   const all: z.infer<S>[] = [];
   let pageUrl: string | null = null;
   for (let i = 0; i < MAX_PAGES; i++) {
@@ -109,6 +138,7 @@ async function firstPage<S extends z.ZodTypeAny>(path: string, token: string, sc
       token,
       schema,
       pageUrl,
+      windowed,
     );
     all.push(...results);
     if (!next) return all;
@@ -121,7 +151,7 @@ async function firstPage<S extends z.ZodTypeAny>(path: string, token: string, sc
 }
 
 export const fetchConsultations = (token: string) =>
-  firstPage("/consultation", token, provetConsultationRawSchema);
+  firstPage("/consultation", token, provetConsultationRawSchema, true);
 export const fetchClients = (token: string) =>
   firstPage("/client", token, provetClientRawSchema);
 export const fetchPatients = (token: string) =>

@@ -1,5 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { fetchConsultations, fetchClients, ProvetApiError } from "./provetApi";
+import {
+  fetchConsultations,
+  fetchClients,
+  fetchPatients,
+  fetchInvoices,
+  fetchPhoneNumbers,
+  fetchConsultationItems,
+  fetchInvoiceRows,
+  ProvetApiError,
+} from "./provetApi";
 
 const fetchMock = vi.fn();
 vi.stubGlobal("fetch", fetchMock);
@@ -126,5 +135,48 @@ describe("fetchConsultations", () => {
     expect((err as ProvetApiError).code).toBe("requests_limit");
     expect(fetchMock.mock.calls.length).toBeGreaterThan(1);
     expect(fetchMock.mock.calls.length).toBeLessThanOrEqual(6);
+  });
+});
+
+describe("the modified__gte window applies ONLY to consultations", () => {
+  const url = () => fetchMock.mock.calls[0][0] as string;
+
+  it("windows consultations — that is the resource the queue is scoped by", async () => {
+    process.env.PROVET_SYNC_WINDOW_DAYS = "30";
+    fetchMock.mockResolvedValue(fakeRes(page([])));
+    await fetchConsultations("tok");
+    expect(url()).toContain("modified__gte=");
+  });
+
+  /**
+   * A consultation edited yesterday can have lines that were last touched
+   * months ago. Windowing the CHILD resources by their own `modified` date
+   * drops those lines, and the consultation then appears in the queue with
+   * an incomplete item list — billed short, with nothing on screen to show
+   * it. Measured against the live tenant: a 2000-day window returned 178 of
+   * 223 invoicerows.
+   */
+  for (const [label, fn] of [
+    ["invoicerow", fetchInvoiceRows],
+    ["consultationitem", fetchConsultationItems],
+    ["invoice", fetchInvoices],
+    ["client", fetchClients],
+    ["patient", fetchPatients],
+    ["phonenumber", fetchPhoneNumbers],
+  ] as const) {
+    it(`never windows ${label} — a stale child would silently shrink an invoice`, async () => {
+      process.env.PROVET_SYNC_WINDOW_DAYS = "30";
+      fetchMock.mockResolvedValue(fakeRes(page([])));
+      await fn("tok");
+      expect(url()).not.toContain("modified__gte");
+      expect(url()).toContain("page_size=1000");
+    });
+  }
+
+  it("still orders and paginates the unwindowed resources", async () => {
+    fetchMock.mockResolvedValue(fakeRes(page([])));
+    await fetchInvoiceRows("tok");
+    expect(url()).toContain("/invoicerow");
+    expect(url()).toContain("page=1");
   });
 });

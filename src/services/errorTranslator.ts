@@ -1,6 +1,6 @@
 import { SiigoApiError } from "./siigoApi";
 import { UnmappedPaymentMethodError } from "@/mappers/catalogMapping";
-import { MissingEmissionSettingError } from "@/mappers/provetToSiigo";
+import { EmptyConsultationError, MissingEmissionSettingError } from "@/mappers/provetToSiigo";
 import { MissingCreditNoteSettingError } from "@/mappers/creditNote";
 
 /** Action the user can take to resolve the error. */
@@ -175,6 +175,18 @@ export function translateSiigoError(error: unknown): TranslatedError {
       message: error.message,
       severity: "error",
       quickAction: "none",
+      retryable: false,
+    };
+  }
+
+  if (error instanceof EmptyConsultationError) {
+    // The message already states the exact remedy in Spanish; a table entry
+    // would replace it with generic "verifique los datos" advice.
+    return {
+      code: "empty_consultation",
+      message: error.message,
+      severity: "error",
+      quickAction: error.reason === "no_fallback_configured" ? "edit_payments" : "none",
       retryable: false,
     };
   }
