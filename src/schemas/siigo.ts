@@ -97,12 +97,37 @@ export const siigoCustomerSchema = z
     }
   });
 
-export const siigoInvoiceItemSchema = z.object({
-  code: z.string().trim().min(1).max(50),
-  description: z.string().trim().min(1).max(200).transform(sanitizeText),
-  quantity: z.number().positive().max(1e6),
-  price: z.number().positive().max(1e9).refine((n) => hasMaxDecimals(n, 2), "Price max 2 decimals"),
-});
+/**
+ * Official Siigo invoice line.
+ *
+ * `taxed_price` (VAT-inclusive) is sent INSTEAD of `price`, never alongside it.
+ * Siigo's docs: "Precio con IVA incluido. Campo opcional. Si se envía,
+ * reemplaza items.price."
+ *
+ * Why: Provet already returns tax-inclusive amounts (`invoicerow.sum_total`),
+ * and the clinic's Siigo catalogue carries `tax_included: true` with IVA 5%
+ * or 19% configured per product. Putting a VAT-inclusive figure into `price`
+ * makes Siigo apply the product's tax ON TOP of tax already included — the
+ * invoice comes out 5–19% over.
+ *
+ * Both are modelled so exactly one is present. Sending both would be the
+ * dangerous case: if `taxed_price` were ever ignored, the stale `price` would
+ * silently over-charge a legal document instead of failing. Omitting `price`
+ * makes that failure loud and immediate.
+ */
+export const siigoInvoiceItemSchema = z
+  .object({
+    code: z.string().trim().min(1).max(50),
+    description: z.string().trim().min(1).max(200).transform(sanitizeText),
+    quantity: z.number().positive().max(1e6),
+    price: z.number().positive().max(1e9).refine((n) => hasMaxDecimals(n, 2), "Price max 2 decimals").optional(),
+    /** VAT-inclusive unit price. Siigo derives the base and the tax itself. */
+    taxed_price: z.number().positive().max(1e9).refine((n) => hasMaxDecimals(n, 2), "Taxed price max 2 decimals").optional(),
+  })
+  .refine((i) => (i.price === undefined) !== (i.taxed_price === undefined), {
+    message: "Each item must carry exactly one of price or taxed_price, never both and never neither",
+    path: ["taxed_price"],
+  });
 
 /** Official Siigo invoice payment: numeric payment-type id + COP value. */
 export const siigoPaymentSchema = z.object({

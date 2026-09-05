@@ -37,12 +37,24 @@ export interface CreditNoteOptions {
 }
 
 /** Reversal line item — price is negated relative to the original invoice. */
-export const siigoCreditNoteItemSchema = z.object({
-  code: z.string().trim().min(1).max(50),
-  description: z.string().trim().min(1).max(200),
-  quantity: z.number().positive().max(1e6),
-  price: z.number().max(1e9),
-});
+/** Mirrors siigoInvoiceItemSchema: exactly one of price / taxed_price, negated. */
+export const siigoCreditNoteItemSchema = z
+  .object({
+    code: z.string().trim().min(1).max(50),
+    description: z.string().trim().min(1).max(200),
+    quantity: z.number().positive().max(1e6),
+    price: z.number().max(1e9).optional(),
+    taxed_price: z.number().max(1e9).optional(),
+  })
+  .refine((i) => (i.price === undefined) !== (i.taxed_price === undefined), {
+    message: "Each credit-note item must carry exactly one of price or taxed_price",
+    path: ["taxed_price"],
+  });
+
+/** Effective unit price of a line, whichever field the invoice used. */
+export function unitPriceOf(item: { price?: number; taxed_price?: number }): number {
+  return item.taxed_price ?? item.price ?? 0;
+}
 
 /** Reversal payment — value is negated relative to the original invoice. */
 export const siigoCreditNotePaymentSchema = z.object({
@@ -76,7 +88,7 @@ export const siigoCreditNoteSchema = z
   })
   .refine(
     (cn) => {
-      const itemsTotal = cn.items.reduce((s, i) => s + i.price * i.quantity, 0);
+      const itemsTotal = cn.items.reduce((s, i) => s + unitPriceOf(i) * i.quantity, 0);
       const paymentsTotal = cn.payments.reduce((s, p) => s + p.value, 0);
       return itemsTotal === cn.total && paymentsTotal === cn.total;
     },
@@ -108,16 +120,21 @@ export function toCreditNotePayload(
   options: CreditNoteOptions = {},
 ): SiigoCreditNotePayload {
   if (options.documentTypeId === undefined) throw new MissingCreditNoteSettingError();
-  const itemsTotal = original.items.reduce((s, i) => s + i.price * i.quantity, 0);
+  const itemsTotal = original.items.reduce((s, i) => s + unitPriceOf(i) * i.quantity, 0);
   return {
     document: { id: options.documentTypeId },
     base_document: base,
     customer: original.customer,
+    // The credit note must reverse the invoice line-for-line using the SAME
+    // price field. Switching fields here would change how Siigo computes the
+    // tax on the reversal, leaving a residual balance against the DIAN.
     items: original.items.map((i) => ({
       code: i.code,
       description: i.description,
       quantity: i.quantity,
-      price: -i.price,
+      ...(i.taxed_price !== undefined
+        ? { taxed_price: -i.taxed_price }
+        : { price: -(i.price ?? 0) }),
     })),
     payments: original.payments.map((p) => ({
       id: p.id,

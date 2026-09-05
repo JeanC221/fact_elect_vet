@@ -7,6 +7,7 @@ import {
   provetPaginatedSchema,
   provetPhoneNumberRawSchema,
   provetConsultationItemRawSchema,
+  provetInvoiceRowRawSchema,
 } from "@/schemas/provetApi";
 
 /** Custom error class wrapping Provet REST API failures. */
@@ -131,3 +132,6 @@ export const fetchPhoneNumbers = (token: string) =>
   firstPage("/phonenumber", token, provetPhoneNumberRawSchema);
 export const fetchConsultationItems = (token: string) =>
   firstPage("/consultationitem", token, provetConsultationItemRawSchema);
+/** Invoice lines — the authoritative billing amounts (see provetInvoiceRowRawSchema). */
+export const fetchInvoiceRows = (token: string) =>
+  firstPage("/invoicerow", token, provetInvoiceRowRawSchema);

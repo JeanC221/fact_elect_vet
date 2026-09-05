@@ -103,9 +103,50 @@ export const provetConsultationItemRawSchema = z
   })
   .passthrough();
 
+/**
+ * A row of a Provet INVOICE — the billing record, as opposed to
+ * `consultationitem`, which is the clinical record.
+ *
+ * These two are not interchangeable, and using the wrong one silently
+ * mis-bills. Verified against a live Provet tenant: for 19 of 33 consultations,
+ * `sum(consultationitem.price_with_vat * quantity)` did NOT equal the invoice
+ * total, in both directions (one consultation billed 694 too little, another
+ * 1860 too much). `sum(invoicerow.sum_total)` matched `invoice.total_with_vat`
+ * for 33 of 33.
+ *
+ * The reason is `quantity`: for a dispensed medication it is the fraction of a
+ * package consumed (0.05 of a vial), NOT a billable count. Provet derives the
+ * charge from `dosage_units`, `usage_size` and `invoicable_units` and writes
+ * the result to `sum_total`. Multiplying `quantity * price` reproduces none of
+ * that. `invoicerow` also carries rows that have no `consultationitem` at all
+ * (dispensing fees), which no amount of recalculation could recover.
+ *
+ * Rule: the line amount is READ from `sum_total`, never computed.
+ *
+ * Note there is no `code` field — the stable product identifier is the id in
+ * the `item` URL (`.../item/74/`).
+ */
+export const provetInvoiceRowRawSchema = z
+  .object({
+    url: z.string().nullable().catch(null),
+    invoice: rel.nullable().catch(null),
+    item: rel.nullable().catch(null),
+    name: txt,
+    quantity: z.coerce.number().default(1),
+    price: z.coerce.number().default(0),
+    price_with_vat: z.coerce.number().catch(0),
+    vat_percentage: z.coerce.number().default(0),
+    /** Authoritative tax-inclusive line amount. The only field to bill from. */
+    sum_total: z.coerce.number().default(0),
+    sum: z.coerce.number().default(0),
+    sum_vat: z.coerce.number().default(0),
+  })
+  .passthrough();
+
 export type ProvetConsultationRaw = z.infer<typeof provetConsultationRawSchema>;
 export type ProvetClientRaw = z.infer<typeof provetClientRawSchema>;
 export type ProvetPatientRaw = z.infer<typeof provetPatientRawSchema>;
 export type ProvetInvoiceRaw = z.infer<typeof provetInvoiceRawSchema>;
 export type ProvetConsultationItemRaw = z.infer<typeof provetConsultationItemRawSchema>;
+export type ProvetInvoiceRowRaw = z.infer<typeof provetInvoiceRowRawSchema>;
 export type ProvetPhoneNumberRaw = z.infer<typeof provetPhoneNumberRawSchema>;

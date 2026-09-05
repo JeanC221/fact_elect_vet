@@ -9,7 +9,23 @@ import type {
   ProvetClientRaw,
   ProvetPatientRaw,
   ProvetInvoiceRaw,
+  ProvetInvoiceRowRaw,
 } from "@/schemas/provetApi";
+
+const row = (over: Partial<ProvetInvoiceRowRaw> = {}): ProvetInvoiceRowRaw => ({
+  url: "https://api.provet.test/invoicerow/1/",
+  invoice: "https://api.provet.test/invoice/INV-1/",
+  item: "https://api.provet.test/item/74/",
+  name: "Alfaxan Inj",
+  quantity: 0.05,
+  price: 249.93,
+  price_with_vat: 263.0013,
+  vat_percentage: 5.23,
+  sum: 30.001,
+  sum_vat: 1.569,
+  sum_total: 31.57,
+  ...over,
+});
 
 const con = (over: Partial<ProvetConsultationRaw> = {}): ProvetConsultationRaw => ({
   id: "C-1",
@@ -98,5 +114,63 @@ describe("mergeQueueRows", () => {
     const fresh = buildQueueFromProvet([con({ id: "C-NEW" })], [cli()], [pat()], [inv()]);
     const merged = mergeQueueRows([], fresh);
     expect(merged[0].invoiceStatus).toBe("Draft");
+  });
+});
+
+describe("line amounts come from invoicerow.sum_total, never from quantity * price", () => {
+  it("bills the amount Provet computed, not quantity * price_with_vat", () => {
+    // Real data, consultation 38: 0.05 * 263.0013 = 13.15, but Provet charges
+    // 31.57 — `quantity` is the fraction of a vial dispensed, not a count.
+    const r = buildQueueFromProvet(
+      [con({ id: "C-38" })], [cli()], [pat()],
+      [inv({ id: "INV-1", consultation: "C-38", total_with_vat: 60.07 })],
+      [], [],
+      [row({ sum_total: 31.57 }), row({ url: "https://api.provet.test/invoicerow/2/", item: "https://api.provet.test/item/75/", name: "Anal Gland Expression", quantity: 1, sum_total: 28.5 })],
+    )[0];
+
+    expect(r.items.map((i) => i.lineTotal)).toEqual([31.57, 28.5]);
+    expect(r.items.reduce((s, i) => s + i.lineTotal, 0)).toBeCloseTo(60.07, 2);
+    // The invoice total the queue shows must equal what we would bill.
+    expect(r.total).toBeCloseTo(60.07, 2);
+  });
+
+  it("keeps billing rows that have no consultationitem behind them (dispensing fees)", () => {
+    const r = buildQueueFromProvet(
+      [con({ id: "C-15" })], [cli()], [pat()],
+      [inv({ id: "INV-9", consultation: "C-15", total_with_vat: 27.76 })],
+      [], [],
+      [
+        row({ invoice: "https://api.provet.test/invoice/INV-9/", name: "Amoxicillin", sum_total: 19.11 }),
+        row({ url: "https://api.provet.test/invoicerow/3/", invoice: "https://api.provet.test/invoice/INV-9/", item: null, name: "Dispensing fee", quantity: 1, sum_total: 8.65 }),
+      ],
+    )[0];
+
+    expect(r.items).toHaveLength(2);
+    expect(r.items.reduce((s, i) => s + i.lineTotal, 0)).toBeCloseTo(27.76, 2);
+  });
+
+  it("uses the stable Provet item id as the catalog-mapping code, not the per-consultation row id", () => {
+    const r = buildQueueFromProvet(
+      [con({ id: "C-38" })], [cli()], [pat()],
+      [inv({ id: "INV-1", consultation: "C-38" })],
+      [], [],
+      [row()],
+    )[0];
+    expect(r.items[0].code).toBe("74");
+  });
+
+  it("returns no items when the consultation has no Provet invoice, rather than inventing amounts", () => {
+    const r = buildQueueFromProvet([con({ id: "C-99" })], [cli()], [pat()], [], [], [], [row()])[0];
+    expect(r.items).toEqual([]);
+  });
+
+  it("drops zero-amount rows so they cannot reach Siigo as free items", () => {
+    const r = buildQueueFromProvet(
+      [con({ id: "C-38" })], [cli()], [pat()],
+      [inv({ id: "INV-1", consultation: "C-38" })],
+      [], [],
+      [row({ sum_total: 31.57 }), row({ url: "https://api.provet.test/invoicerow/4/", name: "Nota", sum_total: 0 })],
+    )[0];
+    expect(r.items).toHaveLength(1);
   });
 });

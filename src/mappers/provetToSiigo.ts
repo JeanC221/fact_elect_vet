@@ -96,7 +96,12 @@ export function provetToSiigoInvoice(
         code: product?.code ?? item.code,
         description: item.name,
         quantity: item.quantity,
-        price: lineUnitPrice(item),
+        // taxed_price, never price: the amount is already VAT-inclusive
+        // (Provet's invoicerow.sum_total), and the clinic's Siigo products
+        // carry their own IVA. See siigoInvoiceItemSchema for the full
+        // rationale and why `price` is deliberately omitted rather than
+        // sent alongside.
+        taxed_price: lineUnitPrice(item),
       };
     }),
     payments: [{ id: paymentTypeId, value: paymentValue }],

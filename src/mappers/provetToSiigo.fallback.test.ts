@@ -41,7 +41,7 @@ describe("provetToSiigoInvoice — zero-drift rounding", () => {
     const result = provetToSiigoInvoice(consultation, mockClients[0], mockPatients[0], opts());
     const frac = String(result.items[0].price).split(".")[1] ?? "";
     expect(frac.length).toBeLessThanOrEqual(2);
-    expect(result.items[0].price).toBe(119.15);
+    expect(result.items[0].taxed_price).toBe(119.15);
     expect(() => siigoInvoicePayloadSchema.parse(result)).not.toThrow();
   });
 });
@@ -64,7 +64,7 @@ describe("provetToSiigoInvoice — empty-items fallback", () => {
     const result = provetToSiigoInvoice(consultation, mockClients[0], mockPatients[0], opts());
     expect(result.items).toHaveLength(1);
     expect(result.items[0].code).toBe("FALLBACK-CVG-01");
-    expect(result.items[0].price).toBe(1);
+    expect(result.items[0].taxed_price).toBe(1);
     expect(result.payments[0].value).toBe(1);
     expect(() => siigoInvoicePayloadSchema.parse(result)).not.toThrow();
   });

@@ -5,6 +5,7 @@ import type {
   ProvetInvoiceRaw,
   ProvetPhoneNumberRaw,
   ProvetConsultationItemRaw,
+  ProvetInvoiceRowRaw,
 } from "@/schemas/provetApi";
 import type { ConsultationQueueRow, InvoiceStatus, ProvetStatus, QuickEditItem } from "@/mappers/consultationQueue";
 import { identificationTypes } from "@/schemas/provet";
@@ -62,7 +63,15 @@ export function buildQueueFromProvet(
   invoices: ProvetInvoiceRaw[],
   phoneNumbers: ProvetPhoneNumberRaw[] = [],
   consultationItems: ProvetConsultationItemRaw[] = [],
+  invoiceRows: ProvetInvoiceRowRaw[] = [],
 ): ConsultationQueueRow[] {
+  // `consultationitem` is the CLINICAL record and is no longer the source of
+  // billing amounts — see provetInvoiceRowRawSchema for the measured evidence
+  // (19 of 33 consultations mis-billed, in both directions). It is still
+  // fetched by /api/consultations and kept in the signature because the dose
+  // detail it carries (usage_size, usage_type) is wanted for the invoice
+  // description in a follow-up change.
+  void consultationItems;
   const clientById = new Map<string, ProvetClientRaw>();
   for (const c of clients) {
     clientById.set(c.id, c);
@@ -88,16 +97,29 @@ export function buildQueueFromProvet(
     list.push(ph);
     phonesByClient.set(cid, list);
   }
+  // Line items are built from the INVOICE rows, joined to the consultation
+  // through the invoice. `sum_total` is read verbatim: it is the amount Provet
+  // itself charges, already accounting for dosage units, package sizes and
+  // dispensing rules that cannot be reconstructed from quantity * price.
+  const consultationByInvoiceId = new Map<string, string>();
+  for (const inv of invoices) {
+    const cid = extractId(inv.consultation);
+    const invId = extractId(inv.url) ?? inv.id;
+    if (cid && invId) consultationByInvoiceId.set(invId, cid);
+  }
   const itemsByConsultation = new Map<string, QuickEditItem[]>();
-  for (const it of consultationItems) {
-    if (it.hide_on_consultation) continue;
-    const cid = extractId(it.consultation);
-    if (!cid) continue;
-    const unitPriceWithVat = it.price_with_vat || it.price * (1 + it.vat_percentage / 100);
-    if (unitPriceWithVat <= 0) continue;
+  for (const r of invoiceRows) {
+    const invId = extractId(r.invoice);
+    if (!invId) continue;
+    const cid = consultationByInvoiceId.get(invId);
+    if (!cid) continue; // row belongs to an invoice with no linked consultation
+    const lineTotal = r.sum_total;
+    if (!Number.isFinite(lineTotal) || lineTotal <= 0) continue;
     const list = itemsByConsultation.get(cid) ?? [];
-    const itemCode = it.code || extractId(it.url) || `ITEM-${cid}-${list.length}`;
-    list.push({ code: itemCode, name: it.name, quantity: it.quantity, lineTotal: unitPriceWithVat * it.quantity });
+    // The stable catalog key is the Provet item id, not the row id: row ids
+    // are regenerated per invoice and would never match a saved mapping twice.
+    const itemCode = extractId(r.item) || `ROW-${extractId(r.url) ?? list.length}`;
+    list.push({ code: itemCode, name: r.name, quantity: r.quantity, lineTotal });
     itemsByConsultation.set(cid, list);
   }
 

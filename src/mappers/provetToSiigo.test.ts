@@ -53,7 +53,7 @@ describe("provetToSiigoInvoice", () => {
     expect(result.customer).not.toHaveProperty("identification_type");
     expect(result).not.toHaveProperty("total");
     expect(result.items).toHaveLength(2);
-    expect(result.items[0]).toMatchObject({ code: "SERV-CG-01", price: 59500 });
+    expect(result.items[0]).toMatchObject({ code: "SERV-CG-01", taxed_price: 59500 });
     expect(result.items[0]).not.toHaveProperty("taxes");
     expect(result.items[1].code).toBe("LAB-HEM-01");
     expect(result.document).toEqual({ id: 2372 });
@@ -82,7 +82,7 @@ describe("provetToSiigoInvoice", () => {
   it("transforms CON-002 (IVA_5 product, Efectivo) correctly", () => {
     const result = map(1);
     expect(result.items[0].code).toBe("PROC-VAC-01");
-    expect(result.items[0].price).toBe(52500);
+    expect(result.items[0].taxed_price).toBe(52500);
     expect(result.payments[0].id).toBe(10948);
     expect(result.payments[0].value).toBe(52500);
     expect(result.customer.name).toEqual(["Veterinaria Los Andes S.A.S."]);

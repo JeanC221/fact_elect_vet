@@ -180,11 +180,83 @@ describe("buildInvoicePayloadFromQuickEdit", () => {
     expect(buildInvoicePayloadFromQuickEdit(orphan, mockClients, mockPatients, "CON-X", validFormValues)).toBeUndefined();
   });
 
-  it("keeps sum(payments.value) == sum(items.price*quantity) to prevent invalid_total_payments", () => {
+  it("keeps sum(payments.value) == sum(items.taxed_price*quantity) to prevent invalid_total_payments", () => {
     const p = buildInvoicePayloadFromQuickEdit(mockConsultations, mockClients, mockPatients, "CON-001", validFormValues, emitOpts);
     expect(p).toBeDefined();
-    const itemsTotal = p!.items.reduce((s, it) => s + it.price * it.quantity, 0);
+    const itemsTotal = p!.items.reduce((s, it) => s + it.taxed_price! * it.quantity, 0);
     const paymentsTotal = p!.payments.reduce((s, pay) => s + pay.value, 0);
     expect(toCents(paymentsTotal)).toBe(toCents(itemsTotal));
+  });
+});
+
+describe("Siigo line shape: whole quantity, line total as unit price", () => {
+  const detail = (items: { code: string; name: string; quantity: number; lineTotal: number }[]) => ({
+    id: "C-38", clientName: "Sara Bobby", identificationType: "CC" as const, identificationNumber: "2111111234",
+    email: "s@b.com", phone: "3000000000", patientName: "Bobby", paymentMethod: "",
+    paymentMethodOptions: [], total: items.reduce((s, i) => s + i.lineTotal, 0),
+    createdAt: new Date("2026-09-04T10:00:00Z"), items,
+  });
+  const values = {
+    name: "Sara Bobby", identificationType: "CC" as const, identificationNumber: "2111111234",
+    email: "s@b.com", phone: "3000000000", paymentMethod: "Tarjeta Debito MMA", paidAmount: 0,
+  };
+  const options = {
+    mapping: { items: [], payments: [{ provetMethod: "Tarjeta Debito MMA", siigoPaymentTypeId: 5637 }], version: 1, updatedAt: "2026-09-04T00:00:00.000Z", documentTypeId: 60345, creditNoteDocumentTypeId: null, sellerId: 629 },
+    siigoProducts: [], mode: "sandbox" as const, documentTypeId: 60345, sellerId: 629,
+  };
+
+  it("never sends a quantity with more than 2 decimals — Siigo's items.quantity limit", () => {
+    // Real Provet dosages: 0.028 of a bottle, 0.083 of a can. Sent verbatim,
+    // Siigo rejects the line or truncates it, altering a legal document.
+    const payload = buildInvoicePayloadFromQuickEdit(
+      [], [], [], "C-38", values, options,
+      detail([
+        { code: "74", name: "Amoxicillin 250mg", quantity: 0.028, lineTotal: 19.11 },
+        { code: "75", name: "Hills Canine ID 13oz", quantity: 0.083, lineTotal: 8.65 },
+      ]),
+    );
+    for (const it of payload!.items) {
+      expect(Number.isInteger(it.quantity)).toBe(true);
+    }
+  });
+
+  it("bills the exact line total, so quantity * price reproduces it with no rounding drift", () => {
+    const payload = buildInvoicePayloadFromQuickEdit(
+      [], [], [], "C-38", values, options,
+      detail([
+        { code: "74", name: "Alfaxan Inj", quantity: 0.05, lineTotal: 31.57 },
+        { code: "75", name: "Anal Gland Expression", quantity: 1, lineTotal: 28.5 },
+      ]),
+    );
+    expect(payload!.items.map((i) => i.quantity * i.taxed_price!)).toEqual([31.57, 28.5]);
+    expect(payload!.payments[0].value).toBeCloseTo(60.07, 2);
+  });
+
+  it("keeps the dispensed dose visible in the description, since it left the quantity column", () => {
+    const payload = buildInvoicePayloadFromQuickEdit(
+      [], [], [], "C-38", values, options,
+      detail([{ code: "74", name: "Alfaxan Inj", quantity: 0.05, lineTotal: 31.57 }]),
+    );
+    expect(payload!.items[0].description).toContain("Alfaxan Inj");
+    expect(payload!.items[0].description).toContain("0.05");
+  });
+
+  it("does not clutter the description when the quantity is a whole unit", () => {
+    const payload = buildInvoicePayloadFromQuickEdit(
+      [], [], [], "C-38", values, options,
+      detail([{ code: "75", name: "Anal Gland Expression", quantity: 1, lineTotal: 28.5 }]),
+    );
+    expect(payload!.items[0].description).toBe("Anal Gland Expression");
+  });
+
+  it("sends taxed_price and NOT price, so Siigo does not add the product's VAT on top of VAT already included", () => {
+    // The clinic's Siigo catalogue has tax_included: true with IVA 5%/19% per
+    // product. A VAT-inclusive figure placed in `price` comes back 5-19% high.
+    const payload = buildInvoicePayloadFromQuickEdit(
+      [], [], [], "C-38", values, options,
+      detail([{ code: "74", name: "Alfaxan Inj", quantity: 0.05, lineTotal: 31.57 }]),
+    );
+    expect(payload!.items[0].taxed_price).toBe(31.57);
+    expect(payload!.items[0].price).toBeUndefined();
   });
 });
