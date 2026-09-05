@@ -7,6 +7,7 @@ import {
   readLastPollAt,
   markPolled,
   shouldPollNow,
+  diagnoseEmptyQueue,
 } from "./consultationQueueCache";
 import type { ConsultationQueueRow } from "@/mappers/consultationQueue";
 
@@ -171,5 +172,33 @@ describe("cross-tab poll throttle", () => {
   it("returns null and no-ops when storage is unavailable (privacy mode)", () => {
     expect(readLastPollAt(null)).toBeNull();
     expect(() => markPolled(1_000, null)).not.toThrow();
+  });
+});
+
+describe("empty-queue diagnosis", () => {
+  it("says nothing when the queue has rows", () => {
+    expect(diagnoseEmptyQueue(3, { provetConsultations: 3, syncWindowDays: 30 })).toBeNull();
+  });
+
+  it("reports a genuinely empty Provet result as a diagnosable state, not a blank screen", () => {
+    // A 30-day window against a tenant whose data is older returns 0 on every
+    // endpoint, and that looks exactly like "nothing left to invoice".
+    const n = diagnoseEmptyQueue(0, { provetConsultations: 0, syncWindowDays: 30 });
+    expect(n).not.toBeNull();
+    expect(n!.message).toContain("30");
+    expect(n!.message).toContain("Provet");
+    expect(n!.severity).toBe("warning");
+  });
+
+  it("distinguishes 'Provet returned consultations but none are billable' from 'Provet returned nothing'", () => {
+    const noneAtAll = diagnoseEmptyQueue(0, { provetConsultations: 0, syncWindowDays: 30 });
+    const someButFiltered = diagnoseEmptyQueue(0, { provetConsultations: 12, syncWindowDays: 30 });
+    expect(someButFiltered).not.toBeNull();
+    expect(someButFiltered!.message).not.toBe(noneAtAll!.message);
+    expect(someButFiltered!.message).toContain("12");
+  });
+
+  it("stays quiet when there is no meta (cached render, mock fallback)", () => {
+    expect(diagnoseEmptyQueue(0, undefined)).toBeNull();
   });
 });

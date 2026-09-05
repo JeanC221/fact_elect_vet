@@ -53,7 +53,7 @@ describe("provetToSiigoInvoice", () => {
     expect(result.customer).not.toHaveProperty("identification_type");
     expect(result).not.toHaveProperty("total");
     expect(result.items).toHaveLength(2);
-    expect(result.items[0]).toMatchObject({ code: "SERV-CG-01", price: 59500 });
+    expect(result.items[0]).toMatchObject({ code: "SERV-CG-01", taxed_price: 59500 });
     expect(result.items[0]).not.toHaveProperty("taxes");
     expect(result.items[1].code).toBe("LAB-HEM-01");
     expect(result.document).toEqual({ id: 2372 });
@@ -82,7 +82,7 @@ describe("provetToSiigoInvoice", () => {
   it("transforms CON-002 (IVA_5 product, Efectivo) correctly", () => {
     const result = map(1);
     expect(result.items[0].code).toBe("PROC-VAC-01");
-    expect(result.items[0].price).toBe(52500);
+    expect(result.items[0].taxed_price).toBe(52500);
     expect(result.payments[0].id).toBe(10948);
     expect(result.payments[0].value).toBe(52500);
     expect(result.customer.name).toEqual(["Veterinaria Los Andes S.A.S."]);
@@ -141,5 +141,55 @@ describe("provetToSiigoInvoice", () => {
     const production = map(0, opts("production"));
     expect(production.stamp.send).toBe(true);
     expect(production.mail.send).toBe(true);
+  });
+});
+
+describe("IVA discriminado en la factura DIAN", () => {
+  const taxedProduct = {
+    id: "PROD-IVA", code: "SERV-CG-01", name: "Servicio gravado",
+    tax_classification: "Taxed",
+    taxes: [{ id: 1270, name: "IVA 19%", type: "IVA", percentage: 19 }],
+  };
+  const exemptProduct = {
+    id: "PROD-EX", code: "SERV-CG-01", name: "Servicio excluido",
+    tax_classification: "Excluded",
+  };
+  const optsWith = (products: unknown[]) => ({
+    mapping: {
+      items: [{ provetCode: "SERV-CG-01", siigoProductId: products[0] ? (products[0] as { id: string }).id : "x" }],
+      payments: [{ provetMethod: "Tarjeta Crédito", siigoPaymentTypeId: 5636 }, { provetMethod: "Efectivo", siigoPaymentTypeId: 10948 }],
+      version: 1, updatedAt: "2026-08-26T00:00:00.000Z",
+      documentTypeId: 2372, creditNoteDocumentTypeId: 2379, sellerId: 62,
+    },
+    siigoProducts: products as never,
+    mode: "sandbox" as const,
+    documentTypeId: 2372,
+    sellerId: 62,
+  });
+
+  it("sends the mapped product's tax ids, because Siigo applies NO tax unless asked", () => {
+    // Verified against the live API: a product configured with IVA 19% billed
+    // without items.taxes comes back as total 100.00 with no tax line. A
+    // Colombian electronic invoice must break the IVA out.
+    const result = provetToSiigoInvoice(mockConsultations[0], mockClients[0], mockPatients[0], optsWith([taxedProduct]));
+    expect(result.items[0].taxes).toEqual([{ id: 1270 }]);
+  });
+
+  it("omits taxes entirely for Excluded/Exempt products instead of sending an empty array", () => {
+    const result = provetToSiigoInvoice(mockConsultations[0], mockClients[0], mockPatients[0], optsWith([exemptProduct]));
+    expect(result.items[0].taxes).toBeUndefined();
+  });
+
+  it("leaves the payment total untouched — taxed_price already includes the IVA", () => {
+    // taxed_price 119 + IVA 19% makes Siigo derive base 100 and tax 19; the
+    // total stays 119. Adding the tax to the payment total would double it.
+    const plain = provetToSiigoInvoice(mockConsultations[0], mockClients[0], mockPatients[0], optsWith([exemptProduct]));
+    const taxed = provetToSiigoInvoice(mockConsultations[0], mockClients[0], mockPatients[0], optsWith([taxedProduct]));
+    expect(taxed.payments[0].value).toBe(plain.payments[0].value);
+  });
+
+  it("omits taxes when the item has no mapped Siigo product", () => {
+    const result = provetToSiigoInvoice(mockConsultations[0], mockClients[0], mockPatients[0], optsWith([]));
+    expect(result.items[0].taxes).toBeUndefined();
   });
 });

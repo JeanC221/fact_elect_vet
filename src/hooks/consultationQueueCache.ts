@@ -156,3 +156,53 @@ export function shouldPollNow(
   if (lastPollAt > now) return true; // clock skew / bogus future stamp
   return now - lastPollAt >= minIntervalMs;
 }
+
+/** What `/api/consultations` reports about the fetch behind the rows. */
+export interface QueueMeta {
+  provetConsultations: number;
+  syncWindowDays: number;
+}
+
+/** A non-error notice rendered in the same banner as fetch failures. */
+export interface QueueNotice {
+  message: string;
+  severity: "warning";
+}
+
+/**
+ * Turn an empty queue into something a receptionist can act on.
+ *
+ * An empty list is ambiguous by nature: "everything is invoiced" and "the
+ * Provet integration is returning nothing" render identically. The second is
+ * not hypothetical — a PROVET_SYNC_WINDOW_DAYS shorter than the age of the
+ * tenant's data makes every endpoint return zero, and the screen just looks
+ * calm. Showing a blank list in that case is a silent failure, which is the
+ * one thing this project consistently refuses to do.
+ *
+ * Two distinguishable causes, two distinguishable messages:
+ *   - Provet returned NO consultations at all → almost certainly the window
+ *     or the credentials.
+ *   - Provet returned consultations but none reached the queue → the data is
+ *     there and something downstream filtered it out.
+ *
+ * Returns null when there is nothing to explain (rows present, or no meta
+ * because the render came from cache or the mock fallback).
+ */
+export function diagnoseEmptyQueue(rowCount: number, meta: QueueMeta | undefined): QueueNotice | null {
+  if (rowCount > 0 || !meta) return null;
+  if (meta.provetConsultations === 0) {
+    return {
+      severity: "warning",
+      message:
+        `Provet no devolvió ninguna consulta en los últimos ${meta.syncWindowDays} días. ` +
+        "Si esperaba ver consultas, es probable que la ventana de sincronización sea demasiado corta " +
+        "o que las credenciales de Provet apunten a otra cuenta.",
+    };
+  }
+  return {
+    severity: "warning",
+    message:
+      `Provet devolvió ${meta.provetConsultations} consultas, pero ninguna llegó a la cola de facturación. ` +
+      "Revise que tengan cliente y paciente asociados en Provet.",
+  };
+}

@@ -21,9 +21,9 @@ describe("creditNote mapper", () => {
 
     it("negates item prices, payment amounts, and total", () => {
       const cn = toCreditNotePayload(original, base, "billing_error", withDocType);
-      expect(cn.items[0].price).toBe(-original.items[0].price);
+      expect(cn.items[0].price).toBe(-original.items[0].price!);
       expect(cn.payments[0].value).toBe(-original.payments[0].value);
-      expect(cn.total).toBe(-(original.items[0].price * original.items[0].quantity));
+      expect(cn.total).toBe(-(original.items[0].price! * original.items[0].quantity));
     });
 
     it("carries base_document with original invoice id and CUFE", () => {
@@ -119,5 +119,31 @@ describe("creditNote mapper", () => {
         expect(r.label.trim().length).toBeGreaterThan(0);
       }
     });
+  });
+
+  it("mirrors taxed_price when the original invoice used it, instead of switching fields", () => {
+    // Switching price<->taxed_price between invoice and credit note changes how
+    // Siigo computes tax on the reversal, leaving a residual DIAN balance.
+    const taxedOriginal = {
+      ...original,
+      items: original.items.map(({ price, ...rest }) => ({ ...rest, taxed_price: price! })),
+    };
+    const cn = toCreditNotePayload(taxedOriginal, base, "billing_error", withDocType);
+    expect(cn.items[0].taxed_price).toBe(-taxedOriginal.items[0].taxed_price);
+    expect(cn.items[0].price).toBeUndefined();
+  });
+
+  it("mirrors the item taxes, so the reversal cancels the IVA and not just the net", () => {
+    const taxedOriginal = {
+      ...original,
+      items: original.items.map((i) => ({ ...i, taxes: [{ id: 1270 }] })),
+    };
+    const cn = toCreditNotePayload(taxedOriginal, base, "billing_error", withDocType);
+    expect(cn.items[0].taxes).toEqual([{ id: 1270 }]);
+  });
+
+  it("omits taxes on the credit note when the invoice line had none", () => {
+    const cn = toCreditNotePayload(original, base, "billing_error", withDocType);
+    expect(cn.items[0].taxes).toBeUndefined();
   });
 });

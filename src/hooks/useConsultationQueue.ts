@@ -8,6 +8,8 @@ import type { TranslatedError } from "@/services/errorTranslator";
 import {
   buildInitialRows,
   decideAfterFetch,
+  diagnoseEmptyQueue,
+  type QueueMeta,
   markPolled,
   readLastPollAt,
   readQueueCache,
@@ -107,15 +109,20 @@ export function useConsultationQueue(): UseConsultationQueueResult {
     setFetchError(null);
     let isNetworkError = false;
     let liveRows: ConsultationQueueRow[] = [];
+    let meta: QueueMeta | undefined;
     let serverMessage: string | null = null;
     try {
       try {
         const res = await fetch("/api/consultations", { cache: "no-store" });
         const data = (await res.json()) as {
           rows?: ConsultationQueueRow[];
+          meta?: QueueMeta;
           error?: { message?: string };
         };
-        if (res.ok && Array.isArray(data?.rows)) liveRows = data.rows as ConsultationQueueRow[];
+        if (res.ok && Array.isArray(data?.rows)) {
+          liveRows = data.rows as ConsultationQueueRow[];
+          meta = data.meta;
+        }
         else {
           isNetworkError = true;
           serverMessage = data?.error?.message ?? null;
@@ -126,8 +133,20 @@ export function useConsultationQueue(): UseConsultationQueueResult {
       const next = decideAfterFetch(liveRows, rowsRef.current, isNetworkError, MOCK_ROWS);
       rowsRef.current = next;
       setRows(next);
-      if (!isNetworkError) writeQueueCache(next);
-      else setFetchError({ ...FETCH_ERROR, message: serverMessage ?? FETCH_ERROR.message });
+      if (!isNetworkError) {
+        writeQueueCache(next);
+        // An empty list is ambiguous on screen; say which kind of empty it is.
+        const notice = diagnoseEmptyQueue(next.length, meta);
+        if (notice) {
+          setFetchError({
+            code: "empty_queue",
+            message: notice.message,
+            severity: notice.severity,
+            quickAction: "none",
+            retryable: false,
+          });
+        }
+      } else setFetchError({ ...FETCH_ERROR, message: serverMessage ?? FETCH_ERROR.message });
       if (initial) setIsInitialLoading(false);
       else setIsRefreshing(false);
       return { ok: !isNetworkError, count: next.length };

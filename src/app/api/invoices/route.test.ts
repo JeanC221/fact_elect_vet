@@ -59,6 +59,11 @@ vi.mock("@/services/siigoAuth", async () => {
   return { ...actual, getSiigoAccessToken: vi.fn() };
 });
 
+vi.mock("@/services/invoiceReconciliation", async () => {
+  const actual = await vi.importActual<typeof import("@/services/invoiceReconciliation")>("@/services/invoiceReconciliation");
+  return { ...actual, reconcileInvoice: vi.fn() };
+});
+
 vi.mock("@/services/siigoApi", async () => {
   const actual = await vi.importActual<typeof import("@/services/siigoApi")>("@/services/siigoApi");
   return { ...actual, submitInvoice: vi.fn() };
@@ -67,6 +72,8 @@ vi.mock("@/services/siigoApi", async () => {
 import { POST } from "./route";
 import { getSiigoAccessToken, SiigoAuthError } from "@/services/siigoAuth";
 import { SiigoApiError, submitInvoice } from "@/services/siigoApi";
+import { reconcileInvoice, AmbiguousReconciliationError } from "@/services/invoiceReconciliation";
+
 
 function makeRequest(body: unknown, idempotencyKey?: string): Request {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -81,6 +88,8 @@ describe("POST /api/invoices", () => {
     vi.clearAllMocks();
     claims.clear();
     vi.mocked(getSiigoAccessToken).mockResolvedValue({ accessToken: mockAccessToken, partnerId: mockPartnerId });
+    vi.mocked(reconcileInvoice).mockResolvedValue(null);
+    process.env.SIIGO_RECONCILE_DELAY_MS = "0";
   });
 
   it("returns the Siigo response on success and pins the claim to the emitted invoice", async () => {
@@ -92,7 +101,10 @@ describe("POST /api/invoices", () => {
 
     expect(res.status).toBe(200);
     expect(json).toEqual(siigoResponse);
-    expect(submitInvoice).toHaveBeenCalledWith(validPayload, mockAccessToken, mockPartnerId, "IDEMKEY123");
+    expect(submitInvoice).toHaveBeenCalledWith(
+      expect.objectContaining({ ...validPayload, observations: expect.stringContaining(`Consulta Provet #${CONSULTATION_ID}`) }),
+      mockAccessToken, mockPartnerId, "IDEMKEY123",
+    );
     expect(claims.get(CONSULTATION_ID)).toMatchObject({ status: "emitted", invoice_id: "INV-1" });
   });
 
@@ -214,7 +226,6 @@ describe("POST /api/invoices", () => {
     const retry = await POST(makeRequest(validBody));
     expect(retry.status).toBe(409);
     expect((await retry.json()).error.message).toContain("no se pudo confirmar");
-    expect(submitInvoice).toHaveBeenCalledTimes(1);
   });
 
   it("KEEPS the claim as `unknown` when Siigo returns 5xx", async () => {
@@ -263,5 +274,98 @@ describe("POST /api/invoices", () => {
     const [resA, resB] = await Promise.all([first, second]);
     expect([resA.status, resB.status].sort()).toEqual([200, 409]);
     expect(submitInvoice).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports SUCCESS when Siigo 500s but the document turns out to exist — only the response was lost", async () => {
+    // Measured on the Siigo sandbox: ~1 POST in 10 returns HTTP 500 with an
+    // identical payload. Without this, 10% of emissions wedge a consultation.
+    const stamped = { id: "INV-RECON", number: 42, cufe: "CUFE-R", status: "Accepted" as const, observations: undefined };
+    vi.mocked(submitInvoice).mockRejectedValue(new SiigoApiError("unhandled_error", "Unhandled error", 500));
+    vi.mocked(reconcileInvoice).mockResolvedValue(stamped);
+
+    const res = await POST(makeRequest(validBody));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual(stamped);
+    expect(claims.get(CONSULTATION_ID)).toMatchObject({ status: "emitted", invoice_id: "INV-RECON" });
+    expect(submitInvoice).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries with a FRESH idempotency key once Siigo confirms nothing was created", async () => {
+    // Siigo records an idempotency key even on a failed request and rejects
+    // its reuse with 400 documents_service, so the retry must not reuse it.
+    vi.mocked(submitInvoice)
+      .mockRejectedValueOnce(new SiigoApiError("unhandled_error", "Unhandled error", 500))
+      .mockResolvedValueOnce({ id: "INV-2ND", number: 43, cufe: "C", status: "Accepted" as const, observations: undefined });
+    vi.mocked(reconcileInvoice).mockResolvedValue(null);
+
+    const res = await POST(makeRequest(validBody, "IDEMKEYFIRST"));
+
+    expect(res.status).toBe(200);
+    expect(submitInvoice).toHaveBeenCalledTimes(2);
+    const firstKey = vi.mocked(submitInvoice).mock.calls[0][3];
+    const secondKey = vi.mocked(submitInvoice).mock.calls[1][3];
+    expect(firstKey).toBe("IDEMKEYFIRST");
+    expect(secondKey).not.toBe(firstKey);
+    expect(claims.get(CONSULTATION_ID)).toMatchObject({ status: "emitted", invoice_id: "INV-2ND" });
+  });
+
+  it("keeps the SAME marker on the retry, so the second reconciliation can still find it", async () => {
+    vi.mocked(submitInvoice)
+      .mockRejectedValueOnce(new SiigoApiError("unhandled_error", "Unhandled error", 500))
+      .mockResolvedValueOnce({ id: "INV-2ND", number: 43, cufe: "C", status: "Accepted" as const, observations: undefined });
+
+    await POST(makeRequest(validBody, "IDEMKEYFIRST"));
+
+    const obsA = (vi.mocked(submitInvoice).mock.calls[0][0] as { observations?: string }).observations;
+    const obsB = (vi.mocked(submitInvoice).mock.calls[1][0] as { observations?: string }).observations;
+    expect(obsA).toBe(obsB);
+    expect(obsA).toContain("FEV:IDEMKEYFIRST");
+  });
+
+  it("falls back to `unknown` when the retry also fails and the document still cannot be found", async () => {
+    vi.mocked(submitInvoice).mockRejectedValue(new SiigoApiError("unhandled_error", "Unhandled error", 500));
+    vi.mocked(reconcileInvoice).mockResolvedValue(null);
+
+    const res = await POST(makeRequest(validBody));
+
+    expect(res.status).toBe(500);
+    expect(submitInvoice).toHaveBeenCalledTimes(2);
+    expect(claims.get(CONSULTATION_ID)).toMatchObject({ status: "unknown" });
+  });
+
+  it("does NOT retry when the reconciliation lookup itself fails — a failed check is not evidence of absence", async () => {
+    vi.mocked(submitInvoice).mockRejectedValue(new SiigoApiError("unhandled_error", "Unhandled error", 500));
+    vi.mocked(reconcileInvoice).mockRejectedValue(new SiigoApiError("service_unavailable", "No se pudo verificar."));
+
+    const res = await POST(makeRequest(validBody));
+
+    expect(submitInvoice).toHaveBeenCalledTimes(1);
+    expect(res.status).toBe(502);
+    expect(claims.get(CONSULTATION_ID)).toMatchObject({ status: "unknown" });
+  });
+
+  it("returns 409 and blocks when the marker matches more than one document", async () => {
+    vi.mocked(submitInvoice).mockRejectedValue(new SiigoApiError("unhandled_error", "Unhandled error", 500));
+    vi.mocked(reconcileInvoice).mockRejectedValue(new AmbiguousReconciliationError(2));
+
+    const res = await POST(makeRequest(validBody));
+    const json = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(json.error.code).toBe("ambiguous_reconciliation");
+    expect(json.error.message).toContain("nota crédito");
+    expect(claims.get(CONSULTATION_ID)).toMatchObject({ status: "unknown" });
+  });
+
+  it("never reconciles on a 4xx — Siigo already proved nothing was created", async () => {
+    vi.mocked(submitInvoice).mockRejectedValue(new SiigoApiError("invalid_identification", "NIT invalido", 400));
+
+    const res = await POST(makeRequest(validBody));
+
+    expect(res.status).toBe(400);
+    expect(reconcileInvoice).not.toHaveBeenCalled();
+    expect(submitInvoice).toHaveBeenCalledTimes(1);
+    expect(claims.has(CONSULTATION_ID)).toBe(false);
   });
 });

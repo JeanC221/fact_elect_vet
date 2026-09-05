@@ -5,6 +5,7 @@ import {
   calculateBackoff,
   retryWithBackoff,
 } from "./errorTranslator";
+import { EmptyConsultationError } from "@/mappers/provetToSiigo";
 import { SiigoApiError } from "./siigoApi";
 import { UnmappedPaymentMethodError } from "@/mappers/catalogMapping";
 
@@ -160,5 +161,13 @@ describe("retryWithBackoff", () => {
     expect(result).toMatchObject({ code: "service_unavailable" });
     expect(fn).toHaveBeenCalledTimes(3);
     expect(onRetry).toHaveBeenCalledTimes(2);
+  });
+
+  it("surfaces the empty-consultation remedy verbatim instead of generic retry advice", () => {
+    const r = translateSiigoError(new EmptyConsultationError("no_amount"));
+    expect(r.code).toBe("empty_consultation");
+    expect(r.retryable).toBe(false);
+    expect(r.message).toContain("Provet");
+    expect(r.message).not.toContain("intente nuevamente");
   });
 });

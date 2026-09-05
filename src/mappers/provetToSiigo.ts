@@ -43,7 +43,34 @@ export class MissingEmissionSettingError extends Error {
   }
 }
 
-export const DEFAULT_FALLBACK_ITEM_CODE = "FALLBACK-CVG-01";
+/**
+ * Thrown when a consultation carries no billable line and no honest substitute
+ * exists. Emission stops here rather than inventing content for a document
+ * that is legally binding once the DIAN stamps it.
+ *
+ * The two cases this replaces both fabricated data silently:
+ *   - `code: fallbackItemCode ?? "FALLBACK-CVG-01"` — a placeholder code that
+ *     does not exist in the clinic's Siigo catalogue.
+ *   - `unit_price: Math.max(consultation.total || 1, 1)` — a one-peso invoice
+ *     conjured out of a zero total.
+ *
+ * Measured against the live Provet tenant: 5 of 39 consultations have no
+ * invoice line at all, so this is a real path, not a theoretical one.
+ */
+export class EmptyConsultationError extends Error {
+  readonly reason: "no_fallback_configured" | "no_amount";
+  constructor(reason: "no_fallback_configured" | "no_amount") {
+    super(
+      reason === "no_fallback_configured"
+        ? "Esta consulta no tiene ítems facturables en Provet y no hay un código de producto de respaldo configurado. " +
+          "Registre los ítems en Provet, o configure el código de respaldo en Ajustes → Mapeo de Catálogo."
+        : "Esta consulta no tiene ítems facturables en Provet y su total es $0. " +
+          "No se puede emitir una factura sin monto: registre los ítems o el valor de la consulta en Provet.",
+    );
+    this.name = "EmptyConsultationError";
+    this.reason = reason;
+  }
+}
 
 /** Empty-catalog default — emission REQUIRES an explicit dynamic payment mapping. */
 const DEFAULT_OPTIONS: ProvetToSiigoOptions = {
@@ -79,8 +106,22 @@ export function provetToSiigoInvoice(
   const paymentTypeId = resolvePaymentTypeId(consultation.payment_method, mapping.payments);
 
   const stampSend = stampSendFor(mode);
-    const fallbackItem = { name: "Consulta Veterinaria General", code: fallbackItemCode ?? DEFAULT_FALLBACK_ITEM_CODE, quantity: 1, unit_price: Math.max(consultation.total || 1, 1), tax_rate: 0, discount: 0 };
-  const sourceItems = consultation.items.length > 0 ? consultation.items : [fallbackItem];
+  // No lines: fall back ONLY to an explicitly configured product code and a
+  // real consultation total. Anything else stops emission — see
+  // EmptyConsultationError for why each branch used to be a silent fabrication.
+  let sourceItems = consultation.items;
+  if (sourceItems.length === 0) {
+    if (!fallbackItemCode) throw new EmptyConsultationError("no_fallback_configured");
+    if (!(consultation.total > 0)) throw new EmptyConsultationError("no_amount");
+    sourceItems = [{
+      name: "Consulta Veterinaria General",
+      code: fallbackItemCode,
+      quantity: 1,
+      unit_price: consultation.total,
+      tax_rate: 0,
+      discount: 0,
+    }];
+  }
   const paymentValue = sumLineTotals(sourceItems);
   const date = todayInColombia();
 
@@ -92,11 +133,27 @@ export function provetToSiigoInvoice(
     items: sourceItems.map((item) => {
       const productId = productIdByItemCode.get(item.code);
       const product = productId ? productById.get(productId) : undefined;
+      // Siigo applies NO tax on its own: a line without an explicit `taxes`
+      // array is stored with zero IVA even when the product is configured as
+      // Taxed 19% (verified against the live API — a 19% product billed at
+      // 100 came back as total 100.00, no tax line). A Colombian electronic
+      // invoice must break the IVA out, so the mapped product's tax ids are
+      // forwarded. Combined with `taxed_price` Siigo derives the taxable base
+      // and the tax amount, leaving the total unchanged.
+      const taxes = product?.taxes?.length
+        ? product.taxes.map((t) => ({ id: t.id }))
+        : undefined;
       return {
         code: product?.code ?? item.code,
         description: item.name,
         quantity: item.quantity,
-        price: lineUnitPrice(item),
+        ...(taxes ? { taxes } : {}),
+        // taxed_price, never price: the amount is already VAT-inclusive
+        // (Provet's invoicerow.sum_total), and the clinic's Siigo products
+        // carry their own IVA. See siigoInvoiceItemSchema for the full
+        // rationale and why `price` is deliberately omitted rather than
+        // sent alongside.
+        taxed_price: lineUnitPrice(item),
       };
     }),
     payments: [{ id: paymentTypeId, value: paymentValue }],

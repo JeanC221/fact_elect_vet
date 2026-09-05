@@ -51,7 +51,7 @@ describe("Siigo POST /v1/invoices payload invariants", () => {
     const payment = result.payments[0];
     expect(Number.isInteger(payment.id)).toBe(true);
     expect(payment.id).toBeGreaterThan(0);
-    const lineTotal = result.items.reduce((s, i) => s + i.price * i.quantity, 0);
+    const lineTotal = result.items.reduce((s, i) => s + i.taxed_price! * i.quantity, 0);
     expect(payment.value).toBe(lineTotal);
   });
 
@@ -64,9 +64,9 @@ describe("Siigo POST /v1/invoices payload invariants", () => {
       total: 23351.33,
     };
     const result = provetToSiigoInvoice(driftConsultation, mockClients[0], mockPatients[0], opts());
-    const itemSum = result.items.reduce((s, i) => s + i.price * i.quantity, 0);
+    const itemSum = result.items.reduce((s, i) => s + i.taxed_price! * i.quantity, 0);
     expect(result.payments[0].value).toBe(itemSum);
-    expect(String(result.items[0].price)).not.toMatch(/0{3,}/);
+    expect(String(result.items[0].taxed_price)).not.toMatch(/0{3,}/);
     expect(() => siigoInvoicePayloadSchema.parse(result)).not.toThrow();
   });
 

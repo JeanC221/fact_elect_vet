@@ -128,6 +128,36 @@ export function buildQuickEditDetail(consultations: Consultation[], clients: Cli
   };
 }
 
+/**
+ * Collapse a Provet billing line into the shape Siigo can represent.
+ *
+ * Siigo caps `items.quantity` at 2 decimals, but Provet dispensing quantities
+ * routinely carry 3 (0.028 of a bottle, 0.083 of a can). Sending them verbatim
+ * gets the line rejected or silently truncated — and a truncated quantity
+ * changes the amount on a legal document.
+ *
+ * So the whole line is billed as ONE unit priced at the amount Provet charged.
+ * `quantity * price` then reproduces `lineTotal` exactly, with no rounding
+ * drift for Siigo's own `Redondear(Cantidad * ValorUnitario - Descuento, 2)`
+ * check against the payments total.
+ *
+ * The dispensed fraction is not lost: it moves into the description, so the
+ * DIAN invoice still shows what was actually administered.
+ */
+function toSiigoLine(it: QuickEditItem): Consultation["items"][number] {
+  const isWholeUnit = Number.isInteger(it.quantity) && it.quantity === 1;
+  const name = isWholeUnit ? it.name : `${it.name} (${it.quantity})`;
+  return {
+    code: it.code,
+    // consultationItemSchema caps name at 100 chars.
+    name: name.slice(0, 100),
+    quantity: 1,
+    unit_price: it.lineTotal,
+    tax_rate: 0,
+    discount: 0,
+  };
+}
+
 export function buildInvoicePayloadFromQuickEdit(
   consultations: Consultation[], clients: Client[], patients: Patient[],
   id: string, values: QuickEditFormValues, options?: ProvetToSiigoOptions, fallbackDetail?: QuickEditDetail,
@@ -145,7 +175,7 @@ export function buildInvoicePayloadFromQuickEdit(
 
   const syntheticConsultation: Consultation = {
     id: fallbackDetail.id, client_id: `CLI-${fallbackDetail.id}`, patient_id: `PAT-${fallbackDetail.id}`,
-    items: fallbackDetail.items.length > 0 ? fallbackDetail.items.map((it) => ({ code: it.code, name: it.name, quantity: it.quantity, unit_price: it.lineTotal / it.quantity, tax_rate: 0, discount: 0 })) : [],
+    items: fallbackDetail.items.length > 0 ? fallbackDetail.items.map(toSiigoLine) : [],
     subtotal: fallbackDetail.total, tax_total: 0, total: fallbackDetail.total,
     payment_method: values.paymentMethod, status: "closed",
     created_at: fallbackDetail.createdAt, updated_at: fallbackDetail.createdAt,
