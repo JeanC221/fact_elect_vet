@@ -19,6 +19,28 @@ export const siigoProductSchema = z.object({
   name: z.string().trim().min(1).max(200).transform(sanitizeText),
   // Accept Siigo's real field, but don't fail parsing when it's absent/differently-shaped.
   tax_classification: z.string().trim().optional(),
+  /**
+   * Taxes configured on the product in Siigo Nube.
+   *
+   * Siigo does NOT apply them on its own: an invoice line without an explicit
+   * `items.taxes` is stored with zero tax, even when the product is
+   * `tax_classification: "Taxed"` with IVA 19%. Verified against the live API —
+   * a 19% product billed at 100 came back as total 100.00, no tax line.
+   *
+   * A Colombian electronic invoice must break the IVA out, so these ids are
+   * carried through to the invoice payload. Optional because `Excluded` and
+   * `Exempt` products legitimately have none.
+   */
+  taxes: z
+    .array(
+      z.object({
+        id: z.number().int().positive(),
+        name: z.string().optional(),
+        type: z.string().optional(),
+        percentage: z.number().optional(),
+      }).passthrough(),
+    )
+    .optional(),
   unit: z.object({ code: z.string().optional(), name: z.string().optional() }).optional(),
 }).passthrough();
 
@@ -120,6 +142,13 @@ export const siigoInvoiceItemSchema = z
     code: z.string().trim().min(1).max(50),
     description: z.string().trim().min(1).max(200).transform(sanitizeText),
     quantity: z.number().positive().max(1e6),
+    /**
+     * Tax ids from the mapped Siigo product. Sent so the DIAN document breaks
+     * the IVA out: combined with `taxed_price`, Siigo derives the taxable base
+     * and the tax amount, leaving the total unchanged (verified: taxed_price
+     * 119 + IVA 19% -> price 100, tax 19, total 119).
+     */
+    taxes: z.array(z.object({ id: z.number().int().positive() })).optional(),
     price: z.number().positive().max(1e9).refine((n) => hasMaxDecimals(n, 2), "Price max 2 decimals").optional(),
     /** VAT-inclusive unit price. Siigo derives the base and the tax itself. */
     taxed_price: z.number().positive().max(1e9).refine((n) => hasMaxDecimals(n, 2), "Taxed price max 2 decimals").optional(),

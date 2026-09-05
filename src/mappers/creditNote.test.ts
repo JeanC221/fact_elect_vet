@@ -132,4 +132,18 @@ describe("creditNote mapper", () => {
     expect(cn.items[0].taxed_price).toBe(-taxedOriginal.items[0].taxed_price);
     expect(cn.items[0].price).toBeUndefined();
   });
+
+  it("mirrors the item taxes, so the reversal cancels the IVA and not just the net", () => {
+    const taxedOriginal = {
+      ...original,
+      items: original.items.map((i) => ({ ...i, taxes: [{ id: 1270 }] })),
+    };
+    const cn = toCreditNotePayload(taxedOriginal, base, "billing_error", withDocType);
+    expect(cn.items[0].taxes).toEqual([{ id: 1270 }]);
+  });
+
+  it("omits taxes on the credit note when the invoice line had none", () => {
+    const cn = toCreditNotePayload(original, base, "billing_error", withDocType);
+    expect(cn.items[0].taxes).toBeUndefined();
+  });
 });

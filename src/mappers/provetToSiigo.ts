@@ -133,10 +133,21 @@ export function provetToSiigoInvoice(
     items: sourceItems.map((item) => {
       const productId = productIdByItemCode.get(item.code);
       const product = productId ? productById.get(productId) : undefined;
+      // Siigo applies NO tax on its own: a line without an explicit `taxes`
+      // array is stored with zero IVA even when the product is configured as
+      // Taxed 19% (verified against the live API — a 19% product billed at
+      // 100 came back as total 100.00, no tax line). A Colombian electronic
+      // invoice must break the IVA out, so the mapped product's tax ids are
+      // forwarded. Combined with `taxed_price` Siigo derives the taxable base
+      // and the tax amount, leaving the total unchanged.
+      const taxes = product?.taxes?.length
+        ? product.taxes.map((t) => ({ id: t.id }))
+        : undefined;
       return {
         code: product?.code ?? item.code,
         description: item.name,
         quantity: item.quantity,
+        ...(taxes ? { taxes } : {}),
         // taxed_price, never price: the amount is already VAT-inclusive
         // (Provet's invoicerow.sum_total), and the clinic's Siigo products
         // carry their own IVA. See siigoInvoiceItemSchema for the full

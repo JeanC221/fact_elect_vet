@@ -45,6 +45,8 @@ export const siigoCreditNoteItemSchema = z
     quantity: z.number().positive().max(1e6),
     price: z.number().max(1e9).optional(),
     taxed_price: z.number().max(1e9).optional(),
+    /** Mirrored from the invoice so the reversal cancels the IVA too. */
+    taxes: z.array(z.object({ id: z.number().int().positive() })).optional(),
   })
   .refine((i) => (i.price === undefined) !== (i.taxed_price === undefined), {
     message: "Each credit-note item must carry exactly one of price or taxed_price",
@@ -132,6 +134,9 @@ export function toCreditNotePayload(
       code: i.code,
       description: i.description,
       quantity: i.quantity,
+      // The taxes must be mirrored too: a reversal without them would cancel
+      // the net amount but leave the IVA standing on the DIAN ledger.
+      ...(i.taxes?.length ? { taxes: i.taxes } : {}),
       ...(i.taxed_price !== undefined
         ? { taxed_price: -i.taxed_price }
         : { price: -(i.price ?? 0) }),
