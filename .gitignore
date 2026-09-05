@@ -6,3 +6,9 @@ node_modules
 
 .vercel
 .env*
+
+# TypeScript incremental build artifact
+tsconfig.tsbuildinfo
+*.tsbuildinfo
+
+.DS_Store

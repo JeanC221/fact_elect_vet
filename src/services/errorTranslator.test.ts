@@ -66,6 +66,20 @@ describe("translateSiigoError", () => {
     expect(translateSiigoError(null).code).toBe("default");
     expect(translateSiigoError(undefined).code).toBe("default");
   });
+
+  it("passes the server's consultation_already_claimed message through verbatim instead of the generic retry advice", () => {
+    const serverMessage = "Esta consulta ya fue facturada (factura INV-77). No se emitió una segunda factura.";
+    const r = translateSiigoError(new SiigoApiError("consultation_already_claimed", serverMessage, 409));
+    expect(r.message).toBe(serverMessage);
+    expect(r.retryable).toBe(false);
+    expect(r.message).not.toContain("intente nuevamente");
+  });
+
+  it("does not claim the invoice was never sent when Siigo is unreachable — that is unknowable and would invite a duplicate", () => {
+    const r = translateSiigoError(new SiigoApiError("service_unavailable", "Network failure while reaching the Siigo API."));
+    expect(r.message).not.toContain("NO fue enviada");
+    expect(r.message).toContain("Siigo Nube");
+  });
 });
 
 describe("isRetryable", () => {

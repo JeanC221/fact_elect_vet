@@ -206,6 +206,18 @@ export default function MappingPage() {
     }
   }, [mapping]);
 
+  /**
+   * Rate-limiting decision (Hallazgo A4) — no cross-session lock.
+   *
+   * One sync = ~6 Siigo calls (auth + products + payment-types + document
+   * types FV/NC + sellers) against a sandbox budget of ~10 req/min, so two
+   * admins syncing in the same minute would exceed it. Accepted as-is:
+   * this is a manual setup action performed by the single owner account, not
+   * a background job, and Siigo's 429 already surfaces as `requests_limit`,
+   * which errorTranslator marks retryable and retryWithBackoff handles.
+   * The failure mode is a delayed sync, not a duplicated legal document.
+   * `isSyncing` still prevents the common case (impatient double-click).
+   */
   const handleSyncCatalogs = useCallback(async () => {
     setIsSyncing(true);
     try {

@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { POST } from "./route";
 import { siigoCreditNoteSchema } from "@/mappers/creditNote";
 import { mockSiigoInvoicePayloads } from "@/mocks/siigo";
 
@@ -15,8 +14,13 @@ const validCreditNote = siigoCreditNoteSchema.parse({
   mail: { send: true },
 });
 
+const CONSULTATION_ID = "provet-consult-4242";
+
 const mockAccessToken = "tok-live-123";
 const mockPartnerId = "PARTNER-LIVE";
+
+const { queryMock } = vi.hoisted(() => ({ queryMock: vi.fn() }));
+vi.mock("@/services/db", () => ({ getPool: () => ({ query: queryMock }) }));
 
 vi.mock("@/services/siigoAuth", async () => {
   const actual = await vi.importActual<typeof import("@/services/siigoAuth")>("@/services/siigoAuth");
@@ -28,12 +32,15 @@ vi.mock("@/services/siigoApi", async () => {
   return { ...actual, submitCreditNote: vi.fn() };
 });
 
+import { POST } from "./route";
 import { getSiigoAccessToken, SiigoAuthError } from "@/services/siigoAuth";
 import { SiigoApiError, submitCreditNote } from "@/services/siigoApi";
 
 describe("POST /api/credit-notes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    queryMock.mockReset();
+    queryMock.mockResolvedValue({ rowCount: 1, rows: [] });
     vi.mocked(getSiigoAccessToken).mockResolvedValue({ accessToken: mockAccessToken, partnerId: mockPartnerId });
   });
 
@@ -44,7 +51,7 @@ describe("POST /api/credit-notes", () => {
     const req = new Request("http://localhost/api/credit-notes", {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Idempotency-Key": "IDEM-NC-123" },
-      body: JSON.stringify(validCreditNote),
+      body: JSON.stringify({ consultationId: CONSULTATION_ID, payload: validCreditNote }),
     });
 
     const res = await POST(req);
@@ -77,7 +84,7 @@ describe("POST /api/credit-notes", () => {
     const req = new Request("http://localhost/api/credit-notes", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(validCreditNote),
+      body: JSON.stringify({ consultationId: CONSULTATION_ID, payload: validCreditNote }),
     });
 
     const res = await POST(req);
@@ -95,7 +102,7 @@ describe("POST /api/credit-notes", () => {
     const req = new Request("http://localhost/api/credit-notes", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(validCreditNote),
+      body: JSON.stringify({ consultationId: CONSULTATION_ID, payload: validCreditNote }),
     });
 
     const res = await POST(req);
@@ -112,7 +119,7 @@ describe("POST /api/credit-notes", () => {
     const req = new Request("http://localhost/api/credit-notes", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(validCreditNote),
+      body: JSON.stringify({ consultationId: CONSULTATION_ID, payload: validCreditNote }),
     });
 
     const res = await POST(req);
@@ -128,7 +135,7 @@ describe("POST /api/credit-notes", () => {
     const req = new Request("http://localhost/api/credit-notes", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(validCreditNote),
+      body: JSON.stringify({ consultationId: CONSULTATION_ID, payload: validCreditNote }),
     });
 
     const res = await POST(req);
@@ -136,5 +143,49 @@ describe("POST /api/credit-notes", () => {
 
     expect(res.status).toBe(502);
     expect(json.error.code).toBe("service_unavailable");
+  });
+
+  it("marks the emission claim as annulled so the consultation can be billed again", async () => {
+    vi.mocked(submitCreditNote).mockResolvedValue({ id: "NC-9", cufe: "CUDE-9", status: "Accepted" as const, observations: undefined });
+
+    const req = new Request("http://localhost/api/credit-notes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ consultationId: CONSULTATION_ID, payload: validCreditNote }),
+    });
+    const res = await POST(req);
+
+    expect(res.status).toBe(200);
+    const [sql, params] = queryMock.mock.calls[0];
+    expect(sql).toContain("status = 'annulled'");
+    expect(params).toEqual([CONSULTATION_ID, "NC-9"]);
+  });
+
+  it("returns 400 when consultationId is missing, so a credit note can never orphan a blocked consultation", async () => {
+    const req = new Request("http://localhost/api/credit-notes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(validCreditNote),
+    });
+    const res = await POST(req);
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.code).toBe("invalid_payload");
+    expect(submitCreditNote).not.toHaveBeenCalled();
+  });
+
+  it("still reports success when the credit note is stamped but the claim update fails — the document exists", async () => {
+    vi.mocked(submitCreditNote).mockResolvedValue({ id: "NC-10", cufe: "CUDE-10", status: "Accepted" as const, observations: undefined });
+    queryMock.mockRejectedValue(new Error("connection terminated"));
+
+    const req = new Request("http://localhost/api/credit-notes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ consultationId: CONSULTATION_ID, payload: validCreditNote }),
+    });
+    const res = await POST(req);
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).id).toBe("NC-10");
   });
 });

@@ -14,16 +14,28 @@ import { buildQueueFromProvet } from "@/mappers/provetToQueue";
 export const dynamic = "force-dynamic";
 
 /**
- * Rate limits are enforced per endpoint (not globally) per Provet's docs
- * (developers.provetcloud.com/restapi/ratelimit.html), so firing these 6
- * calls in parallel does not itself exceed any single endpoint's budget.
- * The unresolved risk is the per-call WEIGHT: a custom page_size counts as
- * `ceil(requested_page_size / endpoint_default_page_size)` requests against
- * that endpoint's limit. page_size=1000 (see provetApi.ts) could weigh
- * several requests per call if an endpoint's default is low — the exact
- * defaults are only published in each endpoint's own Provet REST API Schema
- * page, which requires production credentials to inspect. Once confirmed,
- * revisit NEXT_PUBLIC_QUEUE_POLL_MS (useConsultationQueue.ts) accordingly.
+ * Rate limits are enforced per endpoint over a rolling 60-second window, not
+ * globally (developers.provetcloud.com/restapi/ratelimit.html), so firing
+ * these 6 calls in parallel spends one request against six SEPARATE budgets
+ * rather than six against one.
+ *
+ * Steady-state cost per device: 3 polls/min (NEXT_PUBLIC_QUEUE_POLL_MS = 20s)
+ * = 3 requests/min against each of the 6 endpoints. With the real team
+ * (owner + receptionists, ~4 devices) that is ~12 requests/min per endpoint.
+ *
+ * The unresolved multiplier is the per-call WEIGHT: a custom page_size counts
+ * as `ceil(requested_page_size / endpoint_default_page_size)` requests.
+ * provetApi.ts requests page_size=100; the per-endpoint defaults are only
+ * published in each endpoint's own Provet REST API Schema page, which needs
+ * production credentials to inspect. If a default turned out to be 20, the
+ * weight would be 5 and the figure above becomes ~60/min per endpoint —
+ * still plausibly within budget, but unverified. Confirm the defaults once
+ * production credentials exist and revisit NEXT_PUBLIC_QUEUE_POLL_MS then.
+ *
+ * Client-side deduplication (interval + focus + visibilitychange + extra tabs
+ * collapsed into one poll per device) lives in consultationQueueCache.ts.
+ * Cross-DEVICE coordination is deliberately not implemented — rationale in
+ * useConsultationQueue.ts.
  */
 export async function GET(): Promise<NextResponse> {
   try {

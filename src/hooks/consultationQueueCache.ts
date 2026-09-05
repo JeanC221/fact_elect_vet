@@ -82,3 +82,77 @@ export function decideAfterFetch(
   if (!isNetworkError) return mergeQueueRows(prevRows, liveRows);
   return prevRows.length > 0 ? prevRows : mockRows;
 }
+
+/**
+ * Cross-tab poll throttle.
+ *
+ * Every `/api/consultations` GET fans out into 6 parallel Provet calls, so
+ * each redundant poll costs 6 upstream requests, not 1. Three triggers can
+ * fire almost simultaneously on one device: the 20s interval, `focus`, and
+ * `visibilitychange` (the last two BOTH fire on a single tab switch), and each
+ * open tab runs its own copy of all three.
+ *
+ * A shared timestamp in localStorage (localStorage, not the sessionStorage
+ * used for the queue cache — sessionStorage is per-tab and would not
+ * deduplicate anything) collapses all of that to at most one poll per interval
+ * per device. This is deliberately NOT a leader election over BroadcastChannel:
+ * a leader that dies leaves the remaining tabs polling nothing until reload,
+ * whereas a stale timestamp simply expires and the next trigger polls.
+ *
+ * Scope note: this covers ONE device. Cross-device coordination is explicitly
+ * not implemented — see the rationale in useConsultationQueue.ts.
+ */
+const POLL_STAMP_KEY = "fact_vet.lastQueuePoll";
+
+/** SSR-safe access to localStorage (null when unavailable). */
+function getSharedStorage(): Storage | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage;
+  } catch {
+    return null; // Privacy mode / disabled storage
+  }
+}
+
+/** Read the last poll timestamp (ms epoch), or null when absent/unreadable. */
+export function readLastPollAt(storage?: Storage | null): number | null {
+  const store = storage ?? getSharedStorage();
+  if (!store) return null;
+  try {
+    const raw = store.getItem(POLL_STAMP_KEY);
+    if (!raw) return null;
+    const value = Number(raw);
+    return Number.isFinite(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Claim the current poll slot. Call BEFORE fetching, so sibling tabs back off. */
+export function markPolled(now: number, storage?: Storage | null): void {
+  const store = storage ?? getSharedStorage();
+  if (!store) return;
+  try {
+    store.setItem(POLL_STAMP_KEY, String(now));
+  } catch {
+    // Quota / disabled storage → fall back to unthrottled polling.
+  }
+}
+
+/**
+ * Pure throttle decision. Returns true when no poll has happened within
+ * `minIntervalMs`. A missing, unreadable or future-dated stamp returns true:
+ * a bad clock or a corrupt value must never permanently wedge the queue into
+ * never refreshing — failing open is the safe direction here, since the cost
+ * of an extra poll is a few requests while the cost of no poll is a stale
+ * consultation list.
+ */
+export function shouldPollNow(
+  lastPollAt: number | null,
+  now: number,
+  minIntervalMs: number,
+): boolean {
+  if (lastPollAt === null || !Number.isFinite(lastPollAt)) return true;
+  if (lastPollAt > now) return true; // clock skew / bogus future stamp
+  return now - lastPollAt >= minIntervalMs;
+}

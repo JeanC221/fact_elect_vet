@@ -273,7 +273,7 @@ export default function HomePage() {
         const res = await fetch("/api/credit-notes", {
           method: "POST",
           headers: { "Content-Type": "application/json", "X-Idempotency-Key": idemKey },
-          body: JSON.stringify(cn),
+          body: JSON.stringify({ consultationId: annulTarget.consultationId, payload: cn }),
         });
         const data = await res.json();
         if (!res.ok) throw new SiigoApiError(data.error?.code ?? "default", data.error?.message ?? "Error al generar la nota crédito.");
@@ -305,7 +305,7 @@ export default function HomePage() {
         const res = await fetch("/api/invoices", {
           method: "POST",
           headers: { "Content-Type": "application/json", "X-Idempotency-Key": idemKey },
-          body: JSON.stringify(payload),
+          body: JSON.stringify({ consultationId: selectedId, payload }),
         });
         const data = await res.json();
         if (!res.ok) throw new SiigoApiError(data.error?.code ?? "default", data.error?.message ?? "Error al emitir la factura.");

@@ -137,7 +137,7 @@ const ERROR_TRANSLATIONS: Record<string, TranslationEntry> = {
   },
   service_unavailable: {
     message:
-      "El servicio de Siigo/DIAN no respondió tras varios intentos. La factura NO fue enviada ni se generó ningún borrador — no se perdió el intento, pero debe reintentar manualmente cuando el servicio esté disponible.",
+      "El servicio de Siigo/DIAN no respondió tras varios intentos. NO se puede confirmar si la factura alcanzó a generarse: verifíquelo en Siigo Nube antes de reintentar, para no emitir un documento duplicado ante la DIAN.",
     severity: "warning",
     quickAction: "save_draft",
     retryable: true,
@@ -188,6 +188,20 @@ export function translateSiigoError(error: unknown): TranslatedError {
     };
   }
   if (error instanceof SiigoApiError) {
+    // The server already produced a precise, staff-facing Spanish message for
+    // this one (which invoice blocked the emission, or why the previous
+    // attempt could not be confirmed). Replacing it with a table entry would
+    // surface the generic "verifique los datos e intente nuevamente" — advice
+    // to do exactly the wrong thing when the consultation is already invoiced.
+    if (error.code === "consultation_already_claimed") {
+      return {
+        code: error.code,
+        message: error.message,
+        severity: "warning",
+        quickAction: "none",
+        retryable: false,
+      };
+    }
     const entry = ERROR_TRANSLATIONS[error.code] ?? DEFAULT_TRANSLATION;
     return { code: error.code, detail: error.message, ...entry };
   }
