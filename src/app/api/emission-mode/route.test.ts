@@ -41,12 +41,39 @@ describe("GET /api/emission-mode", () => {
     expect(JSON.stringify(json)).not.toMatch(/secret-|access-key-/i);
   });
 
-  it("falls back to the sandbox default on any read error", async () => {
+  /**
+   * A 200 carrying the sandbox default when the read actually FAILED is not a
+   * harmless fallback: `useEmissionOptions.fetchServerMode` only discards a
+   * response when `!res.ok`, so a 200 makes every device overwrite a correctly
+   * cached `production` mode with `sandbox` — and `stampSendFor("sandbox")` is
+   * false, so real invoices stop being stamped at the DIAN. The credentials
+   * page was already written against a 503 contract this route never honoured.
+   */
+  it("returns 503 (not a silent 200 sandbox) when the read genuinely fails", async () => {
     queryMock.mockRejectedValue(new Error("network blip"));
     const res = await GET();
     const json = await res.json();
+    expect(res.status).toBe(503);
+    expect(json.error.code).toBe("storage_unavailable");
+    expect(json.mode).toBeUndefined();
+  });
+
+  it("returns 503 when the stored row is corrupt, instead of pretending it is sandbox", async () => {
+    queryMock.mockResolvedValue({
+      rowCount: 1,
+      rows: [{ mode: "not-a-mode", configured: {}, updated_at: new Date("2026-08-31T00:00:00.000Z") }],
+    });
+    const res = await GET();
+    const json = await res.json();
+    expect(res.status).toBe(503);
+    expect(json.error.code).toBe("config_corrupt");
+  });
+
+  it("still returns a plain 200 sandbox default when the row is simply absent (legitimate first run)", async () => {
+    queryMock.mockResolvedValue({ rowCount: 0, rows: [] });
+    const res = await GET();
     expect(res.status).toBe(200);
-    expect(json).toEqual(DEFAULT_CONFIG);
+    expect(await res.json()).toEqual(DEFAULT_CONFIG);
   });
 });
 

@@ -98,4 +98,39 @@ describe("POST /api/catalogs/sync", () => {
     const res = await POST(req);
     expect(res.status).toBe(400);
   });
+
+  /**
+   * The route's own response schema used to be `z.array(z.any())` — it looked
+   * like validation and validated nothing. These two tests fail if it ever
+   * reverts to that, and pin the status code: a malformed catalogue is Siigo's
+   * problem (502), never the caller's (400).
+   */
+  it("returns 502 invalid_payload — not 400 — when a product from Siigo fails the real schema", async () => {
+    vi.mocked(fetchPaymentTypes).mockResolvedValue([]);
+    // `code` is required and non-empty; a bare object must not pass the route schema.
+    vi.mocked(fetchProducts).mockResolvedValue([
+      { id: "PROD-001", name: "Consulta" } as unknown as Awaited<ReturnType<typeof fetchProducts>>[number],
+    ]);
+    const req = new Request("http://localhost/api/catalogs/sync", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(validCreds),
+    });
+    const res = await POST(req);
+    const json = await res.json();
+    expect(res.status).toBe(502);
+    expect(json.error.code).toBe("invalid_payload");
+  });
+
+  it("returns 502 invalid_payload when a payment type from Siigo fails the real schema", async () => {
+    vi.mocked(fetchProducts).mockResolvedValue([]);
+    vi.mocked(fetchPaymentTypes).mockResolvedValue([
+      { id: -1, name: "", type: "" } as unknown as Awaited<ReturnType<typeof fetchPaymentTypes>>[number],
+    ]);
+    const req = new Request("http://localhost/api/catalogs/sync", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(validCreds),
+    });
+    const res = await POST(req);
+    const json = await res.json();
+    expect(res.status).toBe(502);
+    expect(json.error.code).toBe("invalid_payload");
+  });
 });

@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { ArrowLeft, Cog, Lock, User } from "lucide-react";
 import { NavBar } from "@/components/NavBar";
 import { HealthCheckStatus } from "@/components/HealthCheckStatus";
+import { InvoiceClaimsPanel } from "@/components/InvoiceClaimsPanel";
 import { verifySessionToken } from "@/services/auth";
 import { SESSION_COOKIE_NAME } from "@/services/sessionCookies";
 
@@ -46,6 +47,15 @@ export default async function SettingsPage() {
         </header>
 
         <HealthCheckStatus />
+
+        {/*
+          Admin-only rescue panel. Rendered here (and not on its own route)
+          because it is a rare-use safety net, not a workflow screen. The
+          server-side guard is ADMIN_ONLY_PREFIXES in middleware.ts; this
+          `isAdmin` check only avoids showing an employee a panel whose every
+          request would 403.
+        */}
+        {isAdmin && <InvoiceClaimsPanel />}
 
         <nav className="w-full max-w-md space-y-2">
           <Link href="/settings/profile" className={`${linkBase} w-full`}>

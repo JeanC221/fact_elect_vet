@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { hasMaxDecimals, sanitizeText } from "./provet";
+import { hasMaxDecimals, sanitizedText } from "./provet";
 
 /** DIAN tax classifications (Resolution 948). */
 export const siigoTaxEnum = z.enum([
@@ -16,7 +16,7 @@ export const siigoDocumentTypeSchema = z.object({ id: z.number().int().positive(
 export const siigoProductSchema = z.object({
   id: z.string().trim().min(1),
   code: z.string().trim().min(1).max(50),
-  name: z.string().trim().min(1).max(200).transform(sanitizeText),
+  name: sanitizedText({ max: 200 }),
   // Accept Siigo's real field, but don't fail parsing when it's absent/differently-shaped.
   tax_classification: z.string().trim().optional(),
   /**
@@ -55,7 +55,7 @@ export const siigoPaymentTypeSchema = z.object({
 export const siigoDocumentTypeCatalogEntrySchema = z.object({
   id: z.number().int().positive(),
   code: z.string().trim().min(1),
-  name: z.string().trim().min(1).transform(sanitizeText),
+  name: sanitizedText(),
   description: z.string().trim().optional(),
   type: z.string().trim().min(1),
   active: z.boolean(),
@@ -64,8 +64,8 @@ export const siigoDocumentTypeCatalogEntrySchema = z.object({
 export const siigoSellerSchema = z.object({
   id: z.number().int().positive(),
   username: z.string().trim().min(1).optional(),
-  first_name: z.string().trim().min(1).transform(sanitizeText),
-  last_name: z.string().trim().min(1).transform(sanitizeText),
+  first_name: sanitizedText(),
+  last_name: sanitizedText(),
   email: z.string().trim().optional(),
   active: z.boolean(),
   identification: z.string().trim().optional(),
@@ -80,8 +80,8 @@ export const siigoPhoneSchema = z.object({
 
 /** Siigo customer contact (invoice mail dispatch target when mail.send is true). */
 export const siigoContactSchema = z.object({
-  first_name: z.string().trim().min(1).max(100).transform(sanitizeText),
-  last_name: z.string().trim().min(1).max(100).transform(sanitizeText),
+  first_name: sanitizedText({ max: 100 }),
+  last_name: sanitizedText({ max: 100 }),
   email: z.string().trim().max(254).email("Invalid contact email"),
   phone: siigoPhoneSchema.optional(),
 });
@@ -104,7 +104,7 @@ export const siigoCustomerSchema = z
       .optional(),
     branch_office: z.literal(0),
     name: z
-      .array(z.string().trim().min(1).max(100).transform(sanitizeText))
+      .array(sanitizedText({ max: 100 }))
       .min(1)
       .max(2),
     contacts: z.array(siigoContactSchema).min(1).optional(),
@@ -140,7 +140,7 @@ export const siigoCustomerSchema = z
 export const siigoInvoiceItemSchema = z
   .object({
     code: z.string().trim().min(1).max(50),
-    description: z.string().trim().min(1).max(200).transform(sanitizeText),
+    description: sanitizedText({ max: 200 }),
     quantity: z.number().positive().max(1e6),
     /**
      * Tax ids from the mapped Siigo product. Sent so the DIAN document breaks
@@ -184,17 +184,49 @@ export const siigoInvoicePayloadSchema = z.object({
   mail: z.object({ send: z.boolean().default(false) }),
 });
 
+/**
+ * Siigo's raw POST /v1/invoices response.
+ *
+ * OBSERVED (Siigo sandbox, real API call): an unstamped invoice does not send
+ * `stamp: null` — it does not send `stamp` AT ALL. The key is simply absent.
+ * The root keys that do come back are: balance, cost_center, customer, date,
+ * document, id, items, mail, metadata, name, number, observations, payments,
+ * prefix, public_url, seller, total.
+ *
+ * NOT OBSERVED: a populated `stamp` carrying a CUFE. Nobody on this project
+ * has seen one. Every sandbox document type is `electronic_type:
+ * "NoElectronic"`, so a POST with `stamp.send: true` is refused outright with
+ * `{"Code":"document_settings","Message":"The send cannot be used, you must
+ * verify the document settings","Params":["stamp.send"]}`. The inner fields
+ * below (cufe, cude, status, observations, errors) are modelled from Siigo's
+ * DOCUMENTATION, not from a response we have inspected. They stay unverified
+ * until the clinic's production credentials and documentTypeId 60345 are
+ * available. Treat their exact names and types as a hypothesis.
+ *
+ * `.nullish()` rather than `.optional()`: `.optional()` would already cover
+ * the observed absent-key case, and `.nullable()` alone would NOT. `.nullish()`
+ * covers both, which matters because a rejection here is not a harmless
+ * validation error — the POST has already succeeded at that point, so
+ * `POST /api/invoices` classifies the failure as ambiguous and pins the
+ * emission claim to `unknown`, blocking a consultation whose invoice exists.
+ * Accepting a null we have never seen costs nothing; rejecting one would cost
+ * a wedged consultation.
+ *
+ * `status` is deliberately NOT an enum: an unrecognised DIAN state must not
+ * make the document unparseable. Narrowing happens downstream in
+ * `mapSiigoInvoiceStatus`.
+ */
 export const siigoInvoiceRawResponseSchema = z.object({
   id: z.string().trim().min(1),
   number: z.number().int().optional(),
   name: z.string().trim().max(50).optional(),
   stamp: z.object({
-    status: z.string().trim().optional(),
-    cufe: z.string().trim().optional(),
-    cude: z.string().trim().optional(),
-    observations: z.string().optional(),
-    errors: z.string().optional(),
-  }).optional(),
+    status: z.string().trim().nullish(),
+    cufe: z.string().trim().nullish(),
+    cude: z.string().trim().nullish(),
+    observations: z.string().nullish(),
+    errors: z.string().nullish(),
+  }).nullish(),
 }).passthrough();
 
 /** Flattened shape this app's UI/history layer consumes (cufe/status/observations at root). */
@@ -202,7 +234,7 @@ export const siigoInvoiceResponseSchema = siigoInvoiceRawResponseSchema.transfor
   ...raw,
   cufe: raw.stamp?.cufe ?? "",
   status: raw.stamp?.status ?? "Draft",
-  observations: raw.stamp?.observations as string | undefined,
+  observations: raw.stamp?.observations ?? undefined,
 }));
 
 export const siigoErrorSchema = z.object({
