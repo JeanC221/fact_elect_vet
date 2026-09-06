@@ -46,26 +46,52 @@ export const sanitizeText = (s: string): string =>
     .replace(/\s+/g, " ")
     .trim();
 
+/**
+ * A required, sanitised text field.
+ *
+ * The non-empty check is applied TWICE on purpose: once on the raw input and
+ * again on the sanitised output. `sanitizeText` strips quotes and control
+ * characters, so an input like `"''"` passes a plain `.min(1)` and comes out
+ * as `""` — a schema whose own output its own schema rejects. That broke in
+ * two directions:
+ *
+ *  - re-validating an already-parsed value (a route double-checking what a
+ *    service validated) failed on data that had just been accepted;
+ *  - an empty description or customer name reached the Siigo payload, i.e. a
+ *    blank field on a legal DIAN document, without anything complaining.
+ *
+ * Using this helper instead of `z.string().trim().min(1).transform(sanitizeText)`
+ * makes the field reject at the source and keeps parsing idempotent.
+ */
+export const sanitizedText = (opts: { max?: number; message?: string } = {}) => {
+  const { max, message } = opts;
+  const base = z.string().trim().min(1, message);
+  const bounded = max === undefined ? base : base.max(max);
+  return bounded
+    .transform(sanitizeText)
+    .pipe(z.string().min(1, message ?? "El texto queda vacío tras eliminar comillas y caracteres de control"));
+};
+
 export const clientSchema = z.object({
   id: z.string().trim().min(1),
   identification: identificationSchema,
-  name: z.string().trim().min(1, "Client name is required").max(100).transform(sanitizeText),
+  name: sanitizedText({ max: 100, message: "Client name is required" }),
   email: z.string().trim().max(254).email("Invalid email address"),
-  address: z.string().trim().min(1, "Address is required").max(200).transform(sanitizeText),
+  address: sanitizedText({ max: 200, message: "Address is required" }),
   phone: z.string().trim().min(7).max(20),
   client_type: z.enum(["natural", "juridical"]),
 });
 
 export const patientSchema = z.object({
   id: z.string().trim().min(1),
-  name: z.string().trim().min(1).max(100).transform(sanitizeText),
+  name: sanitizedText({ max: 100 }),
   species: z.string().trim().min(1).max(50),
   breed: z.string().trim().min(1).max(50).optional(),
   owner_id: z.string().trim().min(1),
 });
 
 export const consultationItemSchema = z.object({
-  name: z.string().trim().min(1).max(100).transform(sanitizeText),
+  name: sanitizedText({ max: 100 }),
   code: z.string().trim().min(1).max(50),
   quantity: z.number().positive().max(1e6),
   unit_price: z.number().nonnegative().max(1e9).refine((n) => hasMaxDecimals(n, 6), "Unit price max 6 decimals"),

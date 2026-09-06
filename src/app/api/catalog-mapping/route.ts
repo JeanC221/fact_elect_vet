@@ -36,6 +36,31 @@ function rowToMapping(row: CatalogMappingRow): CatalogMapping {
   };
 }
 
+/**
+ * DECISION (fail-loudly review): this fallback is deliberately KEPT, unlike the
+ * one in GET /api/emission-mode which was aligned to fail-loudly in the same
+ * pass. It is not actually silent, and the difference is worth stating so a
+ * later reader does not "fix" it into a hard failure:
+ *
+ * 1. It already fails loudly at the protocol level — a read failure or a
+ *    corrupt row returns 503, not 200. The EMPTY_MAPPING body is a shape
+ *    filler so clients can parse the response; the status is the signal.
+ * 2. The client acts on that status. `settings/mapping/page.tsx` shows the
+ *    user "No se pudo confirmar el mapeo más reciente en el servidor
+ *    (almacenamiento no disponible)" and degrades to the last local copy, and
+ *    `useEmissionOptions.fetchServerMapping` discards the body on `!res.ok`
+ *    rather than adopting an empty mapping.
+ * 3. Degrading cannot silently produce a wrong invoice. An empty or stale
+ *    mapping has no `documentTypeId`/`sellerId`, so `provetToSiigoInvoice`
+ *    throws MissingEmissionSettingError, and an unmapped payment method throws
+ *    UnmappedPaymentMethodError. Emission is blocked, never guessed.
+ * 4. Writes are still safe while degraded: PUT carries the mapping `version`
+ *    and a stale local copy loses the optimistic-concurrency check with a 409.
+ *
+ * The emission-mode case was different on every one of these points: it
+ * returned 200, its default ("sandbox") silently disabled DIAN stamping, and
+ * the client trusted it.
+ */
 export async function GET(): Promise<NextResponse> {
   try {
     const pool = getPool();

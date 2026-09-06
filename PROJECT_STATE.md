@@ -21,13 +21,15 @@ Internal web application (Middleware API + Operational Dashboard) designed to au
 - [x] **Phase 2: API Services & Pure Mappers**[cite: 3]
   - [x] Implement REST/OAuth adaptors for Provet and Siigo APIs[cite: 3, 10].
   - [x] Implement pure data mapping functions (`provetToSiigoInvoice`)[cite: 3].
-- [ ] **Phase 3: Interactive Web Dashboard**[cite: 3, 11]
+- [x] **Phase 3: Interactive Web Dashboard**[cite: 3, 11]
   - [x] View pending & closed consultations from Provet[cite: 3, 6].
   - [x] Quick-edit modal (Identification/NIT, email, payment methods) and 1-Click Invoicing[cite: 3, 11].
-  - Invoice history, DIAN status badge (Accepted/Rejected), and PDF/XML download actions[cite: 3, 11].
-  - Credit Notes / Invoice Annulment module[cite: 3, 11].
+  - [x] Invoice history, DIAN status badge (Accepted/Rejected), and PDF/XML download actions[cite: 3, 11].
+    (`InvoiceHistory.tsx`, `StatusBadge.tsx`, `GET /api/invoice-history`, `GET /api/invoices/[id]/[format]`)
+  - [x] Credit Notes / Invoice Annulment module[cite: 3, 11].
+    (`CreditNoteModal.tsx`, `mappers/creditNote.ts`, `POST /api/credit-notes` — server-side only)
   - [x] Employee JWT authentication & login system[cite: 1, 3, 11].
-- [ ] **Phase 4: Settings & Catalog Mapping**[cite: 3, 11]
+- [x] **Phase 4: Settings & Catalog Mapping**[cite: 3, 11]
   - [x] Dynamic mapping interface for items/services and payment methods between Provet & Siigo[cite: 1, 3].
   - [x] Secure credentials configuration panel and Sandbox vs. Production toggle[cite: 1, 3].
   - [x] Activate live `fetch()` POST /v1/invoices in `siigoApi.submitInvoice` (Partner-Id, Idempotency-Key, Authorization headers).
@@ -103,21 +105,145 @@ Internal web application (Middleware API + Operational Dashboard) designed to au
 
 ---
 
-## Next Pending Task
-- **Project Status:** 🎉 **ALL PHASES 1-6 COMPLETE — PROJECT READY FOR PRODUCTION DEPLOYMENT** 🎉
-- **Final Deliverables:**
-  - ✅ Phase 1: Base Architecture & Mock Schemas
-  - ✅ Phase 2: API Services & Pure Mappers
-  - ✅ Phase 3: Interactive Web Dashboard (JWT auth, live invoicing, credit notes, PDF/XML downloads)
-  - ✅ Phase 4: Settings & Catalog Mapping (dynamic Provet↔Siigo mapping, credentials panel)
-  - ✅ Phase 5: Error Handling & Fallbacks (Spanish error translation, exponential backoff retries)
-  - ✅ Phase 6: Performance Optimization & Deployment (Siigo OAuth integration, Vercel config, security headers, comprehensive README)
-- **Deployment Ready:**
-  - `vercel.json` configured with enterprise security headers (HSTS, X-Frame-Options, CSP)
-  - `.env.example` documents all 13 required environment variables with placeholders
-  - `README.md` provides step-by-step deployment guide (Vercel CLI + Dashboard)
-  - Full verification suite passing: TypeScript ✅ | Vitest (144 tests) ✅ | Lint ✅ | Next.js Build ✅
-- **No Remaining Tasks:** Project roadmap 100% complete. Ready for production deployment to Vercel.
+## Current State (verified 2026-09-05)
+
+Everything in this section was re-checked against the code in this commit. The
+per-task entries below the separator are an append-only changelog: their test
+counts describe the suite as it stood on that date and are left untouched.
+
+### Verification gates
+| Gate | Command | Result |
+| --- | --- | --- |
+| Types | `npx tsc --noEmit` | clean |
+| Tests | `npx vitest run` | **565 passed (565)** across **40 files** |
+| Build | `npx next build` | clean (10/10 pages) — needs `DATABASE_URL` set, a placeholder is enough |
+
+### Security headers — corrected
+The previous version of this document claimed `vercel.json` carried a CSP. It
+does not. What `vercel.json` actually defines, verified line by line:
+
+- `Strict-Transport-Security: max-age=63072000; includeSubDomains; preload` ✅
+- `X-Frame-Options: DENY` ✅
+- `X-Content-Type-Options: nosniff` ✅
+- `Referrer-Policy: strict-origin-when-cross-origin` ✅
+- `Permissions-Policy: camera=(), microphone=(), geolocation=()` ✅
+- `Content-Security-Policy` ❌ **absent** — not in `vercel.json` and not in
+  `next.config.js` either. Still open.
+
+### Roadmap phases 1-6
+All shipped. That is not the same as "ready for production": the blockers below
+are operational and credential-related, not feature gaps.
+
+### Resolved — anti-double-emission session
+- **Emission claims.** `invoice_claims` table + `src/services/invoiceClaims.ts`.
+  An atomic `INSERT ... ON CONFLICT ... RETURNING` claim is taken *before* the
+  Siigo call, so a second device never reaches Siigo. States: `pending`,
+  `emitted`, `unknown`, `annulled`.
+- **Reconciliation.** `src/services/invoiceReconciliation.ts`. After an
+  ambiguous failure (5xx, timeout) the app embeds a marker in `observations`,
+  asks Siigo whether the document exists, and retries with a fresh idempotency
+  key only when absence is confirmed. Motivated by a measured ~10% HTTP 500
+  rate on the Siigo sandbox.
+- **Amounts.** Invoice lines come from Provet `invoicerow.sum_total`, never
+  from `quantity × price` (measured: the latter was wrong in 19 of 33 sampled
+  consultations).
+- **Itemised VAT.** `items.taxes` is sent with the mapped product's tax ids
+  alongside `taxed_price`; Siigo applies no tax unless explicitly told to.
+- **`items` XOR.** Exactly one of `price` or `taxed_price` per line, enforced
+  in the schema.
+- **Date window.** `modified__gte` is applied only to `/consultation`, never to
+  child resources.
+- **Admin endpoint.** `GET`/`DELETE /api/invoice-claims`, guarded by
+  `ADMIN_ONLY_PREFIXES` in `middleware.ts`.
+- **No `UNIQUE` on `invoices.consultation_id`.** Deliberate: the annulment flow
+  stores the credit note as a second row under the same `consultation_id`.
+
+### Resolved — structural quality session (this one)
+- **Schema test coverage.** New `src/schemas/siigo.test.ts` and
+  `src/schemas/provet.test.ts` cover the `stamp` flattening transform, the
+  `price`/`taxed_price` XOR rule, decimal bounds, the `observations` 500-char
+  limit, optional product `taxes`, and the totals-reconciliation `.refine()`
+  (including measured float-drift cases).
+- **`stamp` hardened to `.nullish()`.** Verified against the real Siigo
+  sandbox: an unstamped invoice omits the `stamp` key entirely rather than
+  sending `stamp: null`. Observed root keys: balance, cost_center, customer,
+  date, document, id, items, mail, metadata, name, number, observations,
+  payments, prefix, public_url, seller, total. `.optional()` already covered
+  that; `.nullish()` also covers a null, which costs nothing and avoids the
+  worst failure mode — a rejection here happens *after* a successful POST, and
+  `POST /api/invoices` reads a post-emission validation failure as ambiguous,
+  pinning the claim to `unknown` and wedging a consultation whose invoice
+  exists.
+- **The stamped `stamp` shape is UNVERIFIED.** No populated `stamp` carrying a
+  CUFE has ever been observed on this project. Every sandbox document type is
+  `electronic_type: "NoElectronic"`, so a POST with `stamp.send: true` is
+  refused with `{"Code":"document_settings","Message":"The send cannot be used,
+  you must verify the document settings","Params":["stamp.send"]}`. The
+  `cufe` / `cude` / `status` / `observations` / `errors` fields are modelled
+  from Siigo's documentation. Re-verify against a real stamped document once
+  the clinic's production credentials and documentTypeId 60345 exist.
+- **Phantom validation removed.** `POST /api/catalogs/sync` validated its
+  response with `z.array(z.any())`. It now uses the real catalogue schemas, and
+  a malformed catalogue returns **502 `invalid_payload`** rather than 400 —
+  a bad catalogue is Siigo's fault, not the caller's.
+- **`GET /api/emission-mode` aligned to fail-loudly.** It used to answer 200
+  with the sandbox default on any read error. Because
+  `useEmissionOptions.fetchServerMode` only discards a response when `!res.ok`,
+  that 200 made every device overwrite a correct `production` with `sandbox`,
+  and `stampSendFor("sandbox")` is false — real invoices would stop being
+  stamped. Now: absent row → 200 default (genuinely unconfigured); corrupt row
+  → 503 `config_corrupt`; read failure → 503 `storage_unavailable`.
+  `settings/credentials/page.tsx` had already handled 503 since it was written.
+- **`GET /api/catalog-mapping` fallback kept, and the reasoning written into
+  the file.** It already returns 503 (not a silent 200), the UI warns and
+  degrades to a local copy, PUT keeps optimistic concurrency, and a degraded
+  mapping cannot produce a wrong invoice — it throws
+  `MissingEmissionSettingError` / `UnmappedPaymentMethodError` instead.
+- **Non-idempotent sanitised text fields.** Twelve schema fields were written
+  as `z.string().trim().min(1).transform(sanitizeText)`. `.min(1)` runs BEFORE
+  the transform, so an input made only of quotes or control characters passed
+  the length check and came out as `""` — a value the same schema then
+  rejected. Two consequences: re-validating an already-parsed value failed on
+  data that had just been accepted, and an empty `items.description` or
+  `customer.name` could reach a legal DIAN document unremarked. All twelve now
+  use the `sanitizedText()` helper in `src/schemas/provet.ts`, which re-checks
+  the bound after sanitising. Parsing is idempotent across every catalogue
+  schema (verified) and blank-after-sanitising records are rejected at source.
+- **Admin UI for stuck claims.** `src/components/InvoiceClaimsPanel.tsx` plus
+  the pure `src/mappers/invoiceClaimsAdmin.ts`, mounted on `/settings` for
+  admins. Lists open claims, releases one with explicit confirmation, and
+  surfaces the 409 `claim_emitted` refusal without offering to force it.
+  Replaces hand-written SQL against production, which bypassed that refusal and
+  caused a real incident.
+
+### Open items
+**Blocked on credentials (cannot be closed from the code):**
+- Credit-note payload shape and the fiscal-year restriction remain unverified —
+  the Siigo sandbox has no document type with an active DIAN resolution.
+- `consultationitem` vs `invoicerow` mapping and the dosage / fractional
+  quantity rules need production data to validate.
+- Provet `/item/` catalogue endpoint returns 403 with the current integration
+  credentials, so the queue still derives mappable items from time-windowed
+  consultations instead of the atemporal catalogue.
+- Siigo production credentials must be requested by the clinic owner; likewise
+  the clinic's real Provet Cloud account.
+
+**Open in the code:**
+- No `Content-Security-Policy` header (see above).
+- `useEmissionOptions` sets `isModeReady` to true even when the emission-mode
+  fetch failed, so `page.tsx`'s `modeNotReady` gate only covers the loading
+  window, not a confirmed-unknown mode. Less dangerous since the 503 change
+  above (the client now keeps its cached mode instead of being forced to
+  sandbox), but a device with no cache still falls back to `sandbox`.
+- No component tests: `vitest.config.ts` runs `environment: "node"` over
+  `src/**/*.test.ts` only, with no jsdom or Testing Library in the repo. The
+  convention is to keep decisions in pure `.ts` mappers and the `.tsx` thin.
+
+**Infrastructure:**
+- Vercel Hobby is the current plan; Hobby's terms exclude commercial use, so
+  Vercel Pro is the correct production target.
+- Supabase backups depend on the plan tier and still need confirming in the
+  panel.
 
 ---
 
