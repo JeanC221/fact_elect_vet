@@ -5,9 +5,9 @@
 
 ## 1. MANDATORY READ-FIRST PROTOCOL
 Before writing, refactoring, or planning any code, you MUST inspect the following root files:
-1. `PROJECT_STATE.md` -> Identify current phase, completed tasks, and Next Pending Task.
+1. `PROJECT_STATE.md` -> Read the `## Current State` section: it is the single source of truth for the verified state of the repo. The `Next Pending Task` lines further down are append-only changelog entries, not live instructions.
 2. `01_PROJECT_REQUIREMENTS.md` -> Validate business logic, DIAN tax rules, and API spec.
-3. `02_AGENT_WORKFLOW_RULES.md` -> Follow token rules, atomic scope, and agent matrix[cite: 1, 3].
+3. `2_AGENT_WORKFLOW_RULES.md` -> Follow token rules, atomic scope, and agent matrix[cite: 1, 3].
 4. `03_UI_UX_DESIGN_SPEC.md` -> Apply strict clinical UI design constraints[cite: 4].
 
 ---

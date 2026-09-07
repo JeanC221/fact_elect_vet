@@ -1,5 +1,4 @@
 import type {
-  SiigoError,
   SiigoInvoicePayload,
   SiigoInvoiceResponse,
   SiigoPaymentType,
@@ -125,17 +124,5 @@ export const mockSiigoInvoiceResponses: SiigoInvoiceResponse[] = [
     cufe: "",
     status: "Rejected",
     observations: "DIAN Error: invalid_identification — NIT inválido.",
-  },
-];
-
-export const mockSiigoErrors: SiigoError[] = [
-  {
-    code: "invalid_identification",
-    message: "La cédula o NIT ingresado no es válido para procesamiento DIAN.",
-  },
-  {
-    code: "invalid_total_payments",
-    message:
-      "El total pagado no coincide con el subtotal de los ítems facturados.",
   },
 ];

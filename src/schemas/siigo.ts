@@ -1,15 +1,6 @@
 import { z } from "zod";
 import { hasMaxDecimals, sanitizedText } from "./provet";
 
-/** DIAN tax classifications (Resolution 948). */
-export const siigoTaxEnum = z.enum([
-  "IVA_19",
-  "IVA_5",
-  "EXCLUIDO",
-  "EXENTO",
-  "INC",
-]);
-
 /** Siigo document type discriminator (Factura de Venta, Nota Crédito, ...). */
 export const siigoDocumentTypeSchema = z.object({ id: z.number().int().positive() });
 
@@ -194,14 +185,39 @@ export const siigoInvoicePayloadSchema = z.object({
  * prefix, public_url, seller, total.
  *
  * NOT OBSERVED: a populated `stamp` carrying a CUFE. Nobody on this project
- * has seen one. Every sandbox document type is `electronic_type:
- * "NoElectronic"`, so a POST with `stamp.send: true` is refused outright with
+ * has seen one. A POST with `stamp.send: true` was refused with
  * `{"Code":"document_settings","Message":"The send cannot be used, you must
- * verify the document settings","Params":["stamp.send"]}`. The inner fields
- * below (cufe, cude, status, observations, errors) are modelled from Siigo's
- * DOCUMENTATION, not from a response we have inspected. They stay unverified
- * until the clinic's production credentials and documentTypeId 60345 are
- * available. Treat their exact names and types as a hypothesis.
+ * verify the document settings","Params":["stamp.send"]}`.
+ *
+ * CORRECTION (2026-09-07): an earlier version of this comment explained that
+ * refusal by claiming every sandbox document type is
+ * `electronic_type: "NoElectronic"`. THAT WAS FALSE. Measured against a real
+ * `GET /v1/document-types`: FV returns 72 ElectronicInvoice, 1
+ * ContingencyInvoice, 1 ExportInvoice and 191 NoElectronic; NC returns 19
+ * ElectronicCreditNote and 37 NoElectronic. Most are `active: true`.
+ * Electronic types DO exist in the sandbox.
+ *
+ * What is still UNKNOWN is which of them, if any, belongs to this account. The
+ * Siigo sandbox is shared / multi-tenant, so that catalogue lists other
+ * companies' document types; existence does not imply this account may emit
+ * against them. One suspicious candidate is `id=30640, code=312,
+ * "prueba fac elec"`, which is `NoElectronic` — if that is the mapped
+ * `documentTypeId`, the `document_settings` error is explained by pointing at
+ * a non-electronic type rather than by any sandbox limitation. Siigo's own
+ * documentation lists `document_settings` as the generic "a parameter you sent
+ * is not configured on this voucher" error (seller-per-item, cost centre,
+ * automatic numbering, discounts, decimals) and never mentions electronic
+ * type at all, so the cause remains undetermined.
+ *
+ * Do NOT swap `documentTypeId` for one off that global list: emitting against
+ * another tenant's type would burn their consecutive number.
+ *
+ * The inner fields below (cufe, cude, status, observations, errors) are
+ * modelled from Siigo's DOCUMENTATION, not from a response we have inspected.
+ * They stay unverified until a stamped document is captured — via the clinic's
+ * production credentials and documentTypeId 60345, or sooner if one of the
+ * sandbox electronic types turns out to belong to this account. Treat their
+ * exact names and types as a hypothesis.
  *
  * `.nullish()` rather than `.optional()`: `.optional()` would already cover
  * the observed absent-key case, and `.nullable()` alone would NOT. `.nullish()`

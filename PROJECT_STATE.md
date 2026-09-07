@@ -105,7 +105,7 @@ Internal web application (Middleware API + Operational Dashboard) designed to au
 
 ---
 
-## Current State (verified 2026-09-05)
+## Current State (verified 2026-09-07)
 
 Everything in this section was re-checked against the code in this commit. The
 per-task entries below the separator are an append-only changelog: their test
@@ -115,7 +115,7 @@ counts describe the suite as it stood on that date and are left untouched.
 | Gate | Command | Result |
 | --- | --- | --- |
 | Types | `npx tsc --noEmit` | clean |
-| Tests | `npx vitest run` | **565 passed (565)** across **40 files** |
+| Tests | `npx vitest run` | **569 passed (569)** across **40 files** — timezone-independent, verified under `America/Bogota`, `UTC`, `Asia/Tokyo` and `Pacific/Kiritimati` |
 | Build | `npx next build` | clean (10/10 pages) — needs `DATABASE_URL` set, a placeholder is enough |
 
 ### Security headers — corrected
@@ -175,13 +175,45 @@ are operational and credential-related, not feature gaps.
   pinning the claim to `unknown` and wedging a consultation whose invoice
   exists.
 - **The stamped `stamp` shape is UNVERIFIED.** No populated `stamp` carrying a
-  CUFE has ever been observed on this project. Every sandbox document type is
-  `electronic_type: "NoElectronic"`, so a POST with `stamp.send: true` is
-  refused with `{"Code":"document_settings","Message":"The send cannot be used,
-  you must verify the document settings","Params":["stamp.send"]}`. The
+  CUFE has ever been observed on this project. A POST with `stamp.send: true`
+  was refused with `{"Code":"document_settings","Message":"The send cannot be
+  used, you must verify the document settings","Params":["stamp.send"]}`. The
   `cufe` / `cude` / `status` / `observations` / `errors` fields are modelled
-  from Siigo's documentation. Re-verify against a real stamped document once
-  the clinic's production credentials and documentTypeId 60345 exist.
+  from Siigo's documentation. Re-verify against a real stamped document.
+- **CORRECTED (2026-09-07) — the sandbox is NOT limited to non-electronic
+  document types.** Earlier versions of this document, of the
+  `siigoInvoiceRawResponseSchema` comment and of `siigo.test.ts` all stated
+  that every sandbox document type is `electronic_type: "NoElectronic"` and
+  that `stamp.send: true` was therefore impossible to test. **That was false.**
+  Measured with a real `GET /v1/document-types`:
+
+  ```
+  FV:  72 ElectronicInvoice · 1 ContingencyInvoice · 1 ExportInvoice · 191 NoElectronic
+  NC:  19 ElectronicCreditNote · 37 NoElectronic
+  ```
+
+  Most are `active: true`. What is known, and what is not:
+
+  - **Confirmed:** electronic document types exist in the Siigo sandbox.
+  - **Confirmed:** the sandbox is shared / multi-tenant, so those 74 include
+    other companies' types. Existence does not prove this account may emit
+    with them.
+  - **Unresolved:** which of them, if any, belongs to this account. Suspicious
+    candidate: `id=30640, code=312, "prueba fac elec"`, which is
+    `NoElectronic`. If that is the mapped `documentTypeId`, the
+    `document_settings` error is explained by pointing at a non-electronic
+    type, not by a sandbox limitation.
+  - **Supporting evidence:** Siigo documents `document_settings` as the generic
+    "a parameter you sent is not configured on this voucher" error, listing
+    seller-per-item, cost centre, automatic numbering, discounts and decimals
+    as causes. It never mentions electronic type. Attributing the error to
+    `NoElectronic` was an inference, not a reading.
+
+  **Do not change any `documentTypeId` in the configuration on the strength of
+  this.** Emitting against another tenant's document type would consume their
+  consecutive number. The clean way to resolve it is to log into Siigo Nube on
+  the web with the sandbox credentials and inspect this company's own
+  catalogue, without other tenants' noise.
 - **Phantom validation removed.** `POST /api/catalogs/sync` validated its
   response with `z.array(z.any())`. It now uses the real catalogue schemas, and
   a malformed catalogue returns **502 `invalid_payload`** rather than 400 —
@@ -216,10 +248,162 @@ are operational and credential-related, not feature gaps.
   Replaces hand-written SQL against production, which bypassed that refusal and
   caused a real incident.
 
+### Resolved — dead code and duplication session (2026-09-07)
+
+**Gates after this session:** `tsc --noEmit` clean · **569 passed (569)** across
+**40 files** · `next build` clean. Test count moved 565 -> 569: nothing was
+deleted, four regression tests were added (see C6 below).
+
+- **C1 — seven confirmed-dead exports removed.** Each verified with `ts-prune`
+  plus a `grep -rn` per symbol before deletion; the full suite passed unchanged
+  afterwards, which is the proof none was load-bearing.
+
+  | Removed | File |
+  | --- | --- |
+  | `consultationWebhookSchema` | `src/schemas/provet.ts` |
+  | `ConsultationWebhook` (type) | `src/schemas/provet.ts` |
+  | `ConsultationItem` (type) | `src/schemas/provet.ts` |
+  | `siigoTaxEnum` | `src/schemas/siigo.ts` |
+  | `SiigoCreditNoteItem` (type) | `src/mappers/creditNote.ts` |
+  | `SiigoCreditNotePayment` (type) | `src/mappers/creditNote.ts` |
+  | `mockConsultationWebhook` | `src/mocks/provet.ts` |
+  | `mockSiigoErrors` | `src/mocks/siigo.ts` |
+
+- **C1 — three exports were wrongly listed as dead and were KEPT.**
+  `clientSchema`, `patientSchema` and `consultationItemSchema` are alive.
+  `ts-prune` reports them as `(used in module)` because `provet.ts` consumes
+  them on its own `export type X = z.infer<typeof xSchema>` lines: `clientSchema`
+  and `patientSchema` feed the `Client` / `Patient` types imported by
+  `provetToSiigo.ts`, `consultationQueue.ts` and `customerNormalizer.ts`, and
+  `consultationItemSchema` is used by `consultationSchema:107`. Any future dead
+  code scan on this repo must account for that indirection.
+
+- **`src/mocks/` is NOT test-only.** Four production files import it:
+  `src/app/page.tsx`, `src/hooks/useConsultationQueue.ts`,
+  `src/hooks/useEmissionOptions.ts` and `src/app/settings/mapping/page.tsx`
+  pull `mockClients` / `mockConsultations` / `mockPatients` /
+  `mockSiigoProducts` / `mockSiigoPaymentTypes` as seed state. Deleting that
+  directory would break the build, not just the tests.
+
+- **Orphaned exports reported, deliberately NOT removed.** `ts-prune` also
+  flags these; they go to a later session with their own verification, since
+  they may be `(used in module)` cases like the three above:
+  `SiigoDocumentType`, `SiigoContact`, `SiigoInvoiceItem`, `SiigoPayment`
+  (`src/schemas/siigo.ts:245-253`), `SessionPayload` (`src/services/auth.ts`),
+  `VersionConflictError` (`src/services/db.ts`). Add `SiigoError`
+  (`src/schemas/siigo.ts`), newly orphaned by the removal of `mockSiigoErrors`.
+
+- **C2 — `provet.ts` and `provetApi.ts` are NOT duplicate schema families.**
+  Earlier framing called them duplicates modelling the same Provet entities.
+  They sit at different layers:
+
+  | `src/schemas/provetApi.ts` | `src/schemas/provet.ts` |
+  | --- | --- |
+  | Transport contract — validates raw Provet JSON | Internal domain model |
+  | Live at runtime | Live as the source of `Client`, `Patient`, `Consultation` |
+
+  `provetToSiigo.ts`, `consultationQueue.ts` and `catalogMapping.ts` are all
+  typed against `provet.ts`. Deleting that family is not de-duplication, it is
+  a rewrite of every mapper signature.
+
+- **C2 — the live path does NOT validate totals reconciliation, and that is a
+  deliberate open decision.** `provetApi.ts` contains zero `.refine()` /
+  `.superRefine()`. The only integrity rule, `toCents(subtotal + tax_total) ===
+  toCents(total)`, lives on `consultationSchema:116` in the domain model.
+  Moving it to `provetConsultationRawSchema` was **considered and rejected**:
+
+  1. `total`, `total_vat` and `total_with_vat` all carry `.default(0)`, so a
+     response omitting them satisfies the rule vacuously — the same phantom
+     validation removed as B2 last session.
+  2. The reconciliation the evidence actually supports is
+     `sum(invoicerow.sum_total) === invoice.total_with_vat` (see the comment at
+     `provetApi.ts:113-124`), not the intra-header relation.
+  3. It would turn an invisible rounding drift into a hard emission block in
+     production, with the drift never having been measured.
+
+  With production already blocked on credentials, adding something that can
+  prevent invoicing is risk without upside. **The correct move, once real data
+  exists to calibrate it, is option 2: a `sum(sum_total)` rule.**
+  `consultationSchema` and its tests are kept intact meanwhile.
+
+- **C4 — broken references in `.clinerules` fixed.** §1 pointed at
+  `02_AGENT_WORKFLOW_RULES.md`; the real file is `2_AGENT_WORKFLOW_RULES.md`,
+  without the zero. §1 also told agents to read a `Next Pending Task` block that
+  no longer exists as live state — it now points at `## Current State`. The
+  `Next Pending Task` lines below the separator are append-only changelog
+  entries. `01_PROJECT_REQUIREMENTS.md` and `03_UI_UX_DESIGN_SPEC.md` were
+  already correct.
+
+- **C5 — the 150-line rule: analysis only, nothing refactored.**
+  `2_AGENT_WORKFLOW_RULES.md` §2 caps every file under `/src` at 150 lines.
+  **25 non-test files violate it**, not the nine previously believed (17 under
+  the narrower `/services`, `/mappers`, `/components` scope `.clinerules` uses —
+  the two documents disagree on scope, which is itself worth resolving).
+  Largest: `app/page.tsx` 361, `app/settings/mapping/page.tsx` 351,
+  `services/errorTranslator.ts` 282, `schemas/siigo.ts` 255,
+  `hooks/useConsultationQueue.ts` 233, `services/invoiceClaims.ts` 230,
+  `components/InvoiceClaimsPanel.tsx` 230.
+
+  **Recommendation: do not raise the number — replace the rule.** A line count
+  is a proxy for nothing. `errorTranslator.ts` is long because it is a lookup
+  table of Siigo error codes to Spanish messages; splitting it into three
+  94-line files adds two imports and an indirection to read the same data.
+  `schemas/siigo.ts` is a flat Zod declaration. Conversely the two files where
+  size does signal a real problem — `app/page.tsx`, which orchestrates queue,
+  emission, credit notes, history and downloads in one component — have a
+  responsibility problem, not a length problem. And `invoiceClaims.ts` is the
+  anti-double-emission guard: the last file to touch for cosmetics.
+
+  A rule that 100% of the codebase ignores is not a rule, it is noise that
+  teaches the next agent to distrust the rest of the document. The replacement
+  already exists in §2 as "Strict Layer Decoupling" (components never perform
+  raw mapping or HTTP), and that one *is* being honoured. **Decision on whether
+  to amend `2_AGENT_WORKFLOW_RULES.md` is the owner's; the file was not
+  modified.**
+
+- **C6 — the timezone-dependent test is fixed, and so is the same bug in
+  production display code.**
+  - Root cause: `src/mappers/provetToSiigo.test.ts:44` derived its expected
+    invoice date from `new Date().toISOString().slice(0, 10)` (UTC) while
+    `provetToSiigo.ts:17` correctly uses `America/Bogota`. The suite therefore
+    failed every night between ~19:00 and midnight COT, making the project's
+    verification gate unreliable for a third of the day.
+  - The assertion no longer compares two live clocks. Two deterministic
+    regression tests freeze the clock with `vi.setSystemTime`, one at
+    `2026-09-08T01:43Z` (20:43 COT, the reported failure) and one mid-morning.
+    An expected value computed the same way production computes it would agree
+    with itself in any timezone and prove nothing.
+  - `TZ` was **not** pinned in `vitest.config.ts`: that would hide the problem
+    and decouple the test environment from production.
+  - **Second occurrence found and fixed:** `src/mappers/consultationQueue.ts:42`
+    `formatDate` used `toISOString().slice(0, 10)` — production code, UTC. A
+    consultation created at 21:00 COT was displayed to reception under the next
+    day's date. Same bug, same day boundary, on the presentation path instead of
+    the emission path, and explicitly prohibited by the project's date rule.
+    Verified safe before changing: `tableSort.ts:30` orders on `Date.getTime()`
+    and `filterInvoiceHistory` never reads a date, so no filter, sort or
+    comparison depends on the rendered string — it is display-only.
+  - No other time-dependent patterns remain. `invoiceReconciliation.ts:69-71`
+    already uses `America/Bogota`; the remaining `new Date()` calls in tests are
+    opaque values whose date representation is never asserted.
+  - Verified across four timezones, all **569 passed**: `America/Bogota`,
+    `UTC`, `Asia/Tokyo` and `Pacific/Kiritimati` (UTC+14, the extreme case).
+
+- **C7 — the false sandbox claim was corrected in four places, not three.** The
+  prompt listed the `siigoInvoiceRawResponseSchema` comment, `PROJECT_STATE.md`
+  and `EVIDENCIA_APIS.md`. `EVIDENCIA_APIS.md` **does not exist in this repo**
+  (it is maintained outside it and must be corrected there separately). Two
+  further copies were found and fixed: `src/schemas/siigo.test.ts:45-52` and the
+  "Open items" entry below, which recorded the same falsehood in different
+  words. Detail of the correction is in the `stamp` entry above.
+
 ### Open items
 **Blocked on credentials (cannot be closed from the code):**
-- Credit-note payload shape and the fiscal-year restriction remain unverified —
-  the Siigo sandbox has no document type with an active DIAN resolution.
+- Credit-note payload shape and the fiscal-year restriction remain unverified.
+  The reason previously recorded here — "the Siigo sandbox has no document type
+  with an active DIAN resolution" — was **false** and is corrected above: 74
+  electronic FV types and 19 electronic NC types do exist in the sandbox. The
+  real blocker is that it is unknown which of them belongs to this account.
 - `consultationitem` vs `invoicerow` mapping and the dosage / fractional
   quantity rules need production data to validate.
 - Provet `/item/` catalogue endpoint returns 403 with the current integration

@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   provetToSiigoInvoice,
   MissingEmissionSettingError,
@@ -38,10 +38,35 @@ const opts = (
 const map = (i: number, o: ProvetToSiigoOptions = opts()) =>
   provetToSiigoInvoice(mockConsultations[i], mockClients[i], mockPatients[i], o);
 
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+/**
+ * Regression guard for the timezone bug that made the suite fail nightly
+ * between ~19:00 and midnight COT. The clock is frozen instead of compared
+ * against a live `new Date()`: an expected value derived from the same call
+ * the production code makes would agree with itself in any timezone and prove
+ * nothing.
+ */
+describe("provetToSiigoInvoice — invoice date at the Colombia day boundary", () => {
+  it("dates the invoice on the Colombia day, not the UTC day, at 20:43 COT", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-08T01:43:00.000Z")); // 2026-09-07 20:43 COT
+    expect(map(0).date).toBe("2026-09-07");
+  });
+
+  it("agrees with UTC when both sides fall on the same calendar day", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-07T14:00:00.000Z")); // 2026-09-07 09:00 COT
+    expect(map(0).date).toBe("2026-09-07");
+  });
+});
+
 describe("provetToSiigoInvoice", () => {
   it("transforms CON-001 via dynamic mapping (Zod round-trip)", () => {
     const result = map(0);
-    expect(result.date).toBe(new Date().toISOString().slice(0, 10));
+    expect(result.date).toBe(new Intl.DateTimeFormat("en-CA", { timeZone: "America/Bogota" }).format(new Date()));
     expect(result.seller).toBe(62);
     expect(result.customer.identification).toBe("1234567890");
     expect(result.customer.id_type).toBe("13");

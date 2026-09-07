@@ -70,7 +70,16 @@ describe("formatCOP", () => {
 
 describe("formatDate", () => {
   it("formats an ISO date as YYYY-MM-DD (es-CO)", () => {
-    expect(formatDate(new Date("2026-08-15T08:00:00.000Z"))).toMatch(/2026-08-15/);
+    expect(formatDate(new Date("2026-08-15T08:00:00.000Z"))).toBe("2026-08-15");
+  });
+
+  it("renders the Colombia day, not the UTC day, for an evening consultation", () => {
+    // 21:00 COT on the 14th is already the 15th in UTC.
+    expect(formatDate(new Date("2026-08-15T02:00:00.000Z"))).toBe("2026-08-14");
+  });
+
+  it("renders midnight COT as the day that just started", () => {
+    expect(formatDate(new Date("2026-08-15T05:00:00.000Z"))).toBe("2026-08-15");
   });
 });
 
