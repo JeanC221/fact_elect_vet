@@ -44,12 +44,18 @@ const basePayload = {
 describe("siigoInvoiceResponseSchema — stamp flattening", () => {
   /**
    * UNVERIFIED SHAPE. No populated `stamp` with a CUFE has ever been observed
-   * on this project: every sandbox document type is
-   * `electronic_type: "NoElectronic"`, so `stamp.send: true` is refused with
-   * `{"Code":"document_settings", ..., "Params":["stamp.send"]}`. The fixture
-   * below follows Siigo's documentation, not a captured response. Re-check it
-   * against a real stamped document once the clinic's production credentials
-   * and documentTypeId 60345 are available.
+   * on this project: `stamp.send: true` was refused with
+   * `{"Code":"document_settings", ..., "Params":["stamp.send"]}`.
+   *
+   * CORRECTION (2026-09-07): this comment used to attribute that refusal to
+   * every sandbox document type being `electronic_type: "NoElectronic"`. That
+   * was false — a real `GET /v1/document-types` returns 72 ElectronicInvoice
+   * types for FV and 19 ElectronicCreditNote for NC. What is unknown is which
+   * of them belongs to this account, since the sandbox is multi-tenant. See
+   * the comment on `siigoInvoiceRawResponseSchema` in `./siigo.ts`.
+   *
+   * The fixture below follows Siigo's documentation, not a captured response.
+   * Re-check it against a real stamped document.
    */
   it("flattens stamp.cufe and stamp.status to the root on an Accepted DIAN response", () => {
     const parsed = siigoInvoiceResponseSchema.parse({

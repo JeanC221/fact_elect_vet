@@ -38,8 +38,19 @@ export interface ConsultationQueueRow {
 export const formatCOP = (value: number): string =>
   `$${new Intl.NumberFormat("es-CO", { maximumFractionDigits: 0 }).format(value)}`;
 
-/** Deterministic short ISO date (YYYY-MM-DD), locale-independent. */
-export const formatDate = (value: Date): string => new Date(value).toISOString().slice(0, 10);
+/**
+ * Deterministic short date (YYYY-MM-DD) rendered in Colombia time (UTC-5, no
+ * DST year-round). `Date#toISOString()` returns UTC, which is already the next
+ * calendar day in Colombia from ~7pm COT onwards: a consultation created at
+ * 21:00 COT would be displayed to reception under tomorrow's date. Same bug,
+ * same day boundary, as the one already fixed in `provetToSiigo.ts`.
+ *
+ * Display only. Sorting and filtering operate on the underlying `Date`
+ * (`tableSort.ts` compares `getTime()`; `filterInvoiceHistory` never reads a
+ * date), so shifting the rendered day does not move any row.
+ */
+export const formatDate = (value: Date): string =>
+  new Intl.DateTimeFormat("en-CA", { timeZone: "America/Bogota" }).format(new Date(value));
 
 /** Active mapped payment option for the Quick-Edit drawer dropdown. */
 export interface PaymentOption {

@@ -101,8 +101,6 @@ export const siigoCreditNoteSchema = z
     },
   );
 
-export type SiigoCreditNoteItem = z.infer<typeof siigoCreditNoteItemSchema>;
-export type SiigoCreditNotePayment = z.infer<typeof siigoCreditNotePaymentSchema>;
 export type SiigoCreditNotePayload = z.infer<typeof siigoCreditNoteSchema>;
 
 /** Credit-note emission response from Siigo (DIAN Accepted). */

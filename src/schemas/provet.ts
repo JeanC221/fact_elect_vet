@@ -118,15 +118,7 @@ export const consultationSchema = z
     path: ["total"],
   });
 
-export const consultationWebhookSchema = z.object({
-  event_id: z.literal(45),
-  consultation_id: z.string().trim().min(1),
-  timestamp: z.coerce.date(),
-});
-
 export type Identification = z.infer<typeof identificationSchema>;
 export type Client = z.infer<typeof clientSchema>;
 export type Patient = z.infer<typeof patientSchema>;
-export type ConsultationItem = z.infer<typeof consultationItemSchema>;
 export type Consultation = z.infer<typeof consultationSchema>;
-export type ConsultationWebhook = z.infer<typeof consultationWebhookSchema>;

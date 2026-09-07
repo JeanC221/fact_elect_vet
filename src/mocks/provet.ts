@@ -1,7 +1,6 @@
 import type {
   Client,
   Consultation,
-  ConsultationWebhook,
   Patient,
 } from "@/schemas/provet";
 
@@ -143,9 +142,3 @@ export const mockConsultations: Consultation[] = [
     updated_at: new Date("2026-08-17T11:45:00.000Z"),
   },
 ];
-
-export const mockConsultationWebhook: ConsultationWebhook = {
-  event_id: 45,
-  consultation_id: "CON-001",
-  timestamp: new Date("2026-08-15T09:30:00.000Z"),
-};
