@@ -12,3 +12,8 @@ tsconfig.tsbuildinfo
 *.tsbuildinfo
 
 .DS_Store
+
+# Local Siigo API capture dumps (scripts/capture-siigo-response.ts) — contain
+# real production catalogue data (products, payment types, document types)
+# and must never be committed.
+/capturas/
