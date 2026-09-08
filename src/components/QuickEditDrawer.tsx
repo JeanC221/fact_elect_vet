@@ -10,6 +10,8 @@ import {
   type QuickEditFormValues,
 } from "@/mappers/consultationQueue";
 import { toCents } from "@/schemas/provet";
+import type { EmissionGate } from "@/mappers/emissionModeState";
+import { EmissionModeBanner } from "./EmissionModeBanner";
 import { ReconciliationBar } from "./ReconciliationBar";
 
 interface QuickEditDrawerProps {
@@ -23,6 +25,10 @@ interface QuickEditDrawerProps {
   documentTypeId?: number;
   /** Configured Siigo seller id — required to emit, no hardcoded fallback. */
   sellerId?: number;
+  /** Emission-mode gate. Blocks the button when the mode could not be confirmed. */
+  gate: EmissionGate;
+  isRetryingMode?: boolean;
+  onRetryMode?: () => void;
   onClose: () => void;
   onSubmit: (values: QuickEditFormValues) => void;
 }
@@ -39,7 +45,7 @@ function initialValues(d: QuickEditDetail | null): QuickEditFormValues {
   return { name: d?.clientName ?? "", identificationType: d?.identificationType ?? "CC", identificationNumber: d?.identificationNumber ?? "", email: d?.email ?? "", phone: d?.phone ?? "", paymentMethod: d?.paymentMethod ?? "", paidAmount: d?.total ?? 0 };
 }
 
-export function QuickEditDrawer({ detail, isSubmitting, errorMessage, errorDetail, fallbackItemCode, documentTypeId, sellerId, onClose, onSubmit }: QuickEditDrawerProps) {
+export function QuickEditDrawer({ detail, isSubmitting, errorMessage, errorDetail, fallbackItemCode, documentTypeId, sellerId, gate, isRetryingMode = false, onRetryMode, onClose, onSubmit }: QuickEditDrawerProps) {
   const [values, setValues] = useState<QuickEditFormValues>(() => initialValues(detail));
   const [isEditingAmount, setIsEditingAmount] = useState(false);
   useEffect(() => { setValues(initialValues(detail)); setIsEditingAmount(false); }, [detail?.id]);
@@ -50,7 +56,9 @@ export function QuickEditDrawer({ detail, isSubmitting, errorMessage, errorDetai
   const balanced = toCents(detail?.total ?? 0) - toCents(values.paidAmount) === 0;
   const missingFallback = detail !== null && detail.items.length === 0 && !fallbackItemCode;
   const missingSiigoSettings = !documentTypeId || !sellerId;
-  const canSubmit = parsed.success && balanced && !isSubmitting && detail !== null && values.paymentMethod !== "" && !missingFallback && !missingSiigoSettings;
+  // gate.canEmit is part of canSubmit so the button is genuinely disabled,
+  // not merely refused after the click as the old modeNotReady check was.
+  const canSubmit = parsed.success && balanced && !isSubmitting && detail !== null && values.paymentMethod !== "" && !missingFallback && !missingSiigoSettings && gate.canEmit;
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
@@ -152,6 +160,7 @@ export function QuickEditDrawer({ detail, isSubmitting, errorMessage, errorDetai
               <span>Falta configurar {!documentTypeId && !sellerId ? "el tipo de documento y el vendedor" : !documentTypeId ? "el tipo de documento" : "el vendedor"} de Siigo en Ajustes → Mapeo de Catálogo antes de poder emitir.</span>
             </div>
           )}
+          <EmissionModeBanner gate={gate} isRetrying={isRetryingMode} onRetry={onRetryMode} />
           {errorMessage && <div className="flex items-start gap-2 rounded-md border border-status-rejected-border bg-status-rejected-bg px-2 py-2 text-xs text-status-rejected-text"><AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" /><span>{errorDetail ?? errorMessage}</span></div>}
         </div>
         <footer className="border-t border-grid-line p-3">
