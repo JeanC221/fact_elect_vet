@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, beforeAll } from "vitest";
 import { POST } from "./route";
 
 vi.mock("@/services/siigoAuth", async () => {
@@ -16,6 +16,31 @@ vi.mock("@/services/siigoCatalogs", () => ({
 import { getSiigoAccessToken, SiigoAuthError } from "@/services/siigoAuth";
 import { fetchPaymentTypes, fetchProducts, fetchAllDocumentTypes, fetchSellers } from "@/services/siigoCatalogs";
 import { SiigoApiError } from "@/services/siigoApi";
+
+import {
+  TEST_JWT_SECRET,
+  ADMIN_SESSION,
+  issueSessionCookie,
+  requestWithCookie,
+} from "@/test/sessionRequest";
+
+/**
+ * D0 added a session guard to every route handler, so these tests now send a
+ * genuinely signed cookie. An admin session is used because it satisfies both
+ * `requireSession` and `requireAdmin`; the role boundary itself is covered by
+ * `middleware.test.ts` and, for the emission-mode asymmetry, by the dedicated
+ * employee cases in `src/app/api/emission-mode/route.test.ts`.
+ */
+let sessionCookie: string;
+beforeAll(async () => {
+  process.env.JWT_SECRET = TEST_JWT_SECRET;
+  sessionCookie = await issueSessionCookie(ADMIN_SESSION);
+});
+
+/** Authenticated request builder — same signature as the plain `new Request`. */
+function authed(url: string, init: RequestInit = {}) {
+  return requestWithCookie(url, sessionCookie, init);
+}
 
 const validCreds = {
   partnerId: "VETPARTNER01", username: "api-user@vet.com", accessKey: "secret-access-key",
@@ -39,7 +64,7 @@ describe("POST /api/catalogs/sync", () => {
     vi.mocked(fetchProducts).mockResolvedValue(prods);
     vi.mocked(fetchAllDocumentTypes).mockResolvedValue(docTypes);
     vi.mocked(fetchSellers).mockResolvedValue(sellers);
-    const req = new Request("http://localhost/api/catalogs/sync", {
+    const req = authed("http://localhost/api/catalogs/sync", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(validCreds),
     });
     const res = await POST(req);
@@ -53,7 +78,7 @@ describe("POST /api/catalogs/sync", () => {
 
   it("returns 502 on SiigoAuthError", async () => {
     vi.mocked(getSiigoAccessToken).mockRejectedValue(new SiigoAuthError("auth_failed", "Credenciales invalidas"));
-    const req = new Request("http://localhost/api/catalogs/sync", {
+    const req = authed("http://localhost/api/catalogs/sync", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(validCreds),
     });
     const res = await POST(req);
@@ -63,7 +88,7 @@ describe("POST /api/catalogs/sync", () => {
   it("returns 502 on SiigoApiError from catalog fetch", async () => {
     vi.mocked(fetchPaymentTypes).mockRejectedValue(new SiigoApiError("service_unavailable", "Network failure", 503));
     vi.mocked(fetchProducts).mockResolvedValue([]);
-    const req = new Request("http://localhost/api/catalogs/sync", {
+    const req = authed("http://localhost/api/catalogs/sync", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(validCreds),
     });
     const res = await POST(req);
@@ -73,7 +98,7 @@ describe("POST /api/catalogs/sync", () => {
   it("falls back to server env vars when the body is empty (no browser-stored credentials)", async () => {
     vi.mocked(fetchPaymentTypes).mockResolvedValue([]);
     vi.mocked(fetchProducts).mockResolvedValue([]);
-    const req = new Request("http://localhost/api/catalogs/sync", {
+    const req = authed("http://localhost/api/catalogs/sync", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
     });
     const res = await POST(req);
@@ -84,7 +109,7 @@ describe("POST /api/catalogs/sync", () => {
   it("falls back to server env vars when the request has no body at all", async () => {
     vi.mocked(fetchPaymentTypes).mockResolvedValue([]);
     vi.mocked(fetchProducts).mockResolvedValue([]);
-    const req = new Request("http://localhost/api/catalogs/sync", { method: "POST" });
+    const req = authed("http://localhost/api/catalogs/sync", { method: "POST" });
     const res = await POST(req);
     expect(res.status).toBe(200);
     expect(getSiigoAccessToken).toHaveBeenCalledWith(undefined);
@@ -92,7 +117,7 @@ describe("POST /api/catalogs/sync", () => {
 
   it("returns 400 for Zod-invalid credentials", async () => {
     const bad = { ...validCreds, username: "" };
-    const req = new Request("http://localhost/api/catalogs/sync", {
+    const req = authed("http://localhost/api/catalogs/sync", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(bad),
     });
     const res = await POST(req);
@@ -111,7 +136,7 @@ describe("POST /api/catalogs/sync", () => {
     vi.mocked(fetchProducts).mockResolvedValue([
       { id: "PROD-001", name: "Consulta" } as unknown as Awaited<ReturnType<typeof fetchProducts>>[number],
     ]);
-    const req = new Request("http://localhost/api/catalogs/sync", {
+    const req = authed("http://localhost/api/catalogs/sync", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(validCreds),
     });
     const res = await POST(req);
@@ -125,7 +150,7 @@ describe("POST /api/catalogs/sync", () => {
     vi.mocked(fetchPaymentTypes).mockResolvedValue([
       { id: -1, name: "", type: "" } as unknown as Awaited<ReturnType<typeof fetchPaymentTypes>>[number],
     ]);
-    const req = new Request("http://localhost/api/catalogs/sync", {
+    const req = authed("http://localhost/api/catalogs/sync", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(validCreds),
     });
     const res = await POST(req);

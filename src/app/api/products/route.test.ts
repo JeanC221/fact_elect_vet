@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, beforeAll } from "vitest";
 import { GET } from "./route";
 
 vi.mock("@/services/siigoAuth", async () => {
@@ -7,6 +7,31 @@ vi.mock("@/services/siigoAuth", async () => {
 });
 
 import { getSiigoAccessToken, SiigoAuthError } from "@/services/siigoAuth";
+
+import {
+  TEST_JWT_SECRET,
+  ADMIN_SESSION,
+  issueSessionCookie,
+  requestWithCookie,
+} from "@/test/sessionRequest";
+
+/**
+ * D0 added a session guard to every route handler, so these tests now send a
+ * genuinely signed cookie. An admin session is used because it satisfies both
+ * `requireSession` and `requireAdmin`; the role boundary itself is covered by
+ * `middleware.test.ts` and, for the emission-mode asymmetry, by the dedicated
+ * employee cases in `src/app/api/emission-mode/route.test.ts`.
+ */
+let sessionCookie: string;
+beforeAll(async () => {
+  process.env.JWT_SECRET = TEST_JWT_SECRET;
+  sessionCookie = await issueSessionCookie(ADMIN_SESSION);
+});
+
+/** Authenticated request builder — same signature as the plain `new Request`. */
+function authed(url: string, init: RequestInit = {}) {
+  return requestWithCookie(url, sessionCookie, init);
+}
 
 const sampleProducts = [
   { id: "5bb7d6d6-9c74-4b5f-9d0e-7f9c1a2b3c4d", code: "CONS-001", name: "Consulta general" },
@@ -21,7 +46,7 @@ describe("GET /api/products", () => {
 
   it("fails loudly (502) when Siigo auth is missing, instead of silently returning mock data", async () => {
     vi.mocked(getSiigoAccessToken).mockRejectedValue(new SiigoAuthError("missing_credentials", "no env"));
-    const res = await GET();
+    const res = await GET(authed("http://localhost/api/products"));
     expect(res.status).toBe(502);
     const json = await res.json();
     expect(json.error.code).toBe("missing_credentials");
@@ -29,7 +54,7 @@ describe("GET /api/products", () => {
 
   it("fails loudly (502, service_unavailable) on network failure, instead of silently returning mock data", async () => {
     global.fetch = vi.fn().mockRejectedValue(new Error("network down")) as unknown as typeof fetch;
-    const res = await GET();
+    const res = await GET(authed("http://localhost/api/products"));
     const json = await res.json();
     expect(res.status).toBe(502);
     expect(json.error.code).toBe("service_unavailable");
@@ -40,7 +65,7 @@ describe("GET /api/products", () => {
       ok: true,
       json: async () => ({ results: sampleProducts, pagination: { page: 1, page_size: 25, total_results: 2 } }),
     } as Response) as unknown as typeof fetch;
-    const res = await GET();
+    const res = await GET(authed("http://localhost/api/products"));
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(Array.isArray(json)).toBe(true);
@@ -53,7 +78,7 @@ describe("GET /api/products", () => {
       ok: true,
       json: async () => ({ results: [{ ...sampleProducts[0], account_group: { id: 1253, name: "Servicios" }, type: "Service" }] }),
     } as Response) as unknown as typeof fetch;
-    const res = await GET();
+    const res = await GET(authed("http://localhost/api/products"));
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json[0].type).toBe("Service");
@@ -65,7 +90,7 @@ describe("GET /api/products", () => {
       ok: true,
       json: async () => sampleProducts,
     } as Response) as unknown as typeof fetch;
-    const res = await GET();
+    const res = await GET(authed("http://localhost/api/products"));
     const json = await res.json();
     expect(res.status).toBe(502);
     expect(json.error.code).toBe("invalid_payload");
@@ -76,7 +101,7 @@ describe("GET /api/products", () => {
       ok: true,
       json: async () => ({ results: [{ id: 12345, name: "" }] }),
     } as Response) as unknown as typeof fetch;
-    const res = await GET();
+    const res = await GET(authed("http://localhost/api/products"));
     const json = await res.json();
     expect(res.status).toBe(502);
     expect(json.error.code).toBe("invalid_payload");
@@ -88,7 +113,7 @@ describe("GET /api/products", () => {
       status: 401,
       json: async () => ({ error: { code: "auth_failed", message: "Unauthorized" } }),
     } as Response) as unknown as typeof fetch;
-    const res = await GET();
+    const res = await GET(authed("http://localhost/api/products"));
     expect(res.status).toBe(401);
     const json = await res.json();
     expect(json.error.code).toBe("default");
@@ -97,7 +122,7 @@ describe("GET /api/products", () => {
   it("calls the Siigo products endpoint with the Partner-Id and Bearer headers", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ results: [] }) } as Response);
     global.fetch = fetchMock as unknown as typeof fetch;
-    await GET();
+    await GET(authed("http://localhost/api/products"));
     const [url, init] = fetchMock.mock.calls[0];
     expect(String(url)).toContain("/v1/products");
     expect(init.headers["Partner-Id"]).toBe("PARTNER-ID");

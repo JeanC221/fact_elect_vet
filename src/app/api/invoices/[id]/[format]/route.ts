@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 import { z } from "zod";
 import { getSiigoAccessToken, SiigoAuthError } from "@/services/siigoAuth";
 import { SiigoApiError, fetchInvoicePdf, fetchInvoiceXml } from "@/services/siigoApi";
+import { requireSession } from "@/services/routeGuard";
 
 export const dynamic = "force-dynamic";
 
@@ -39,9 +41,11 @@ const invoiceIdSchema = z
 const formatSchema = z.enum(["pdf", "xml"]);
 
 export async function GET(
-  _req: Request,
+  req: NextRequest,
   { params }: { params: { id: string; format: string } },
 ): Promise<NextResponse> {
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
   // Validate the id FIRST: an invalid id must never reach the Siigo URL or the
   // Content-Disposition header, regardless of whether the format is also bad.
   const parsedId = invoiceIdSchema.safeParse(params.id);

@@ -1,14 +1,43 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, beforeAll } from "vitest";
+import type { NextRequest } from "next/server";
 
 const { queryMock } = vi.hoisted(() => ({ queryMock: vi.fn() }));
 vi.mock("@/services/db", () => ({ getPool: () => ({ query: queryMock }) }));
 
 import { GET, DELETE } from "./route";
 
+import {
+  TEST_JWT_SECRET,
+  ADMIN_SESSION,
+  issueSessionCookie,
+  requestWithCookie,
+  EMPLOYEE_SESSION,
+  sessionRequest,
+  anonymousRequest,
+} from "@/test/sessionRequest";
+
+/**
+ * D0 added a session guard to every route handler, so these tests now send a
+ * genuinely signed cookie. An admin session is used because it satisfies both
+ * `requireSession` and `requireAdmin`; the role boundary itself is covered by
+ * `middleware.test.ts` and, for the emission-mode asymmetry, by the dedicated
+ * employee cases in `src/app/api/emission-mode/route.test.ts`.
+ */
+let sessionCookie: string;
+beforeAll(async () => {
+  process.env.JWT_SECRET = TEST_JWT_SECRET;
+  sessionCookie = await issueSessionCookie(ADMIN_SESSION);
+});
+
+/** Authenticated request builder — same signature as the plain `new Request`. */
+function authed(url: string, init: RequestInit = {}) {
+  return requestWithCookie(url, sessionCookie, init);
+}
+
 const CONSULTATION_ID = "provet-consult-777";
 
-function deleteRequest(query: string): Request {
-  return new Request(`http://localhost/api/invoice-claims${query}`, { method: "DELETE" });
+function deleteRequest(query: string): NextRequest {
+  return authed(`http://localhost/api/invoice-claims${query}`, { method: "DELETE" });
 }
 
 beforeEach(() => {
@@ -25,7 +54,7 @@ describe("GET /api/invoice-claims", () => {
       ],
     });
 
-    const res = await GET();
+    const res = await GET(authed("http://localhost/api/invoice-claims"));
     const json = await res.json();
 
     expect(res.status).toBe(200);
@@ -36,7 +65,7 @@ describe("GET /api/invoice-claims", () => {
 
   it("returns 500 rather than an empty list when the database is unreachable — an empty list would read as 'nothing is blocked'", async () => {
     queryMock.mockRejectedValue(new Error("connection terminated"));
-    const res = await GET();
+    const res = await GET(authed("http://localhost/api/invoice-claims"));
     expect(res.status).toBe(500);
     expect((await res.json()).error.code).toBe("default");
   });
@@ -111,5 +140,32 @@ describe("DELETE /api/invoice-claims", () => {
 
     expect(res.status).toBe(500);
     expect((await res.json()).error.code).toBe("default");
+  });
+});
+
+/**
+ * Admin-only on EVERY method, asserted from the handler. Releasing a claim
+ * removes the only server-side guard against stamping a second DIAN document
+ * for the same consultation, so the method exception granted to
+ * `GET /api/emission-mode` must never leak here.
+ */
+describe("/api/invoice-claims — admin-only on both methods, enforced by the handler", () => {
+  it("refuses an employee GET with 403", async () => {
+    const res = await GET(await sessionRequest("/api/invoice-claims", EMPLOYEE_SESSION));
+    expect(res.status).toBe(403);
+  });
+
+  it("refuses an employee DELETE with 403 and never reaches the claim service", async () => {
+    queryMock.mockReset();
+    const res = await DELETE(
+      await sessionRequest("/api/invoice-claims?consultationId=c-1", EMPLOYEE_SESSION, { method: "DELETE" }),
+    );
+    expect(res.status).toBe(403);
+    expect(queryMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses an anonymous DELETE with 401", async () => {
+    const res = await DELETE(anonymousRequest("/api/invoice-claims?consultationId=c-1", { method: "DELETE" }));
+    expect(res.status).toBe(401);
   });
 });

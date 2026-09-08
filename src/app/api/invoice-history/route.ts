@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 import { z } from "zod";
 import { getPool } from "@/services/db";
 import { invoiceHistoryEntrySchema, type InvoiceHistoryEntry } from "@/mappers/invoiceHistory";
+import { requireSession } from "@/services/routeGuard";
 
 export const dynamic = "force-dynamic";
 
@@ -41,7 +43,9 @@ function rowToEntry(row: InvoiceRow): InvoiceHistoryEntry {
   };
 }
 
-export async function GET(): Promise<NextResponse> {
+export async function GET(req: NextRequest): Promise<NextResponse> {
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
   try {
     const pool = getPool();
     // created_at ASC preserves original insertion order — matches the old
@@ -58,7 +62,9 @@ export async function GET(): Promise<NextResponse> {
   }
 }
 
-export async function PUT(req: Request): Promise<NextResponse> {
+export async function PUT(req: NextRequest): Promise<NextResponse> {
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
   let parsed;
   try {
     const body = await req.json();

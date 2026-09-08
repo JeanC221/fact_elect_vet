@@ -58,8 +58,46 @@ describe("submitInvoice", () => {
     expect(headersAt(0)["Idempotency-Key"]).not.toBe(
       headersAt(1)["Idempotency-Key"],
     );
-    await submitInvoice(payload, "t", "PARTNER1", "RETRY-KEY-99");
-    expect(headersAt(2)["Idempotency-Key"]).toBe("RETRY-KEY-99");
+    await submitInvoice(payload, "t", "PARTNER1", "RETRYKEY99");
+    expect(headersAt(2)["Idempotency-Key"]).toBe("RETRYKEY99");
+  });
+
+  /**
+   * Siigo documents the key as "alfanumérico, sin caracteres especiales, sin
+   * espacios en blanco" on the Idempotencia page, and repeats "sin caracteres
+   * especiales" in the `invalid_idempotency-key` error. A hyphen is a special
+   * character under both. This is not a theoretical caller: both
+   * `POST /api/invoices` and `POST /api/credit-notes` read the key from the
+   * client-supplied `X-Idempotency-Key` header, so a browser sending a UUID
+   * fragment reached Siigo and was rejected — and a Siigo 5xx consumes the key
+   * permanently, so the retry then needed a brand-new one. Fail here, locally,
+   * instead of burning a key against the DIAN.
+   */
+  it("rejects an Idempotency-Key containing a hyphen before any network call", async () => {
+    fetchMock.mockResolvedValue(fakeRes(okRawBody));
+    await expect(submitInvoice(payload, "t", "PARTNER1", "RETRY-KEY-99")).rejects.toThrow();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects keys with underscores, spaces or dots for the same reason", async () => {
+    fetchMock.mockResolvedValue(fakeRes(okRawBody));
+    for (const bad of ["retry_key_99", "retry key 99", "retry.key.99", "clave-ñ"]) {
+      await expect(submitInvoice(payload, "t", "PARTNER1", bad)).rejects.toThrow();
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("still accepts a purely alphanumeric key of exactly 30 chars", async () => {
+    fetchMock.mockResolvedValue(fakeRes(okRawBody));
+    const key = "a".repeat(30);
+    await submitInvoice(payload, "t", "PARTNER1", key);
+    expect(headersAt(0)["Idempotency-Key"]).toBe(key);
+  });
+
+  it("generateIdempotencyKey never emits a hyphen, whatever randomUUID returns", () => {
+    for (let i = 0; i < 200; i++) {
+      expect(generateIdempotencyKey()).toMatch(/^[A-Za-z0-9]{1,30}$/);
+    }
   });
 
   it("never serializes a root `total` key, even if a rogue caller injects one", async () => {
@@ -179,10 +217,10 @@ describe("submitCreditNote", () => {
 
   it("reuses a provided Idempotency-Key across retries (no duplicate credit notes)", async () => {
     fetchMock.mockResolvedValue(fakeRes(cnOkBody));
-    await submitCreditNote(cnPayload, "t", "PARTNER1", "NC-RETRY-1");
-    await submitCreditNote(cnPayload, "t", "PARTNER1", "NC-RETRY-1");
-    expect(headersAt(0)["Idempotency-Key"]).toBe("NC-RETRY-1");
-    expect(headersAt(1)["Idempotency-Key"]).toBe("NC-RETRY-1");
+    await submitCreditNote(cnPayload, "t", "PARTNER1", "NCRETRY1");
+    await submitCreditNote(cnPayload, "t", "PARTNER1", "NCRETRY1");
+    expect(headersAt(0)["Idempotency-Key"]).toBe("NCRETRY1");
+    expect(headersAt(1)["Idempotency-Key"]).toBe("NCRETRY1");
   });
 
   it("throws SiigoApiError with the parsed Siigo error code on 4xx", async () => {

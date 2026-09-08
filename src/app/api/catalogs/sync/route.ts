@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 import { z } from "zod";
 import { credentialsSchema } from "@/mappers/credentials";
 import { getSiigoAccessToken, SiigoAuthError } from "@/services/siigoAuth";
@@ -10,6 +11,7 @@ import {
   siigoDocumentTypeCatalogEntrySchema,
   siigoSellerSchema,
 } from "@/schemas/siigo";
+import { requireSession } from "@/services/routeGuard";
 
 export const dynamic = "force-dynamic";
 
@@ -29,7 +31,9 @@ const syncResponseSchema = z.object({
   sellers: z.array(siigoSellerSchema),
 });
 
-export async function POST(req: Request): Promise<NextResponse> {
+export async function POST(req: NextRequest): Promise<NextResponse> {
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
   try {
     const rawBody = await req.json().catch(() => ({}));
     const hasBodyCreds = rawBody && typeof rawBody === "object" && Object.keys(rawBody).length > 0;

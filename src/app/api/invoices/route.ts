@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 import { z } from "zod";
 import { siigoInvoicePayloadSchema, type SiigoInvoiceResponse } from "@/schemas/siigo";
 import { getSiigoAccessToken, SiigoAuthError } from "@/services/siigoAuth";
@@ -17,6 +18,7 @@ import {
   markClaimUnknown,
   releaseInvoiceClaim,
 } from "@/services/invoiceClaims";
+import { requireSession } from "@/services/routeGuard";
 
 export const dynamic = "force-dynamic";
 
@@ -54,7 +56,9 @@ function reconcileDelayMs(): number {
 }
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-export async function POST(req: Request): Promise<NextResponse> {
+export async function POST(req: NextRequest): Promise<NextResponse> {
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
   let consultationId: string | null = null;
   let claimHeld = false;
   try {

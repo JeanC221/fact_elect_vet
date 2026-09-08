@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 import { getPool } from "@/services/db";
 import { credentialsConfigSchema, type CredentialsConfig } from "@/mappers/credentials";
+import { requireAdmin, requireSession } from "@/services/routeGuard";
 
 export const dynamic = "force-dynamic";
 
@@ -48,7 +50,9 @@ function rowToConfig(row: CredentialsConfigRow): CredentialsConfig {
  * Contrast with GET /api/catalog-mapping, whose fallback was reviewed in the
  * same pass and deliberately KEPT — see the note in that file.
  */
-export async function GET(): Promise<NextResponse> {
+export async function GET(req: NextRequest): Promise<NextResponse> {
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
   let result;
   try {
     result = await getPool().query<CredentialsConfigRow>(
@@ -87,7 +91,9 @@ export async function GET(): Promise<NextResponse> {
   return NextResponse.json(parsed.data);
 }
 
-export async function PUT(req: Request): Promise<NextResponse> {
+export async function PUT(req: NextRequest): Promise<NextResponse> {
+  const guard = await requireAdmin(req);
+  if (!guard.ok) return guard.response;
   try {
     const body = await req.json();
     const parsed = credentialsConfigSchema.safeParse(body);

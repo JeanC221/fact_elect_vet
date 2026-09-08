@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, beforeAll } from "vitest";
 import { GET } from "./route";
 
 vi.mock("@/services/siigoAuth", async () => {
@@ -13,8 +13,35 @@ vi.mock("@/services/siigoApi", async () => {
 import { getSiigoAccessToken, SiigoAuthError } from "@/services/siigoAuth";
 import { fetchInvoicePdf, fetchInvoiceXml, SiigoApiError } from "@/services/siigoApi";
 
-const req = new Request("http://localhost/api/invoices/x/pdf");
-const call = (id: string, format: string) => GET(req, { params: { id, format } });
+import {
+  TEST_JWT_SECRET,
+  ADMIN_SESSION,
+  issueSessionCookie,
+  requestWithCookie,
+} from "@/test/sessionRequest";
+
+/**
+ * D0 added a session guard to every route handler, so these tests now send a
+ * genuinely signed cookie. An admin session is used because it satisfies both
+ * `requireSession` and `requireAdmin`; the role boundary itself is covered by
+ * `middleware.test.ts` and, for the emission-mode asymmetry, by the dedicated
+ * employee cases in `src/app/api/emission-mode/route.test.ts`.
+ */
+let sessionCookie: string;
+beforeAll(async () => {
+  process.env.JWT_SECRET = TEST_JWT_SECRET;
+  sessionCookie = await issueSessionCookie(ADMIN_SESSION);
+});
+
+/** Authenticated request builder — same signature as the plain `new Request`. */
+function authed(url: string, init: RequestInit = {}) {
+  return requestWithCookie(url, sessionCookie, init);
+}
+
+// Built per call, not once at module scope: the session cookie is issued in
+// `beforeAll`, so a module-level request would carry an empty cookie.
+const call = (id: string, format: string) =>
+  GET(authed("http://localhost/api/invoices/x/pdf"), { params: { id, format } });
 
 describe("GET /api/invoices/[id]/[format] — route param validation", () => {
   beforeEach(() => {

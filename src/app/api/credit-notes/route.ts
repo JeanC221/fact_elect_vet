@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 import { z } from "zod";
 import { siigoCreditNoteSchema } from "@/mappers/creditNote";
 import { getSiigoAccessToken, SiigoAuthError } from "@/services/siigoAuth";
 import { generateIdempotencyKey, SiigoApiError, submitCreditNote } from "@/services/siigoApi";
 import { markClaimAnnulled } from "@/services/invoiceClaims";
+import { requireSession } from "@/services/routeGuard";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +20,9 @@ const creditNoteRequestSchema = z.object({
   payload: siigoCreditNoteSchema,
 });
 
-export async function POST(req: Request): Promise<NextResponse> {
+export async function POST(req: NextRequest): Promise<NextResponse> {
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
   try {
     const body = await req.json();
     const { consultationId, payload } = creditNoteRequestSchema.parse(body);

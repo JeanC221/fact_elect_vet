@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 import { z } from "zod";
 import { listOpenClaims, releaseClaimAsAdmin } from "@/services/invoiceClaims";
+import { requireAdmin } from "@/services/routeGuard";
 
 export const dynamic = "force-dynamic";
 
@@ -25,7 +27,9 @@ const consultationIdSchema = z
   .max(100, "consultationId demasiado largo.");
 
 /** GET — list every claim an admin might need to act on (anything not cleanly emitted). */
-export async function GET(): Promise<NextResponse> {
+export async function GET(req: NextRequest): Promise<NextResponse> {
+  const guard = await requireAdmin(req);
+  if (!guard.ok) return guard.response;
   try {
     const claims = await listOpenClaims();
     return NextResponse.json({ claims, count: claims.length });
@@ -36,7 +40,9 @@ export async function GET(): Promise<NextResponse> {
 }
 
 /** DELETE ?consultationId=… — release a stuck claim so the consultation can be billed again. */
-export async function DELETE(req: Request): Promise<NextResponse> {
+export async function DELETE(req: NextRequest): Promise<NextResponse> {
+  const guard = await requireAdmin(req);
+  if (!guard.ok) return guard.response;
   const raw = new URL(req.url).searchParams.get("consultationId");
   const parsed = consultationIdSchema.safeParse(raw ?? "");
   if (!parsed.success) {

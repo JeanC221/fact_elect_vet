@@ -24,7 +24,19 @@ export function generateIdempotencyKey(): string {
 
 /** Runtime validation for mandatory Siigo headers (defense-in-depth for non-UI callers). */
 const partnerIdHeaderSchema = z.string().trim().min(3, "Partner-Id requiere 3-100 caracteres").max(100).regex(/^[A-Za-z0-9-]+$/, "Partner-Id inválido");
-const idempotencyKeyHeaderSchema = z.string().trim().min(1, "Idempotency-Key requerido").max(30, "Idempotency-Key max 30 caracteres").regex(/^[A-Za-z0-9-]+$/, "Idempotency-Key inválido");
+/**
+ * Strictly alphanumeric. Siigo's Idempotencia page requires "alfanumérico, sin
+ * caracteres especiales, sin espacios en blanco, máximo 30 caracteres", and the
+ * `invalid_idempotency-key` error repeats "sin caracteres especiales" (while
+ * stating 32 — the docs contradict each other on length, so 30 is kept as the
+ * conservative bound). A hyphen is a special character under both readings.
+ *
+ * This matters because the key is not always generated here: `POST /api/invoices`
+ * and `POST /api/credit-notes` accept a client-supplied `X-Idempotency-Key`
+ * header. Rejecting it locally costs nothing; letting it reach Siigo burns the
+ * key, and a Siigo 5xx consumes it permanently.
+ */
+const idempotencyKeyHeaderSchema = z.string().trim().min(1, "Idempotency-Key requerido").max(30, "Idempotency-Key max 30 caracteres").regex(/^[A-Za-z0-9]+$/, "Idempotency-Key inválido: solo caracteres alfanuméricos, sin guiones ni espacios.");
 
 /** HTTP status → fallback error code when the body is not a standard Siigo error. */
 const STATUS_ERROR_CODES: Record<number, string> = {

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 import { getProvetAccessToken, ProvetAuthError } from "@/services/provetAuth";
 import {
   fetchConsultations,
@@ -12,6 +13,7 @@ import {
   ProvetApiError,
 } from "@/services/provetApi";
 import { buildQueueFromProvet } from "@/mappers/provetToQueue";
+import { requireSession } from "@/services/routeGuard";
 
 export const dynamic = "force-dynamic";
 
@@ -40,7 +42,9 @@ export const dynamic = "force-dynamic";
  * Cross-DEVICE coordination is deliberately not implemented — rationale in
  * useConsultationQueue.ts.
  */
-export async function GET(): Promise<NextResponse> {
+export async function GET(req: NextRequest): Promise<NextResponse> {
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
   try {
     const token = await getProvetAccessToken();
     const [consultations, clients, patients, invoices, phoneNumbers, consultationItems, invoiceRows] =

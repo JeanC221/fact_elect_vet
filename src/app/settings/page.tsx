@@ -51,7 +51,7 @@ export default async function SettingsPage() {
         {/*
           Admin-only rescue panel. Rendered here (and not on its own route)
           because it is a rare-use safety net, not a workflow screen. The
-          server-side guard is ADMIN_ONLY_PREFIXES in middleware.ts; this
+          server-side guard is ADMIN_ONLY_RULES in middleware.ts; this
           `isAdmin` check only avoids showing an employee a panel whose every
           request would 403.
         */}

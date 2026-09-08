@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 import { z } from "zod";
 import { siigoProductSchema } from "@/schemas/siigo";
 import { getSiigoAccessToken, SiigoAuthError } from "@/services/siigoAuth";
 import { SiigoApiError } from "@/services/siigoApi";
+import { requireSession } from "@/services/routeGuard";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +19,9 @@ const productsPageSchema = z.object({ results: z.array(siigoProductSchema) });
  * code against a mock product id would produce a mapping that fails only
  * later, at real emission time, with a confusing unrelated Siigo error.
  */
-export async function GET(): Promise<NextResponse> {
+export async function GET(req: NextRequest): Promise<NextResponse> {
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
   try {
     const { accessToken, partnerId } = await getSiigoAccessToken();
     const baseUrl = process.env.SIIGO_API_BASE_URL ?? "https://api.siigo.com";
