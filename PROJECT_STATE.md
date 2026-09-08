@@ -115,7 +115,7 @@ counts describe the suite as it stood on that date and are left untouched.
 | Gate | Command | Result |
 | --- | --- | --- |
 | Types | `npx tsc --noEmit` | clean |
-| Tests | `npx vitest run` | **569 passed (569)** across **40 files** — timezone-independent, verified under `America/Bogota`, `UTC`, `Asia/Tokyo` and `Pacific/Kiritimati` |
+| Tests | `npx vitest run` | **593 passed (593)** across **42 files** — timezone-independent, verified under `America/Bogota`, `UTC`, `Asia/Tokyo` and `Pacific/Kiritimati` |
 | Build | `npx next build` | clean (10/10 pages) — needs `DATABASE_URL` set, a placeholder is enough |
 | Deps | `npm audit` | **2 high**, both `next` (and its bundled `postcss`). No fix exists in 14.x. Was 7 before `vitest` 2.1.9 -> 4.1.11 |
 
@@ -563,6 +563,126 @@ this session touched no source file.
   table, password management or onboarding flow. **Not implemented — awaiting
   the owner's decision.**
 
+### Resolved — emission-mode gate session (2026-09-08)
+
+**Gates after this session:** `tsc --noEmit` clean · **593 passed (593)** across
+**42 files** (569 -> 593, +24, nothing deleted) · `next build` clean 10/10.
+
+- **D-0 (found while auditing, more serious than the finding this session was
+  scoped to). `GET /api/emission-mode` was unreachable by the employee role.**
+  `middleware.ts` matched `ADMIN_ONLY_PREFIXES` by path prefix only, not by
+  method, so an employee session got **403 on every dashboard load**.
+  `fetchServerMode` returns null on `!res.ok`, `setMode` was therefore never
+  called, and the client fell back to its `"sandbox"` default —
+  `stampSendFor("sandbox")` is false, so **every invoice emitted from a
+  reception-only device was never stamped at the DIAN**. This was not the 503
+  edge case the session was scoped to: it was the permanent everyday state of
+  the role that actually invoices. Verified empirically by executing the real
+  middleware against signed `NextRequest`s before and after.
+
+  Fix: the admin list is now `ADMIN_ONLY_RULES`, with an optional per-route
+  `sessionOnlyMethods` whitelist. `/api/emission-mode` exempts **GET only**;
+  `PUT` (which flips the account into DIAN production stamping) stays
+  admin-only, as do `/settings/credentials`, `/settings/mapping` and
+  `/api/invoice-claims` on every method. The whitelist shape fails closed: an
+  unforeseen verb still requires admin. Enforcement stayed in `middleware.ts`
+  rather than moving into the handler, because that handler has no
+  authentication of its own (chat 6a, D0) and a hand-rolled guard there would
+  have opened a window on the production-stamping PUT.
+
+  `src/middleware.test.ts` is new — the repo had **no middleware tests at all**.
+  9 tests: employee GET 200 / PUT 403 / POST-DELETE-PATCH 403, admin GET+PUT
+  200, no session 401, `/api/invoice-claims` and `/settings/*` still blocked to
+  employees, unauthenticated page redirect to `/login`.
+
+  Exposing that GET to an authenticated employee is safe: `credentialsConfigSchema`
+  is `{ mode, configured: Record<string, boolean>, updatedAt }`, the handler
+  selects only `mode, configured, updated_at`, and `credentials_config` has no
+  secret column. A non-boolean in `configured` fails the parse and yields 503
+  `config_corrupt` rather than leaking.
+
+- **`isModeReady` split into "finished loading" and "server confirmed".** New
+  pure `src/mappers/emissionModeState.ts`:
+  - `parseCachedMode(raw)` returns a **discriminated** `CachedModeRead`
+    (`cache` / `absent` / `corrupt` / `ssr`). The old `readMode()` answered the
+    string `"sandbox"` for SSR, an absent key, a corrupt blob **and** a
+    genuinely stored sandbox — four situations the caller could not tell apart,
+    three of which were defaults. The asymmetry below is only sound because
+    this distinction now exists.
+  - `resolveEmissionGate({ settled, serverMode, cached })` returns
+    `{ mode, modeConfirmed, canEmit, reason }`. `modeConfirmed` is true only
+    when the server answered in this session.
+  - `EMISSION_GATE_MESSAGES` holds the Spanish copy; the UI renders it and maps
+    nothing.
+
+- **The gate is deliberately asymmetric, and this is the reasoning.** A wrongly
+  assumed `sandbox` emits `stamp.send: false`: the invoice looks successful, is
+  never stamped, has no legal validity, and per Siigo's own `invalid_document`
+  rule an electronic invoice that was never sent to the DIAN **cannot be
+  annulled with a credit note** until it is. Silent and expensive. A wrongly
+  assumed `production` emits `stamp.send: true` against an account not
+  configured for it, which Siigo refuses with `document_settings` before any
+  document exists. Loud and free. So: server unreachable + cached `sandbox`
+  → **block**; server unreachable + cached `production` → **allow with a visible
+  warning**; no usable cache → **block**. Blocking both would stop a clinic
+  invoicing to prevent the cheaper of the two failures.
+
+- **Retry now exists.** There was no refresh path before — the `useEffect` ran
+  once with `[]` and the only other listener reacted to `storage` events, which
+  never re-query the server. `useEmissionOptions` exposes `refreshMode()`,
+  wired to a "Reintentar" button in the blocked banner.
+
+- **The gate disables the button.** `modeNotReady` never disabled anything: it
+  produced a message *after* the click (`page.tsx:295`), and its text
+  ("Intente de nuevo en un momento") could never appear in the 503 case because
+  `isModeReady` was already permanently true. `gate.canEmit` is now part of
+  `canSubmit` in `QuickEditDrawer`, so the button is genuinely disabled, with
+  the reason shown inline. The in-handler check is kept as defense in depth.
+
+- **Credit notes de-coupled from the mode.** `page.tsx:216` used to block
+  annulment on `modeNotReady`. That was a false coupling: `creditNote.ts:148`
+  sets `stamp: { send: true }` unconditionally (DIAN Resolución 000042),
+  `toCreditNotePayload` overwrites the original payload's `stamp` entirely
+  rather than inheriting it, and the Siigo base URL comes from
+  `siigoAuth.ts:37-38` on the server, not from the client mode. The client
+  `mode` affects **only** `stamp.send` on invoices
+  (`provetToSiigo.ts:108,160`). The block was stopping a legally required
+  annulment for a reason that does not apply to it, and was removed.
+
+- **`useEmissionOptions` split to stay under the file cap.** Browser-storage and
+  network access moved verbatim to `src/hooks/emissionOptionsStorage.ts`
+  (149 -> 119 + 107). Behaviour is unchanged, including the storage-event path:
+  a cross-tab write to `fact_vet.credentialsConfig` re-reads the cache and drops
+  the server confirmation, which reproduces the old `setMode(readMode())`
+  exactly while correctly reporting the value as unconfirmed. `mode` is now
+  derived rather than held in its own state; the four transitions were checked
+  for equivalence one by one.
+
+- **`src/mocks/` untouched.** `emissionOptionsStorage.ts` still imports
+  `mockSiigoProducts` as seed state, as the hook did.
+
+- **Mutation checks (each new test proven non-decorative).**
+
+  | Mutation | Killed by |
+  | --- | --- |
+  | Guard ignores the HTTP method (original bug) | employee GET 200 |
+  | `PUT` added to the session-only whitelist | employee PUT 403 |
+  | Generalised to "any GET is free" | invoice-claims GET + settings GET |
+  | `parseCachedMode` treats an absent key as cached sandbox | absent-key test |
+  | `resolveEmissionGate` trusts a cached sandbox | cached-sandbox block test |
+  | Unconfirmed state reported as confirmed | 4 tests |
+
+- **Untested without jsdom, and left as debt.** That the button renders
+  disabled, that `EmissionModeBanner` renders, that the retry button calls
+  `refreshMode`, and the hook's `useEffect` sequencing. All are covered by
+  `tsc` only. Every decidable rule lives in the pure mapper and is tested.
+
+- **Not done, deliberately.** `vitest.config.ts` -> `.mts` was dropped from this
+  session: line 7 uses `__dirname`, so the rename alone would break the `@`
+  alias and every one of the 42 test files. It needs
+  `fileURLToPath(new URL("./src", import.meta.url))` and a path-resolution
+  re-verification — its own session.
+
 ### Open items
 **Blocked on credentials (cannot be closed from the code):**
 - Credit-note payload shape and the fiscal-year restriction remain unverified.
@@ -592,11 +712,8 @@ this session touched no source file.
 - **`invoices.emitted_by` proposed, not implemented** — see the A6 analysis
   above. Awaiting the owner's decision.
 - No `Content-Security-Policy` header (see above).
-- `useEmissionOptions` sets `isModeReady` to true even when the emission-mode
-  fetch failed, so `page.tsx`'s `modeNotReady` gate only covers the loading
-  window, not a confirmed-unknown mode. Less dangerous since the 503 change
-  above (the client now keeps its cached mode instead of being forced to
-  sandbox), but a device with no cache still falls back to `sandbox`.
+- ~~`useEmissionOptions` sets `isModeReady` to true even when the emission-mode
+  fetch failed.~~ **Closed in the emission-gate session below.**
 - No component tests: `vitest.config.ts` runs `environment: "node"` over
   `src/**/*.test.ts` only, with no jsdom or Testing Library in the repo. The
   convention is to keep decisions in pure `.ts` mappers and the `.tsx` thin.

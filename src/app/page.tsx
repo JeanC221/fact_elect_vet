@@ -34,6 +34,7 @@ import { translateSiigoError, retryWithBackoff, type TranslatedError, type Quick
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { mockClients, mockConsultations, mockPatients } from "@/mocks/provet";
 import { useEmissionOptions, readCreditNoteDocumentTypeId } from "@/hooks/useEmissionOptions";
+import { EMISSION_GATE_MESSAGES } from "@/mappers/emissionModeState";
 import { useConsultationQueue } from "@/hooks/useConsultationQueue";
 
 type Tab = "queue" | "history";
@@ -55,6 +56,7 @@ export default function HomePage() {
   const [isAnnulling, setIsAnnulling] = useState(false);
   const [annulError, setAnnulError] = useState<string | null>(null);
   const [busyDownload, setBusyDownload] = useState<{ invoiceId: string; format: "pdf" | "xml" } | null>(null);
+  const [isRetryingMode, setIsRetryingMode] = useState(false);
   const options = useEmissionOptions();
 
   const fetchHistoryFromServer = useCallback(async (): Promise<InvoiceHistoryEntry[] | null> => {
@@ -164,11 +166,14 @@ export default function HomePage() {
   }, [handleRefresh, showToast]);
 
   const disableActions = isInitialLoading || isRefreshing || isSubmitting;
-  // Blocks emission (both invoice submit and credit-note annul) until the
-  // server-confirmed emission mode has loaded — see EmissionOptionsResult.isModeReady.
-  // Reusing the drawer/modal's existing isSubmitting/isAnnulling-driven disabled
-  // state keeps this a one-line gate instead of a new prop through both components.
-  const modeNotReady = !options.isModeReady;
+  // Invoice emission is gated on options.gate.canEmit, which requires the server
+  // to have confirmed the mode in this session (or a cached `production`, whose
+  // failure mode is a loud Siigo rejection rather than an unstamped invoice).
+  // The gate is passed into QuickEditDrawer so the button is actually disabled.
+  const handleRetryMode = useCallback(async () => {
+    setIsRetryingMode(true);
+    try { await options.refreshMode(); } finally { setIsRetryingMode(false); }
+  }, [options]);
   const displayError = translatedError ?? queueFetchError;
   const handleDismissError = useCallback(() => { setTranslatedError(null); clearFetchError(); }, [clearFetchError]);
   const invoicedConsultationIds = useMemo(
@@ -213,7 +218,10 @@ export default function HomePage() {
 
   const handleAnnulConfirm = useCallback(async (reason: AnnulmentReason) => {
     if (!annulTarget) return;
-    if (modeNotReady) { setAnnulError("Verificando el modo de emisión configurado (sandbox/producción)... Intente de nuevo en un momento."); return; }
+    // NOT gated on the emission mode. creditNote.ts sets `stamp: { send: true }`
+    // unconditionally (DIAN Resolución 000042) and the Siigo base URL comes from
+    // the server, so the client mode affects invoices only. Blocking here stopped
+    // a legally required annulment for a reason that does not apply to it.
     setIsAnnulling(true); setAnnulError(null);
     try {
       // Same real-data-first, synthetic-fallback strategy as selectedDetail/handleSubmit:
@@ -292,8 +300,9 @@ export default function HomePage() {
 
   const handleSubmit = useCallback(async (values: QuickEditFormValues) => {
     if (!selectedId) return;
-    if (modeNotReady) {
-      setTranslatedError({ code: "mode_not_ready", message: "Verificando el modo de emisión configurado (sandbox/producción)... Intente de nuevo en un momento.", severity: "warning", quickAction: "none", retryable: true });
+    // Defense in depth: the drawer button is already disabled when !canEmit.
+    if (!options.gate.canEmit) {
+      setTranslatedError({ code: "mode_not_confirmed", message: EMISSION_GATE_MESSAGES[options.gate.reason] ?? "No se pudo confirmar el modo de emisión.", severity: "warning", quickAction: "none", retryable: true });
       return;
     }
     setIsSubmitting(true); setTranslatedError(null); setRetryAttempt(0);
@@ -347,7 +356,7 @@ export default function HomePage() {
         ) : (
           <InvoiceHistory entries={history} rows={rows} busyDownload={busyDownload} onDownload={handleDownload} onAnnul={handleAnnul} onViewSnapshot={setSnapshotTarget} />
         )}
-        <QuickEditDrawer detail={selectedDetail} isSubmitting={isSubmitting} errorMessage={translatedError?.message ?? null} errorDetail={translatedError?.detail ?? null} fallbackItemCode={options.fallbackItemCode} documentTypeId={options.documentTypeId} sellerId={options.sellerId} onClose={handleClose} onSubmit={handleSubmit} />
+        <QuickEditDrawer detail={selectedDetail} isSubmitting={isSubmitting} errorMessage={translatedError?.message ?? null} errorDetail={translatedError?.detail ?? null} fallbackItemCode={options.fallbackItemCode} documentTypeId={options.documentTypeId} sellerId={options.sellerId} gate={options.gate} isRetryingMode={isRetryingMode} onRetryMode={handleRetryMode} onClose={handleClose} onSubmit={handleSubmit} />
         <CreditNoteModal row={annulTarget} isSubmitting={isAnnulling} errorMessage={annulError} onClose={() => { if (!isAnnulling) setAnnulTarget(null); }} onConfirm={handleAnnulConfirm} />
         <InvoiceSnapshotDrawer row={snapshotTarget} onClose={() => setSnapshotTarget(null)} />
         {toast && (

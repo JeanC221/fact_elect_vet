@@ -10,20 +10,52 @@ import { SESSION_COOKIE_NAME } from "@/services/sessionCookies";
  * payload. Runs on the Edge runtime (Web Crypto) — no external JWT dependency.
  *
  * "/api/emission-mode" is included here (not just its UI page
- * "/settings/credentials"): it's the endpoint that actually flips the account
- * into DIAN production stamping, so it must be server-enforced, not just
- * hidden by the UI.
+ * "/settings/credentials"): PUT is the endpoint that actually flips the
+ * account into DIAN production stamping, so it must be server-enforced, not
+ * just hidden by the UI.
  *
- * "/api/invoice-claims" likewise: releasing an emission claim removes the
- * only server-side guard against stamping a second DIAN document for the same
+ * Its GET, however, is the opposite case and is exempted by method. Every
+ * dashboard load calls it from `useEmissionOptions.fetchServerMode` to learn
+ * whether the account emits in sandbox or production. While the whole prefix
+ * was admin-only, an employee session got 403 on every load, that fetch
+ * returned null, `setMode` was never called, and the client fell back to its
+ * "sandbox" default — and `stampSendFor("sandbox")` is false, so a
+ * receptionist emitted invoices that are never stamped at the DIAN and
+ * therefore have no legal validity. The response body carries no secrets:
+ * `credentialsConfigSchema` is `{ mode, configured: Record<string, boolean>,
+ * updatedAt }`, and `credentials_config` has no secret column to leak.
+ *
+ * The exemption is expressed as a per-route whitelist of methods, not a
+ * blanket "GET is free" rule: anything outside `sessionOnlyMethods` still
+ * requires admin, so an unforeseen verb fails closed. "/settings/credentials",
+ * "/settings/mapping" and "/api/invoice-claims" are served over GET and stay
+ * admin-only on every method.
+ *
+ * "/api/invoice-claims": releasing an emission claim removes the only
+ * server-side guard against stamping a second DIAN document for the same
  * consultation, so it must never be reachable by the employee role.
  */
-const ADMIN_ONLY_PREFIXES = [
-  "/settings/credentials",
-  "/settings/mapping",
-  "/api/emission-mode",
-  "/api/invoice-claims",
+interface AdminOnlyRule {
+  prefix: string;
+  /** Methods that need only a valid session. Every other method requires admin. */
+  sessionOnlyMethods?: readonly string[];
+}
+
+const ADMIN_ONLY_RULES: readonly AdminOnlyRule[] = [
+  { prefix: "/settings/credentials" },
+  { prefix: "/settings/mapping" },
+  { prefix: "/api/emission-mode", sessionOnlyMethods: ["GET"] },
+  { prefix: "/api/invoice-claims" },
 ];
+
+/** True when this path+method pair is reserved to the admin role. */
+function requiresAdmin(pathname: string, method: string): boolean {
+  return ADMIN_ONLY_RULES.some(
+    (rule) =>
+      pathname.startsWith(rule.prefix) &&
+      !(rule.sessionOnlyMethods?.includes(method) ?? false),
+  );
+}
 
 export async function middleware(req: NextRequest): Promise<NextResponse> {
   const token = req.cookies.get(SESSION_COOKIE_NAME)?.value;
@@ -33,7 +65,7 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
     if (isApiRoute) return NextResponse.json({ error: { code: "unauthorized", message: "Sesión requerida." } }, { status: 401 });
     return NextResponse.redirect(new URL("/login", req.url));
   }
-  const needsAdmin = ADMIN_ONLY_PREFIXES.some((p) => req.nextUrl.pathname.startsWith(p));
+  const needsAdmin = requiresAdmin(req.nextUrl.pathname, req.method);
   if (needsAdmin && !valid.admin) {
     if (isApiRoute) return NextResponse.json({ error: { code: "forbidden", message: "Se requiere rol de administrador." } }, { status: 403 });
     return NextResponse.redirect(new URL("/", req.url));
