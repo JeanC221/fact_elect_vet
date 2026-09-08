@@ -117,6 +117,13 @@ counts describe the suite as it stood on that date and are left untouched.
 | Types | `npx tsc --noEmit` | clean |
 | Tests | `npx vitest run` | **569 passed (569)** across **40 files** — timezone-independent, verified under `America/Bogota`, `UTC`, `Asia/Tokyo` and `Pacific/Kiritimati` |
 | Build | `npx next build` | clean (10/10 pages) — needs `DATABASE_URL` set, a placeholder is enough |
+| Deps | `npm audit` | **2 high**, both `next` (and its bundled `postcss`). No fix exists in 14.x. Was 7 before `vitest` 2.1.9 -> 4.1.11 |
+
+**Install note:** `npm install` on npm 10.x crashes with
+`Cannot read properties of null (reading 'edgesOut')` while resolving vitest's
+optional peers — an arborist bug, reproducible in an empty project. Use
+`npx npm@12` to change dependencies. `npm ci` on npm 10 works normally against
+the committed lockfile.
 
 ### Security headers — corrected
 The previous version of this document claimed `vercel.json` carried a CSP. It
@@ -397,6 +404,165 @@ deleted, four regression tests were added (see C6 below).
   "Open items" entry below, which recorded the same falsehood in different
   words. Detail of the correction is in the `stamp` entry above.
 
+### Resolved — dependencies and session model session (2026-09-07, chat 4)
+
+**Gates after this session:** `tsc --noEmit` clean · **569 passed (569)** across
+**40 files**, verified under `America/Bogota`, `UTC`, `Asia/Tokyo` and
+`Pacific/Kiritimati` · `next build` clean (10/10 pages). Test count unchanged:
+this session touched no source file.
+
+- **A7 — `vitest` 2.1.9 -> 4.1.11 (pinned exact). Five advisories closed with
+  one update.** The whole vulnerable dev subtree hung off a single root:
+  `tsx` already carried the patched `esbuild@0.28.2`, and the vulnerable
+  `esbuild@0.21.5` reached the tree only through `vite@5.4.21`, which reached it
+  only through `vitest@2.1.9`. `vitest@4.1.11` pulls `vite@8.2.2`, which does
+  not depend on `esbuild` at all (rolldown/oxc), so `esbuild`, `vite`,
+  `vite-node`, `@vitest/mocker` and `vitest` all left the tree together.
+  `npm audit` went from 7 vulnerabilities (3 moderate, 3 high, 1 critical) to
+  **2 high**, both `next` and both unfixable without migrating Next.
+
+  Lockfile diff reviewed entry by entry: 38 added, 61 removed, 15 changed, all
+  inside the vitest/vite subtree. The 61 removals are `@esbuild/*` and
+  `@rollup/*` platform binaries plus chai internals and `vite-node`. **Nothing
+  touching `next`, `react`, `postcss`, `typescript`, `tsx` or `@types/*` for the
+  project moved.**
+
+  `vi.hoisted()` and `vi.setSystemTime` both survive the 2.x -> 4.x jump; the
+  chat-3 timezone regression tests still pass in all four zones.
+
+  **`vitest@5.0.0` was deliberately NOT taken.** It was published 2026-09-03,
+  four days before this session. 4.1.11 (2026-08-18) is the last of a mature
+  line and already clears every advisory.
+
+- **A7 — an npm 10 bug blocks the install, and it is not this repo's lockfile.**
+  `npm install --save-exact --save-dev vitest@4.1.11` fails on npm 10.9.7 with
+  `TypeError: Cannot read properties of null (reading 'edgesOut')` at
+  `@npmcli/arborist/lib/arborist/build-ideal-tree.js:1289` (`#loadPeerSet`),
+  while resolving vitest's optional peers. **Reproduced in an empty
+  `npm init -y` project**, so it is an arborist bug, not lockfile corruption.
+
+  Resolution: the lockfile was generated with `npx npm@12`. It comes out as
+  `lockfileVersion: 3` — the same format as before — and **npm 10 installs it
+  with plain `npm ci`, no flags, `found 0 vulnerabilities` in the dev tree.**
+  `--legacy-peer-deps` was rejected as an alternative: it would have written a
+  lockfile whose peer resolution no longer reflects the declared graph.
+  Vercel is unaffected either way, since it installs from the resolved lockfile.
+
+- **A7 — Next stays on 14.2.35. Confirmed there is nowhere to go inside 14.x.**
+  `npm view next versions` gives 46 stable 14.x releases ending at **14.2.35
+  (2025-12-11)**; the `next-14` dist-tag points there. Next 14 reached EOL on
+  **2025-10-26**. Every `next` advisory in `npm audit` has its fix boundary in
+  15.5.x or 16.x — **not one has a 14.x patch.**
+
+- **A7 — CORRECTION: the May 2026 App Router middleware bypasses do NOT affect
+  14.2.35.** Earlier framing in the session prompt held that this project's
+  middleware-only authorization was "exactly the profile the May advisories
+  describe as affected". Checked against the advisory ranges:
+
+  | Advisory | Affected range | 14.2.35? |
+  | --- | --- | --- |
+  | `GHSA-267c-6grr-h53f` segment-prefetch (CVE-2026-44575) | `>=15.2.0 <15.5.16` · `>=16.0.0 <16.2.5` | no |
+  | `GHSA-26hh-7cqf-hhc6` follow-up (Turbopack) | same | no |
+  | `GHSA-492v-c6pp-mqqv` dynamic route param injection (CVE-2026-44574) | `>=15.4.0 <15.5.16` · `>=16.0.0 <16.2.5` | no |
+  | `GHSA-36qx-fr4f-26g5` Pages Router + i18n (CVE-2026-44573) | `>=12.2.0 <15.5.16` | in range, but no Pages Router and no i18n here |
+
+  The bugs were introduced in branches later than 14. The August 2026 criticals
+  are likewise inapplicable: `GHSA-2xp9-vwfh-vxw4` (AVIF/libheif RCE) needs the
+  Image Optimization API and this repo has **zero `next/image` usage and no
+  `remotePatterns`**, plus Vercel disabled AVIF on its managed service;
+  `CVE-2026-75604` needs a Windows host with Pages Router.
+
+  **This lowers the urgency, not the obligation.** 14.x is EOL and will receive
+  no patch for anything found from here on.
+
+- **A7 — migration target is 16.3.4, not 15.5.25.** Next 15 is Maintenance LTS
+  until **2026-10-21**, six weeks from this session. Migrating to 15 would buy
+  weeks and then repeat the exercise.
+
+- **A7 — nothing in the Next ecosystem is pinned to 14.** `eslint`,
+  `eslint-config-next` and `@next/eslint-plugin-next` are **not installed at
+  all** (which is why `npm run lint` is an alias of `tsc --noEmit`). The future
+  migration carries no peripheral dependencies with it.
+
+- **A7 — NOT ROUTE-REVALIDATED: no handler under `ADMIN_ONLY_PREFIXES` checks
+  the role itself.** Verified by grepping every use of `verifySessionToken`,
+  `SESSION_COOKIE_NAME` and `cookies()` across `src/`:
+
+  | Path in `ADMIN_ONLY_PREFIXES` | Revalidates? | Evidence |
+  | --- | --- | --- |
+  | `/api/emission-mode` | no | no auth import; `GET`/`PUT` go straight to `getPool()` |
+  | `/api/invoice-claims` | no | its own comment: "Admin-only enforcement lives in middleware.ts" |
+  | `/settings/credentials` | no | `"use client"`, no server gate |
+  | `/settings/mapping` | no | `"use client"`, no server gate |
+
+  Wider than the admin surface: **none of the 12 route handlers under
+  `src/app/api/` verifies a session at all.** A middleware bypass would not
+  land on a second closed door — it reaches `POST /api/invoices` (real DIAN
+  emission), `POST /api/credit-notes` and `DELETE /api/invoice-claims`
+  unauthenticated. The one page that *does* revalidate — `/settings/page.tsx`,
+  `payload.admin === true`, commented as defense-in-depth — is **not** in
+  `ADMIN_ONLY_PREFIXES`. The correct pattern already exists in the repo; it was
+  simply not applied where it matters. **Goes to the security session (chat 6);
+  it is cheaper and more durable than the migration and does not depend on it.**
+
+- **A7 — the swc lockfile patch error is unchanged, and its cause is now
+  known.** The lockfile lists 8 of the 9 `@next/swc-*` platform packages at
+  `node_modules/@next/…`; `swc-win32-x64-msvc` exists only nested under
+  `node_modules/next/node_modules/`. Next 14.2's `patch-incorrect-lockfile.js`
+  reads `.os` off the absent top-level entry, hence
+  `TypeError: Cannot read properties of undefined (reading 'os')`. It is **not**
+  a corrupt lockfile: `next@14.2.35` itself declares its swc binaries at
+  `14.2.33`, because 14.2.34/35 shipped without bumping them. Non-blocking
+  (`✓ Compiled successfully`, 10/10 pages), preexisting, unchanged by this
+  session.
+
+### Resolved — A6 session model: analysed, nothing implemented
+
+- **CORRECTION: the plain-text password regression no longer exists in the
+  code.** `src/services/auth.ts` at this commit reads `ADMIN_EMAIL` +
+  `ADMIN_PASSWORD_HASH` and `EMPLOYEE_EMAIL` + `EMPLOYEE_PASSWORD_HASH`, hashes
+  the submitted password with SHA-256/base64url and compares in constant time.
+  **`ADMIN_PASSWORD` / `EMPLOYEE_PASSWORD` do not appear anywhere in `src/`.**
+  The plain-text simplification recorded in the 2026-08-28 changelog entry below
+  was reverted in `5d66830` ("Login page fixed", 2026-09-02). That entry is
+  append-only and stays, but it no longer describes the code. **This item can
+  come off the chat-6 scope.**
+
+- **`.env.example` is not in the repo, and is gitignored.**
+  `git check-ignore` confirms `.gitignore:8` (`.env*`) matches it. The canonical
+  list of required environment variables is therefore unversioned, which is how
+  the `ADMIN_PASSWORD` naming drifted through the documentation in the first
+  place. Worth an explicit `!.env.example` negation.
+
+- **No legal requirement was found for per-person traceability.** Resolución
+  000165 de 2023 and the technical annex v1.9 place the obligation on the
+  *obligado a facturar electrónicamente* — the clinic, identified by NIT in
+  `AccountingSupplierParty`. The traceability the regulation demands is
+  document-level: signed XML, CUFE, `ApplicationResponse`, RADIAN events,
+  authorised numbering range. **No UBL field identifies the natural person who
+  operated the software.** Siigo's `seller` is a Siigo Nube registered user id,
+  and here it is a single global `catalog_mapping.seller_id` chosen once by the
+  admin — the same value on every invoice regardless of who pressed emit. It
+  satisfies Siigo's schema requirement; it says nothing about the operator.
+
+- **The schema stores no operator identity, not even the role.** `invoices`
+  (11 columns) and `invoice_claims` (7 columns) carry no `emitted_by`,
+  `user_email` or `role`. `login_rate_limits.email_hash` exists for throttling,
+  not audit.
+
+- **Recommendation: do not build individual accounts, and do not add device/IP
+  fingerprinting.** With 2-3 fixed receptionists on clinic-owned devices,
+  rotating a shared password when someone leaves is a two-minute operation.
+  Fingerprinting is disproportionate here and has a real failure mode: a dynamic
+  ISP address or a PC changing network would drop a legitimate session
+  mid-emission. **What is worth doing instead is one column** —
+  `invoices.emitted_by`, fed from the JWT `email` claim, which already exists in
+  `SessionPayload` and already distinguishes the two accounts. It gives the
+  owner "the admin account did this, the reception account did that" for
+  disputes and incident review at near-zero cost, and does not require a user
+  table, password management or onboarding flow. **Not implemented — awaiting
+  the owner's decision.**
+
 ### Open items
 **Blocked on credentials (cannot be closed from the code):**
 - Credit-note payload shape and the fiscal-year restriction remain unverified.
@@ -413,6 +579,18 @@ deleted, four regression tests were added (see C6 below).
   the clinic's real Provet Cloud account.
 
 **Open in the code:**
+- **Next.js 14.2.35 is EOL and cannot be patched.** Migration to **16.3.4** is
+  its own session, with the 569 tests and `next build` as the net. Do not go to
+  15.x: it leaves Maintenance LTS on 2026-10-21.
+- **No route handler verifies a session.** All authorization lives in
+  `middleware.ts`. Applying the existing `/settings/page.tsx` pattern to the
+  handlers under `ADMIN_ONLY_PREFIXES` — and a session check to the rest — is
+  the durable fix and does not wait on the migration. Chat 6.
+- **`.env.example` is gitignored** by `.gitignore:8` (`.env*`) and absent from
+  the repo, leaving the required environment variables unversioned. Add an
+  `!.env.example` negation.
+- **`invoices.emitted_by` proposed, not implemented** — see the A6 analysis
+  above. Awaiting the owner's decision.
 - No `Content-Security-Policy` header (see above).
 - `useEmissionOptions` sets `isModeReady` to true even when the emission-mode
   fetch failed, so `page.tsx`'s `modeNotReady` gate only covers the loading
