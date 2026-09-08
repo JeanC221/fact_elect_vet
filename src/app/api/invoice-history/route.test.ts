@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, beforeAll } from "vitest";
 
 const { queryMock, connectMock, clientQueryMock, clientReleaseMock } = vi.hoisted(() => ({
   queryMock: vi.fn(),
@@ -14,6 +14,31 @@ vi.mock("@/services/db", () => ({
 }));
 
 import { GET, PUT } from "./route";
+
+import {
+  TEST_JWT_SECRET,
+  ADMIN_SESSION,
+  issueSessionCookie,
+  requestWithCookie,
+} from "@/test/sessionRequest";
+
+/**
+ * D0 added a session guard to every route handler, so these tests now send a
+ * genuinely signed cookie. An admin session is used because it satisfies both
+ * `requireSession` and `requireAdmin`; the role boundary itself is covered by
+ * `middleware.test.ts` and, for the emission-mode asymmetry, by the dedicated
+ * employee cases in `src/app/api/emission-mode/route.test.ts`.
+ */
+let sessionCookie: string;
+beforeAll(async () => {
+  process.env.JWT_SECRET = TEST_JWT_SECRET;
+  sessionCookie = await issueSessionCookie(ADMIN_SESSION);
+});
+
+/** Authenticated request builder — same signature as the plain `new Request`. */
+function authed(url: string, init: RequestInit = {}) {
+  return requestWithCookie(url, sessionCookie, init);
+}
 
 const entryA = {
   invoiceId: "INV-7751", invoiceNumber: "1234", cufe: "CUFE-abc123",
@@ -55,7 +80,7 @@ beforeEach(() => {
 describe("GET /api/invoice-history", () => {
   it("returns an empty array when no rows exist yet", async () => {
     queryMock.mockResolvedValue({ rowCount: 0, rows: [] });
-    const res = await GET();
+    const res = await GET(authed("http://localhost/api/invoice-history"));
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json).toEqual([]);
@@ -63,7 +88,7 @@ describe("GET /api/invoice-history", () => {
 
   it("reads and returns the saved history in insertion order", async () => {
     queryMock.mockResolvedValue({ rowCount: 1, rows: [rowOf(entryA, "2026-08-31T00:00:00.000Z")] });
-    const res = await GET();
+    const res = await GET(authed("http://localhost/api/invoice-history"));
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json).toEqual([entryA]);
@@ -71,7 +96,7 @@ describe("GET /api/invoice-history", () => {
 
   it("returns 503 (not a silent 200 empty array) when the read genuinely fails", async () => {
     queryMock.mockRejectedValue(new Error("network blip"));
-    const res = await GET();
+    const res = await GET(authed("http://localhost/api/invoice-history"));
     const json = await res.json();
     expect(res.status).toBe(503);
     expect(json).toEqual([]);
@@ -81,7 +106,7 @@ describe("GET /api/invoice-history", () => {
 describe("PUT /api/invoice-history", () => {
   it("upserts a single entry into an empty history", async () => {
     queryMock.mockResolvedValueOnce({ rowCount: 1, rows: [rowOf(entryA, "2026-08-31T00:00:00.000Z")] }); // confirmation read after write
-    const req = new Request("http://localhost/api/invoice-history", {
+    const req = authed("http://localhost/api/invoice-history", {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entries: [entryA] }),
     });
     const res = await PUT(req);
@@ -99,7 +124,7 @@ describe("PUT /api/invoice-history", () => {
       rowCount: 2,
       rows: [rowOf(entryA, "2026-08-31T00:00:00.000Z"), rowOf(entryB, "2026-08-31T01:00:00.000Z")],
     });
-    const req = new Request("http://localhost/api/invoice-history", {
+    const req = authed("http://localhost/api/invoice-history", {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entries: [entryB] }),
     });
     const res = await PUT(req);
@@ -115,7 +140,7 @@ describe("PUT /api/invoice-history", () => {
       rowCount: 2,
       rows: [rowOf(annulled, "2026-08-31T00:00:00.000Z"), rowOf(entryB, "2026-08-31T01:00:00.000Z")],
     });
-    const req = new Request("http://localhost/api/invoice-history", {
+    const req = authed("http://localhost/api/invoice-history", {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entries: [annulled] }),
     });
     const res = await PUT(req);
@@ -126,7 +151,7 @@ describe("PUT /api/invoice-history", () => {
 
   it("accepts the single-entry shorthand shape", async () => {
     queryMock.mockResolvedValueOnce({ rowCount: 1, rows: [rowOf(entryA, "2026-08-31T00:00:00.000Z")] });
-    const req = new Request("http://localhost/api/invoice-history", {
+    const req = authed("http://localhost/api/invoice-history", {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entry: entryA }),
     });
     const res = await PUT(req);
@@ -138,7 +163,7 @@ describe("PUT /api/invoice-history", () => {
   it("persists and returns patientName (frozen at emission time, must not be lost on write/read)", async () => {
     const entryWithPatient = { ...entryA, patientName: "Bart Simpson" };
     queryMock.mockResolvedValueOnce({ rowCount: 1, rows: [rowOf(entryWithPatient, "2026-08-31T00:00:00.000Z")] });
-    const req = new Request("http://localhost/api/invoice-history", {
+    const req = authed("http://localhost/api/invoice-history", {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entry: entryWithPatient }),
     });
     const res = await PUT(req);
@@ -150,7 +175,7 @@ describe("PUT /api/invoice-history", () => {
   });
 
   it("returns 400 for a schema-invalid body without opening a transaction", async () => {
-    const req = new Request("http://localhost/api/invoice-history", {
+    const req = authed("http://localhost/api/invoice-history", {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entries: [{ invoiceId: "" }] }),
     });
     const res = await PUT(req);
@@ -159,7 +184,7 @@ describe("PUT /api/invoice-history", () => {
   });
 
   it("returns 400 for a raw array body (old pre-merge contract is no longer accepted)", async () => {
-    const req = new Request("http://localhost/api/invoice-history", {
+    const req = authed("http://localhost/api/invoice-history", {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify([entryA]),
     });
     const res = await PUT(req);
@@ -172,7 +197,7 @@ describe("PUT /api/invoice-history", () => {
     clientQueryMock
       .mockResolvedValueOnce({}) // BEGIN
       .mockRejectedValueOnce(new Error("constraint violation")); // INSERT fails
-    const req = new Request("http://localhost/api/invoice-history", {
+    const req = authed("http://localhost/api/invoice-history", {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entries: [entryA] }),
     });
     const res = await PUT(req);
@@ -185,7 +210,7 @@ describe("PUT /api/invoice-history", () => {
 
   it("returns 503 when the write succeeds but the confirmation read fails — never claims the write itself failed", async () => {
     queryMock.mockRejectedValueOnce(new Error("network blip")); // confirmation read after a successful write
-    const req = new Request("http://localhost/api/invoice-history", {
+    const req = authed("http://localhost/api/invoice-history", {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entries: [entryA] }),
     });
     const res = await PUT(req);

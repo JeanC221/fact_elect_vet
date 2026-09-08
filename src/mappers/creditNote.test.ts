@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mockSiigoInvoicePayloads } from "@/mocks/siigo";
 import {
   ANNULMENT_REASONS,
+  siigoCreditNoteItemSchema,
   MissingCreditNoteSettingError,
   siigoCreditNoteResponseSchema,
   siigoCreditNoteSchema,
@@ -145,5 +146,60 @@ describe("creditNote mapper", () => {
   it("omits taxes on the credit note when the invoice line had none", () => {
     const cn = toCreditNotePayload(original, base, "billing_error", withDocType);
     expect(cn.items[0].taxes).toBeUndefined();
+  });
+});
+
+/**
+ * Description sanitisation parity with the invoice schema.
+ *
+ * `siigoInvoiceItemSchema.description` is `sanitizedText({ max: 200 })`;
+ * `siigoCreditNoteItemSchema.description` was a bare `z.string()`. That gap is
+ * reachable from the network: `POST /api/credit-notes` parses
+ * `siigoCreditNoteSchema` straight off the client-supplied request body, so the
+ * payload does NOT have to come from `buildCreditNote` and its already-sanitised
+ * invoice. Siigo publishes an `invalid_description` error whose character class
+ * excludes the apostrophe and control characters, so an unsanitised description
+ * is rejected at the API — after the Idempotency-Key has been spent.
+ */
+describe("siigoCreditNoteItemSchema — description is sanitised like the invoice's", () => {
+  const baseItem = { code: "CONS-01", quantity: 1, taxed_price: -50000 };
+
+  it("strips an apostrophe from a client-supplied credit note description", () => {
+    const parsed = siigoCreditNoteItemSchema.parse({
+      ...baseItem,
+      description: "Consulta d'urgencia",
+    });
+    expect(parsed.description).not.toMatch(/['\u2018\u2019]/);
+  });
+
+  it("strips smart quotes without merging adjacent words", () => {
+    const parsed = siigoCreditNoteItemSchema.parse({
+      ...baseItem,
+      description: "Vacuna \u201Ctriple\u201D felina",
+    });
+    expect(parsed.description).toBe("Vacuna triple felina");
+  });
+
+  it("strips ASCII control characters", () => {
+    const parsed = siigoCreditNoteItemSchema.parse({
+      ...baseItem,
+      description: "Control\u0000post\u001Foperatorio",
+    });
+    expect(parsed.description).toBe("Control post operatorio");
+  });
+
+  it("keeps Spanish accents and ñ, which Siigo's published class allows", () => {
+    const parsed = siigoCreditNoteItemSchema.parse({
+      ...baseItem,
+      description: "Extracción de uña — canino",
+    });
+    expect(parsed.description).toContain("Extracción");
+    expect(parsed.description).toContain("uña");
+  });
+
+  it("still rejects an empty description after sanitisation", () => {
+    expect(() =>
+      siigoCreditNoteItemSchema.parse({ ...baseItem, description: "''" }),
+    ).toThrow();
   });
 });

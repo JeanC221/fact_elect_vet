@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, beforeAll } from "vitest";
 
 const { queryMock } = vi.hoisted(() => ({ queryMock: vi.fn() }));
 vi.mock("@/services/db", () => ({
@@ -6,6 +6,34 @@ vi.mock("@/services/db", () => ({
 }));
 
 import { GET, PUT } from "./route";
+
+import {
+  TEST_JWT_SECRET,
+  ADMIN_SESSION,
+  issueSessionCookie,
+  requestWithCookie,
+  EMPLOYEE_SESSION,
+  sessionRequest,
+  anonymousRequest,
+} from "@/test/sessionRequest";
+
+/**
+ * D0 added a session guard to every route handler, so these tests now send a
+ * genuinely signed cookie. An admin session is used because it satisfies both
+ * `requireSession` and `requireAdmin`; the role boundary itself is covered by
+ * `middleware.test.ts` and, for the emission-mode asymmetry, by the dedicated
+ * employee cases in `src/app/api/emission-mode/route.test.ts`.
+ */
+let sessionCookie: string;
+beforeAll(async () => {
+  process.env.JWT_SECRET = TEST_JWT_SECRET;
+  sessionCookie = await issueSessionCookie(ADMIN_SESSION);
+});
+
+/** Authenticated request builder — same signature as the plain `new Request`. */
+function authed(url: string, init: RequestInit = {}) {
+  return requestWithCookie(url, sessionCookie, init);
+}
 
 const validConfig = {
   mode: "production" as const,
@@ -26,7 +54,7 @@ beforeEach(() => {
 describe("GET /api/emission-mode", () => {
   it("returns the sandbox default when no row exists yet", async () => {
     queryMock.mockResolvedValue({ rowCount: 0, rows: [] });
-    const res = await GET();
+    const res = await GET(authed("http://localhost/api/emission-mode"));
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json).toEqual(DEFAULT_CONFIG);
@@ -34,7 +62,7 @@ describe("GET /api/emission-mode", () => {
 
   it("reads and returns the saved config, never containing secret values", async () => {
     queryMock.mockResolvedValue({ rowCount: 1, rows: [rowOf(validConfig)] });
-    const res = await GET();
+    const res = await GET(authed("http://localhost/api/emission-mode"));
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json).toEqual(validConfig);
@@ -51,7 +79,7 @@ describe("GET /api/emission-mode", () => {
    */
   it("returns 503 (not a silent 200 sandbox) when the read genuinely fails", async () => {
     queryMock.mockRejectedValue(new Error("network blip"));
-    const res = await GET();
+    const res = await GET(authed("http://localhost/api/emission-mode"));
     const json = await res.json();
     expect(res.status).toBe(503);
     expect(json.error.code).toBe("storage_unavailable");
@@ -63,7 +91,7 @@ describe("GET /api/emission-mode", () => {
       rowCount: 1,
       rows: [{ mode: "not-a-mode", configured: {}, updated_at: new Date("2026-08-31T00:00:00.000Z") }],
     });
-    const res = await GET();
+    const res = await GET(authed("http://localhost/api/emission-mode"));
     const json = await res.json();
     expect(res.status).toBe(503);
     expect(json.error.code).toBe("config_corrupt");
@@ -71,7 +99,7 @@ describe("GET /api/emission-mode", () => {
 
   it("still returns a plain 200 sandbox default when the row is simply absent (legitimate first run)", async () => {
     queryMock.mockResolvedValue({ rowCount: 0, rows: [] });
-    const res = await GET();
+    const res = await GET(authed("http://localhost/api/emission-mode"));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual(DEFAULT_CONFIG);
   });
@@ -80,7 +108,7 @@ describe("GET /api/emission-mode", () => {
 describe("PUT /api/emission-mode", () => {
   it("validates and overwrites the shared config on success", async () => {
     queryMock.mockResolvedValue({ rowCount: 1, rows: [] });
-    const req = new Request("http://localhost/api/emission-mode", {
+    const req = authed("http://localhost/api/emission-mode", {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(validConfig),
     });
     const res = await PUT(req);
@@ -94,7 +122,7 @@ describe("PUT /api/emission-mode", () => {
   });
 
   it("returns 400 for a schema-invalid config without touching the database", async () => {
-    const req = new Request("http://localhost/api/emission-mode", {
+    const req = authed("http://localhost/api/emission-mode", {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: "nope" }),
     });
     const res = await PUT(req);
@@ -104,10 +132,50 @@ describe("PUT /api/emission-mode", () => {
 
   it("returns 500 when the write fails", async () => {
     queryMock.mockRejectedValue(new Error("connection terminated"));
-    const req = new Request("http://localhost/api/emission-mode", {
+    const req = authed("http://localhost/api/emission-mode", {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(validConfig),
     });
     const res = await PUT(req);
     expect(res.status).toBe(500);
+  });
+});
+/**
+ * The asymmetry, asserted from the HANDLER — not only from `middleware.test.ts`.
+ *
+ * `middleware.test.ts` proves the edge layer lets an employee GET this route and
+ * refuses their PUT. It cannot prove the handler agrees, because it never runs
+ * the handler. Without the two cases below, applying `requireAdmin` to the GET
+ * by mistake would leave all 9 middleware tests green while every reception
+ * device silently fell back to `sandbox` — `stampSendFor("sandbox")` is false,
+ * so the clinic would emit invoices that are never stamped at the DIAN and have
+ * no legal validity. Both sides are asserted: one alone leaves half blind.
+ */
+describe("GET/PUT /api/emission-mode — role asymmetry enforced by the handler itself", () => {
+  it("lets an EMPLOYEE read the emission mode, so the client never defaults to sandbox", async () => {
+    queryMock.mockResolvedValue({ rowCount: 1, rows: [rowOf(validConfig)] });
+    const res = await GET(await sessionRequest("/api/emission-mode", EMPLOYEE_SESSION));
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual(validConfig);
+  });
+
+  it("refuses an EMPLOYEE PUT with 403 — PUT is what flips the account into DIAN production", async () => {
+    const res = await PUT(
+      await sessionRequest("/api/emission-mode", EMPLOYEE_SESSION, { method: "PUT", body: validConfig }),
+    );
+    expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toEqual({
+      error: { code: "forbidden", message: "Se requiere rol de administrador." },
+    });
+  });
+
+  it("refuses the employee PUT before touching the database — no partial write", async () => {
+    queryMock.mockReset();
+    await PUT(await sessionRequest("/api/emission-mode", EMPLOYEE_SESSION, { method: "PUT", body: validConfig }));
+    expect(queryMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses an anonymous GET with 401, not an anonymous read of the emission mode", async () => {
+    const res = await GET(anonymousRequest("/api/emission-mode"));
+    expect(res.status).toBe(401);
   });
 });

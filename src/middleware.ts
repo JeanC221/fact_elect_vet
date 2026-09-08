@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { verifySessionToken } from "@/services/auth";
 import { SESSION_COOKIE_NAME } from "@/services/sessionCookies";
+import { ACCESS_DENIED, denialBody } from "@/mappers/routeAuthz";
 
 /**
  * Edge route guard: protects the dashboard ("/") and all non-login routes.
@@ -34,6 +35,12 @@ import { SESSION_COOKIE_NAME } from "@/services/sessionCookies";
  * "/api/invoice-claims": releasing an emission claim removes the only
  * server-side guard against stamping a second DIAN document for the same
  * consultation, so it must never be reachable by the employee role.
+ *
+ * The two refusal bodies are no longer inlined here: D0.1 lifted them into
+ * `@/mappers/routeAuthz` so this middleware and the per-handler guards in
+ * `@/services/routeGuard` cannot answer the same rejection with different
+ * Spanish. The routing policy below (ADMIN_ONLY_RULES) stays here and is NOT
+ * re-derived by the handler guards.
  */
 interface AdminOnlyRule {
   prefix: string;
@@ -62,12 +69,12 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
   const valid = token ? await verifySessionToken(token) : null;
   const isApiRoute = req.nextUrl.pathname.startsWith("/api/");
   if (!valid) {
-    if (isApiRoute) return NextResponse.json({ error: { code: "unauthorized", message: "Sesión requerida." } }, { status: 401 });
+    if (isApiRoute) return NextResponse.json(denialBody(ACCESS_DENIED.unauthorized), { status: ACCESS_DENIED.unauthorized.status });
     return NextResponse.redirect(new URL("/login", req.url));
   }
   const needsAdmin = requiresAdmin(req.nextUrl.pathname, req.method);
   if (needsAdmin && !valid.admin) {
-    if (isApiRoute) return NextResponse.json({ error: { code: "forbidden", message: "Se requiere rol de administrador." } }, { status: 403 });
+    if (isApiRoute) return NextResponse.json(denialBody(ACCESS_DENIED.forbidden), { status: ACCESS_DENIED.forbidden.status });
     return NextResponse.redirect(new URL("/", req.url));
   }
   return NextResponse.next();

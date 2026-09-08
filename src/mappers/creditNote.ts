@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { sanitizedText } from "@/schemas/provet";
 import {
   siigoCustomerSchema,
   siigoDocumentTypeSchema,
@@ -41,7 +42,10 @@ export interface CreditNoteOptions {
 export const siigoCreditNoteItemSchema = z
   .object({
     code: z.string().trim().min(1).max(50),
-    description: z.string().trim().min(1).max(200),
+    /** Sanitised like the invoice's: POST /api/credit-notes parses this schema
+     *  straight off the client body, and Siigo's invalid_description class
+     *  excludes apostrophes. Full rationale in creditNote.test.ts. */
+    description: sanitizedText({ max: 200 }),
     quantity: z.number().positive().max(1e6),
     price: z.number().max(1e9).optional(),
     taxed_price: z.number().max(1e9).optional(),

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, beforeAll } from "vitest";
 import { siigoCreditNoteSchema } from "@/mappers/creditNote";
 import { mockSiigoInvoicePayloads } from "@/mocks/siigo";
 
@@ -36,6 +36,31 @@ import { POST } from "./route";
 import { getSiigoAccessToken, SiigoAuthError } from "@/services/siigoAuth";
 import { SiigoApiError, submitCreditNote } from "@/services/siigoApi";
 
+import {
+  TEST_JWT_SECRET,
+  ADMIN_SESSION,
+  issueSessionCookie,
+  requestWithCookie,
+} from "@/test/sessionRequest";
+
+/**
+ * D0 added a session guard to every route handler, so these tests now send a
+ * genuinely signed cookie. An admin session is used because it satisfies both
+ * `requireSession` and `requireAdmin`; the role boundary itself is covered by
+ * `middleware.test.ts` and, for the emission-mode asymmetry, by the dedicated
+ * employee cases in `src/app/api/emission-mode/route.test.ts`.
+ */
+let sessionCookie: string;
+beforeAll(async () => {
+  process.env.JWT_SECRET = TEST_JWT_SECRET;
+  sessionCookie = await issueSessionCookie(ADMIN_SESSION);
+});
+
+/** Authenticated request builder — same signature as the plain `new Request`. */
+function authed(url: string, init: RequestInit = {}) {
+  return requestWithCookie(url, sessionCookie, init);
+}
+
 describe("POST /api/credit-notes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -48,7 +73,7 @@ describe("POST /api/credit-notes", () => {
     const siigoResponse = { id: "NC-1", cufe: "CUFE-NC-1", status: "Accepted" as const, observations: undefined };
     vi.mocked(submitCreditNote).mockResolvedValue(siigoResponse);
 
-    const req = new Request("http://localhost/api/credit-notes", {
+    const req = authed("http://localhost/api/credit-notes", {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Idempotency-Key": "IDEM-NC-123" },
       body: JSON.stringify({ consultationId: CONSULTATION_ID, payload: validCreditNote }),
@@ -65,7 +90,7 @@ describe("POST /api/credit-notes", () => {
 
   it("returns 400 for a Zod-invalid payload", async () => {
     const bad = { ...validCreditNote, total: 123456 }; // breaks the items/payments/total refine
-    const req = new Request("http://localhost/api/credit-notes", {
+    const req = authed("http://localhost/api/credit-notes", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(bad),
@@ -81,7 +106,7 @@ describe("POST /api/credit-notes", () => {
   it("returns 502 with a Spanish message when SiigoAuthError is thrown", async () => {
     vi.mocked(getSiigoAccessToken).mockRejectedValue(new SiigoAuthError("missing_credentials", "SIIGO_USERNAME no configurada."));
 
-    const req = new Request("http://localhost/api/credit-notes", {
+    const req = authed("http://localhost/api/credit-notes", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ consultationId: CONSULTATION_ID, payload: validCreditNote }),
@@ -99,7 +124,7 @@ describe("POST /api/credit-notes", () => {
   it("returns 400 with a structured error when Siigo rejects with 400", async () => {
     vi.mocked(submitCreditNote).mockRejectedValue(new SiigoApiError("invalid_reference", "base_document.id no encontrado", 400));
 
-    const req = new Request("http://localhost/api/credit-notes", {
+    const req = authed("http://localhost/api/credit-notes", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ consultationId: CONSULTATION_ID, payload: validCreditNote }),
@@ -116,7 +141,7 @@ describe("POST /api/credit-notes", () => {
   it("returns 429 for a Siigo rate-limit error", async () => {
     vi.mocked(submitCreditNote).mockRejectedValue(new SiigoApiError("requests_limit", "Límite excedido.", 429));
 
-    const req = new Request("http://localhost/api/credit-notes", {
+    const req = authed("http://localhost/api/credit-notes", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ consultationId: CONSULTATION_ID, payload: validCreditNote }),
@@ -132,7 +157,7 @@ describe("POST /api/credit-notes", () => {
   it("returns 502 for a status-less Siigo error (network failure)", async () => {
     vi.mocked(submitCreditNote).mockRejectedValue(new SiigoApiError("service_unavailable", "Network failure while reaching the Siigo API."));
 
-    const req = new Request("http://localhost/api/credit-notes", {
+    const req = authed("http://localhost/api/credit-notes", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ consultationId: CONSULTATION_ID, payload: validCreditNote }),
@@ -148,7 +173,7 @@ describe("POST /api/credit-notes", () => {
   it("marks the emission claim as annulled so the consultation can be billed again", async () => {
     vi.mocked(submitCreditNote).mockResolvedValue({ id: "NC-9", cufe: "CUDE-9", status: "Accepted" as const, observations: undefined });
 
-    const req = new Request("http://localhost/api/credit-notes", {
+    const req = authed("http://localhost/api/credit-notes", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ consultationId: CONSULTATION_ID, payload: validCreditNote }),
@@ -162,7 +187,7 @@ describe("POST /api/credit-notes", () => {
   });
 
   it("returns 400 when consultationId is missing, so a credit note can never orphan a blocked consultation", async () => {
-    const req = new Request("http://localhost/api/credit-notes", {
+    const req = authed("http://localhost/api/credit-notes", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(validCreditNote),
@@ -178,7 +203,7 @@ describe("POST /api/credit-notes", () => {
     vi.mocked(submitCreditNote).mockResolvedValue({ id: "NC-10", cufe: "CUDE-10", status: "Accepted" as const, observations: undefined });
     queryMock.mockRejectedValue(new Error("connection terminated"));
 
-    const req = new Request("http://localhost/api/credit-notes", {
+    const req = authed("http://localhost/api/credit-notes", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ consultationId: CONSULTATION_ID, payload: validCreditNote }),

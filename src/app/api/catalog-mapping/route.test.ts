@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, beforeAll } from "vitest";
 
 const { queryMock } = vi.hoisted(() => ({ queryMock: vi.fn() }));
 vi.mock("@/services/db", () => ({
@@ -6,6 +6,31 @@ vi.mock("@/services/db", () => ({
 }));
 
 import { GET, PUT } from "./route";
+
+import {
+  TEST_JWT_SECRET,
+  ADMIN_SESSION,
+  issueSessionCookie,
+  requestWithCookie,
+} from "@/test/sessionRequest";
+
+/**
+ * D0 added a session guard to every route handler, so these tests now send a
+ * genuinely signed cookie. An admin session is used because it satisfies both
+ * `requireSession` and `requireAdmin`; the role boundary itself is covered by
+ * `middleware.test.ts` and, for the emission-mode asymmetry, by the dedicated
+ * employee cases in `src/app/api/emission-mode/route.test.ts`.
+ */
+let sessionCookie: string;
+beforeAll(async () => {
+  process.env.JWT_SECRET = TEST_JWT_SECRET;
+  sessionCookie = await issueSessionCookie(ADMIN_SESSION);
+});
+
+/** Authenticated request builder — same signature as the plain `new Request`. */
+function authed(url: string, init: RequestInit = {}) {
+  return requestWithCookie(url, sessionCookie, init);
+}
 
 const validMapping = {
   items: [{ provetCode: "SERV-CG-01", siigoProductId: "PROD-001" }],
@@ -47,7 +72,7 @@ beforeEach(() => {
 describe("GET /api/catalog-mapping", () => {
   it("returns the empty default mapping when no row exists yet", async () => {
     queryMock.mockResolvedValue({ rowCount: 0, rows: [] });
-    const res = await GET();
+    const res = await GET(authed("http://localhost/api/catalog-mapping"));
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json).toEqual(EMPTY_MAPPING);
@@ -55,7 +80,7 @@ describe("GET /api/catalog-mapping", () => {
 
   it("reads and returns the saved mapping", async () => {
     queryMock.mockResolvedValue({ rowCount: 1, rows: [rowOf(validMapping)] });
-    const res = await GET();
+    const res = await GET(authed("http://localhost/api/catalog-mapping"));
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json).toEqual(validMapping);
@@ -63,7 +88,7 @@ describe("GET /api/catalog-mapping", () => {
 
   it("falls back to the empty default with a 503 on any read error — never a silent 200 'no mapping saved' reading", async () => {
     queryMock.mockRejectedValue(new Error("network blip"));
-    const res = await GET();
+    const res = await GET(authed("http://localhost/api/catalog-mapping"));
     const json = await res.json();
     expect(res.status).toBe(503);
     expect(json).toEqual(EMPTY_MAPPING);
@@ -74,7 +99,7 @@ describe("PUT /api/catalog-mapping — optimistic concurrency", () => {
   it("saves and bumps the version when the client's version matches the server's current version", async () => {
     // The atomic UPDATE...WHERE version=$6 RETURNING succeeds and comes back with version already bumped to 2.
     queryMock.mockResolvedValueOnce({ rowCount: 1, rows: [rowOf({ ...validMapping, version: 2 })] });
-    const req = new Request("http://localhost/api/catalog-mapping", {
+    const req = authed("http://localhost/api/catalog-mapping", {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(validMapping), // sends version:1
     });
     const res = await PUT(req);
@@ -91,7 +116,7 @@ describe("PUT /api/catalog-mapping — optimistic concurrency", () => {
   it("saves the very first mapping when the row is still at version:0", async () => {
     queryMock.mockResolvedValueOnce({ rowCount: 1, rows: [rowOf({ ...validMapping, version: 1 })] });
     const firstSave = { ...validMapping, version: 0 };
-    const req = new Request("http://localhost/api/catalog-mapping", {
+    const req = authed("http://localhost/api/catalog-mapping", {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(firstSave),
     });
     const res = await PUT(req);
@@ -107,7 +132,7 @@ describe("PUT /api/catalog-mapping — optimistic concurrency", () => {
       .mockResolvedValueOnce({ rowCount: 0, rows: [] }) // UPDATE finds no matching row
       .mockResolvedValueOnce({ rowCount: 1, rows: [rowOf(serverCurrent)] }); // follow-up SELECT for `current`
     const staleClientPayload = { ...validMapping, version: 1 }; // this client still thinks it's version:1
-    const req = new Request("http://localhost/api/catalog-mapping", {
+    const req = authed("http://localhost/api/catalog-mapping", {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(staleClientPayload),
     });
     const res = await PUT(req);
@@ -120,7 +145,7 @@ describe("PUT /api/catalog-mapping — optimistic concurrency", () => {
   });
 
   it("returns 400 for a schema-invalid mapping without touching the database", async () => {
-    const req = new Request("http://localhost/api/catalog-mapping", {
+    const req = authed("http://localhost/api/catalog-mapping", {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ items: "nope" }),
     });
     const res = await PUT(req);
@@ -130,7 +155,7 @@ describe("PUT /api/catalog-mapping — optimistic concurrency", () => {
 
   it("returns 500 with a clear message when the UPDATE itself fails", async () => {
     queryMock.mockRejectedValueOnce(new Error("connection terminated"));
-    const req = new Request("http://localhost/api/catalog-mapping", {
+    const req = authed("http://localhost/api/catalog-mapping", {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(validMapping),
     });
     const res = await PUT(req);
@@ -143,7 +168,7 @@ describe("PUT /api/catalog-mapping — optimistic concurrency", () => {
     queryMock
       .mockResolvedValueOnce({ rowCount: 0, rows: [] }) // UPDATE finds no matching row
       .mockRejectedValueOnce(new Error("network blip")); // reconciliation SELECT fails too
-    const req = new Request("http://localhost/api/catalog-mapping", {
+    const req = authed("http://localhost/api/catalog-mapping", {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(validMapping),
     });
     const res = await PUT(req);

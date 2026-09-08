@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 import { credentialsSchema } from "@/mappers/credentials";
 import { getSiigoAccessToken, SiigoAuthError } from "@/services/siigoAuth";
+import { requireSession } from "@/services/routeGuard";
 
 export const dynamic = "force-dynamic";
 
@@ -10,7 +12,9 @@ export const dynamic = "force-dynamic";
  * server-side, and returns ok=true when the badge should turn green.
  * Credentials live only in the request body — never persisted (§2.1).
  */
-export async function POST(req: Request): Promise<NextResponse> {
+export async function POST(req: NextRequest): Promise<NextResponse> {
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
   try {
     const body = await req.json();
     const creds = credentialsSchema.parse(body);

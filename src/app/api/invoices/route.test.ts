@@ -1,6 +1,32 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, beforeAll } from "vitest";
+import type { NextRequest } from "next/server";
 import { siigoInvoicePayloadSchema } from "@/schemas/siigo";
 import { mockSiigoInvoicePayloads } from "@/mocks/siigo";
+
+import {
+  TEST_JWT_SECRET,
+  ADMIN_SESSION,
+  issueSessionCookie,
+  requestWithCookie,
+} from "@/test/sessionRequest";
+
+/**
+ * D0 added a session guard to every route handler, so these tests now send a
+ * genuinely signed cookie. An admin session is used because it satisfies both
+ * `requireSession` and `requireAdmin`; the role boundary itself is covered by
+ * `middleware.test.ts` and, for the emission-mode asymmetry, by the dedicated
+ * employee cases in `src/app/api/emission-mode/route.test.ts`.
+ */
+let sessionCookie: string;
+beforeAll(async () => {
+  process.env.JWT_SECRET = TEST_JWT_SECRET;
+  sessionCookie = await issueSessionCookie(ADMIN_SESSION);
+});
+
+/** Authenticated request builder — same signature as the plain `new Request`. */
+function authed(url: string, init: RequestInit = {}) {
+  return requestWithCookie(url, sessionCookie, init);
+}
 
 const validPayload = siigoInvoicePayloadSchema.parse(mockSiigoInvoicePayloads[0]);
 const CONSULTATION_ID = "provet-consult-9911";
@@ -75,10 +101,10 @@ import { SiigoApiError, submitInvoice } from "@/services/siigoApi";
 import { reconcileInvoice, AmbiguousReconciliationError } from "@/services/invoiceReconciliation";
 
 
-function makeRequest(body: unknown, idempotencyKey?: string): Request {
+function makeRequest(body: unknown, idempotencyKey?: string): NextRequest {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (idempotencyKey) headers["X-Idempotency-Key"] = idempotencyKey;
-  return new Request("http://localhost/api/invoices", { method: "POST", headers, body: JSON.stringify(body) });
+  return authed("http://localhost/api/invoices", { method: "POST", headers, body: JSON.stringify(body) });
 }
 
 const validBody = { consultationId: CONSULTATION_ID, payload: validPayload };

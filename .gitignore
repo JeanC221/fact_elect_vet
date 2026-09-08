@@ -6,6 +6,9 @@ node_modules
 
 .vercel
 .env*
+# Excepción: la plantilla SIN valores debe versionarse (regla D6, chat 6a).
+# Sin esta línea, `.env*` la ignora en silencio y nadie nota que falta.
+!.env.example
 
 # TypeScript incremental build artifact
 tsconfig.tsbuildinfo

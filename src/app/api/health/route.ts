@@ -1,9 +1,13 @@
 import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 import { z } from "zod";
 import { credentialsSchema } from "@/mappers/credentials";
 import { checkHealth } from "@/services/healthCheck";
 import { healthReportSchema } from "@/schemas/health";
 import { SiigoAuthError } from "@/services/siigoAuth";
+import { requireSession } from "@/services/routeGuard";
+
+export const dynamic = "force-dynamic";
 
 /**
  * Dedicated health endpoint.
@@ -13,12 +17,16 @@ import { SiigoAuthError } from "@/services/siigoAuth";
  *                         the badge turns green when valid keys are provided.
  * The UI consumes this same-origin endpoint — never the raw external APIs.
  */
-export async function GET(): Promise<NextResponse> {
+export async function GET(req: NextRequest): Promise<NextResponse> {
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
   const report = await checkHealth();
   return NextResponse.json(healthReportSchema.parse(report));
 }
 
-export async function POST(req: Request): Promise<NextResponse> {
+export async function POST(req: NextRequest): Promise<NextResponse> {
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
   try {
     const creds = credentialsSchema.parse(await req.json());
     const report = await checkHealth({
