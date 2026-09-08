@@ -43,11 +43,11 @@ Internal web application (Middleware API + Operational Dashboard) designed to au
 ---
 
 ## Last Update
-- **Date:** 2026-08-28
-- **Agent:** Cline (Task A)
-- **Completed Task:** Implemented Siigo OAuth service and test suite. (1) `src/services/siigoAuth.ts` (new, 98 lines): `SiigoAuthError`, `siigoTokenResponseSchema` (Zod), in-memory token cache with 60s safety-margin expiry, `getSiigoAccessToken` (POST `/auth` with `username`/`access_key` Client Credentials Grant), runtime base URL from `SIIGO_API_BASE_URL`/`SIIGO_BASE_URL`, env validation, network/401/malformed error mapping. (2) `src/services/siigoAuth.test.ts` (new, 127 lines, 7 tests): token success + URL/body/header assertions, 401 → `auth_failed`, cache hit (single fetch), expired-token renewal via fake timers, network failure → `service_unavailable`, malformed response rejection, missing-credentials rejection. (3) `PROJECT_STATE.md`: updated with Task A completion notes.
-- **Modified Files:** `src/services/siigoAuth.ts`, `src/services/siigoAuth.test.ts`, `PROJECT_STATE.md`
-- **Verification:** `npx tsc --noEmit` ✅ | `npx vitest run` ✅ 183/183 (14 files, +7 new) | `npm run lint` ✅ | files under 150-line cap (`siigoAuth.ts` 98, `siigoAuth.test.ts` 127).
+- **Date:** 2026-09-08
+- **Agent:** Claude (chat 6a — route handler authorization, sanitisation, idempotency key)
+- **Completed Task:** Closed D0, D5, D6 and D7. (1) New pure mapper `src/mappers/routeAuthz.ts` (80 lines) holding the single access decision plus the two denial literals. (2) New service `src/services/routeGuard.ts` (66 lines) exposing `requireSession` / `requireAdmin` over `NextRequest`. (3) New shared test fixture `src/test/sessionRequest.ts` (115 lines), importing nothing from `vitest` so it stays inert at build time. (4) All 13 route handlers under `src/app/api/` now carry a guard; previously none did. (5) `middleware.ts` refactored to import the shared denial constants — routing policy untouched, its 9 tests pass unedited. (6) `siigoCreditNoteItemSchema.description` now uses `sanitizedText({ max: 200 })`. (7) `Idempotency-Key` regex hardened to `/^[A-Za-z0-9]+$/`. (8) `.env.example` created with the 22 variables the code actually reads, plus a `!.env.example` negation in `.gitignore`.
+- **Verification:** `npx tsc --noEmit` ✅ | `npx vitest run` ✅ **629/629 (44 files, +36 tests, +2 files)** | `npx next build` ✅ 9/9 pages, 4 static | mutation testing on `routeAuthz.ts`: 4 mutants, 4 killed.
+- **Not done — deliberately:** D1 (password hashing) is blocked on an operational action, see Open items.
 
 ## Previous Update (Task 6.2)
 - **Date:** 2026-08-27
@@ -105,7 +105,7 @@ Internal web application (Middleware API + Operational Dashboard) designed to au
 
 ---
 
-## Current State (verified 2026-09-07)
+## Current State (verified 2026-09-08)
 
 Everything in this section was re-checked against the code in this commit. The
 per-task entries below the separator are an append-only changelog: their test
@@ -115,8 +115,8 @@ counts describe the suite as it stood on that date and are left untouched.
 | Gate | Command | Result |
 | --- | --- | --- |
 | Types | `npx tsc --noEmit` | clean |
-| Tests | `npx vitest run` | **593 passed (593)** across **42 files** — timezone-independent, verified under `America/Bogota`, `UTC`, `Asia/Tokyo` and `Pacific/Kiritimati` |
-| Build | `npx next build` | clean (10/10 pages) — needs `DATABASE_URL` set, a placeholder is enough |
+| Tests | `npx vitest run` | **629 passed (629)** across **44 files** — timezone-independent, verified under `America/Bogota`, `UTC`, `Asia/Tokyo` and `Pacific/Kiritimati` |
+| Build | `npx next build` | clean (**9/9** pages, **4 static**: `/`, `/_not-found`, `/settings/credentials`, `/settings/mapping`) — needs `DATABASE_URL` set, a placeholder is enough. Was 10/10 until chat 6a gave `/api/health` `force-dynamic`, which took it out of the static-generation phase. |
 | Deps | `npm audit` | **2 high**, both `next` (and its bundled `postcss`). No fix exists in 14.x. Was 7 before `vitest` 2.1.9 -> 4.1.11 |
 
 **Install note:** `npm install` on npm 10.x crashes with
@@ -683,46 +683,219 @@ this session touched no source file.
   `fileURLToPath(new URL("./src", import.meta.url))` and a path-resolution
   re-verification — its own session.
 
-### Open items
-**Blocked on credentials (cannot be closed from the code):**
-- Credit-note payload shape and the fiscal-year restriction remain unverified.
-  The reason previously recorded here — "the Siigo sandbox has no document type
-  with an active DIAN resolution" — was **false** and is corrected above: 74
-  electronic FV types and 19 electronic NC types do exist in the sandbox. The
-  real blocker is that it is unknown which of them belongs to this account.
-- `consultationitem` vs `invoicerow` mapping and the dosage / fractional
-  quantity rules need production data to validate.
-- Provet `/item/` catalogue endpoint returns 403 with the current integration
-  credentials, so the queue still derives mappable items from time-windowed
-  consultations instead of the atemporal catalogue.
-- Siigo production credentials must be requested by the clinic owner; likewise
-  the clinic's real Provet Cloud account.
+### Resolved — route handler authorization session (2026-09-08, chat 6a)
 
-**Open in the code:**
-- **Next.js 14.2.35 is EOL and cannot be patched.** Migration to **16.3.4** is
-  its own session, with the 569 tests and `next build` as the net. Do not go to
-  15.x: it leaves Maintenance LTS on 2026-10-21.
-- **No route handler verifies a session.** All authorization lives in
-  `middleware.ts`. Applying the existing `/settings/page.tsx` pattern to the
-  handlers under `ADMIN_ONLY_PREFIXES` — and a session check to the rest — is
-  the durable fix and does not wait on the migration. Chat 6.
-- **`.env.example` is gitignored** by `.gitignore:8` (`.env*`) and absent from
-  the repo, leaving the required environment variables unversioned. Add an
-  `!.env.example` negation.
+**D0 — session guards on every route handler (defense in depth).**
+Authorization lived *only* in `middleware.ts`. Next.js CVE-2025-29927 showed a
+middleware check can be skipped with a single HTTP header, and in this system
+the route behind it is `POST /api/invoices`, which stamps a legally binding DIAN
+document — a bypass is not a data leak, it is a fraudulent invoice.
+
+Two layers, following the `emissionModeState.ts` precedent:
+
+| File | Role | Lines |
+| --- | --- | --- |
+| `src/mappers/routeAuthz.ts` | Pure mapper. Decides. No I/O, no `next/server`. | 80 |
+| `src/services/routeGuard.ts` | `requireSession` / `requireAdmin` over `NextRequest`. | 66 |
+| `src/test/sessionRequest.ts` | Shared fixture. Imports nothing from `vitest`. | 115 |
+
+- All **13** handlers under `src/app/api/` now carry a guard. Before: zero. The
+  count is 13, not the 12 recorded in earlier notes.
+- `middleware.ts` keeps **all** routing policy (`ADMIN_ONLY_RULES`,
+  `requiresAdmin`). The guard does **not** re-derive it: it inspects neither the
+  path nor the method. Two tests in `routeGuard.test.ts` pin that.
+- Constants-only refactor of `middleware.ts`: the literals `"Sesión requerida."`
+  and `"Se requiere rol de administrador."` moved into the mapper. Its 9 tests
+  pass **without being edited**.
+- Handler signatures went from `req: Request` to `req: NextRequest`, so
+  `req.cookies.get(...)` is reused instead of hand-parsing the `Cookie` header.
+- `/api/health` gained `export const dynamic = "force-dynamic"`; the 13 handlers
+  are now homogeneous. This is what moved the build from 10/10 to 9/9.
+
+**Risk the previous test net could not see.** `middleware.test.ts` never
+executes the handlers, so mistakenly applying `requireAdmin` to
+`GET /api/emission-mode` would have left all 9 of its tests green while every
+reception device fell back to the `sandbox` default and emitted invoices that
+are never stamped at the DIAN. Both sides of the asymmetry are now asserted from
+`emission-mode/route.test.ts`: employee `GET` → 200, employee `PUT` → 403, plus
+a check that the refused `PUT` never touches the database.
+
+**Mutation testing** on `routeAuthz.ts` — 4 mutants, 4 killed: session/role
+order inverted (2 failures), role gate neutralised (3), shared literal drifted
+(4), `status` leaked into the body (5). Note that the literal drift does **not**
+break `middleware.test.ts`, whose asserts use
+`toMatchObject({ error: { code } })` and never pin the message; the middleware's
+message is pinned solely by the mapper test.
+
+**D5 — credit note `description` sanitisation.** Two earlier premises were wrong.
+Siigo *does* publish an `invalid_description` error whose character class
+excludes the apostrophe and control characters. And the risk was *not*
+theoretical: `POST /api/credit-notes` parses `siigoCreditNoteSchema` straight off
+the client-supplied request body, so the payload need not come from
+`buildCreditNote` and its already-sanitised invoice.
+`siigoCreditNoteItemSchema.description` moved from `z.string().trim().min(1)` to
+`sanitizedText({ max: 200 })`, in parity with `siigoInvoiceItemSchema`. The
+published regex was **not** translated into Zod: it arrives HTML-escaped and
+with an ambiguous `@-\\` range.
+
+**D7 — `Idempotency-Key`.** `generateIdempotencyKey()` already stripped hyphens;
+the defect was in validation, which accepted `/^[A-Za-z0-9-]+$/`. Worse than
+first recorded: `POST /api/invoices` and `POST /api/credit-notes` accept a
+client-supplied `X-Idempotency-Key` header, so a hyphenated key reached Siigo and
+was rejected — and a Siigo 5xx consumes the key permanently. Hardened to
+`/^[A-Za-z0-9]+$/`, keeping the **30**-character bound (Siigo's docs contradict
+themselves: 30 on the Idempotency page, 32 in `invalid_idempotency-key`). **Two
+existing tests encoded the defect** (`"RETRY-KEY-99"`, `"NC-RETRY-1"`) and were
+corrected.
+
+**D6 — `.env.example`.** Created with the **22** variables the code actually
+reads, obtained by `grep -rhoE "process\.env\.[A-Z0-9_]+" src/ scripts/ | sort -u`,
+not from memory. `NODE_ENV` deliberately excluded: Next.js sets it and declaring
+it breaks the build. `.gitignore:8` held `.env*`, which would have swallowed the
+template silently — an `!.env.example` negation was added with a comment.
+`BLOB_READ_WRITE_TOKEN` is marked legacy: only `scripts/migrate-blob-to-postgres.ts`
+uses it.
+
+**Minor fixes.** `settings/page.tsx:54` named `ADMIN_ONLY_PREFIXES`, a symbol
+that has not existed since chat 5; corrected to `ADMIN_ONLY_RULES`. Stale
+documentation naming a nonexistent symbol is precisely what caused a session
+prompt to be mis-framed.
+
+**Decision DP2 — `/settings/credentials` and `/settings/mapping` get no server
+guard. Do not "fix" this.** They are `"use client"` components; guarding them
+needs a server `layout.tsx` with `await cookies()`, which turns them from
+`○ (Static)` to `ƒ (Dynamic)`. They render **no** sensitive server-side data —
+everything they show comes from `/api/emission-mode`, `/api/catalog-mapping` and
+`/api/credentials/health`, all of which *are* guarded. Middleware already
+redirects an employee with 307 (`middleware.test.ts:84-90`), so the only way to
+reach them is a middleware bypass, which yields an empty client shell. Paying
+prerender to armour an empty shell does not pay off.
+
+**`src/test/sessionRequest.ts` is a known `ts-prune` false positive.** Only
+`*.test.ts` files consume it, so a production reachability scan reports it as
+dead code. It is not. It is excluded from the suite by `vitest.config.ts`
+(`include: ["src/**/*.test.ts"]`) and imports nothing from `vitest`, so it is
+inert at build time.
+
+**File-size cap breached, knowingly.** `src/mappers/creditNote.ts` is at **154**
+lines against the 150 cap; it sat at exactly 150 before this session, so any
+addition broke it. `src/services/siigoApi.ts` went from 193 to **205** and was
+already over. Both are queued for a splitting session.
+
+### Open items
+
+The planned scope of `01_PROJECT_REQUIREMENTS.md`, `2_AGENT_WORKFLOW_RULES.md`
+and `03_UI_UX_DESIGN_SPEC.md` is exhausted once chat 6b (CSP) lands. Everything
+below is post-plan work, ordered by what blocks it.
+
+**Blocked on production credentials (cannot be closed from the code):**
+- The real shape of a populated `stamp` with a CUFE has never been observed. The
+  documented shape matches `siigoInvoiceRawResponseSchema`, but it remains
+  DOCUMENTED, not OBSERVED.
+- Which electronic `documentTypeId` belongs to this account is unknown. The
+  earlier claim that the sandbox held no electronic type was **false**: 74
+  electronic FV types and 19 electronic NC types exist there. The blocker is
+  ownership, not existence.
+- Whether the `document_settings` error came from a `NoElectronic` type or from
+  permissions is indistinguishable without the production account.
+- `stamp.send: true` behaviour cannot be exercised in sandbox.
+- `consultationitem` vs `invoicerow` mapping and the dosage / fractional
+  quantity rules need production data.
+- Provet `/item/` returns 403 with the current integration credentials, so the
+  queue still derives mappable items from time-windowed consultations.
+- Six `Draft` invoices with an empty `cufe` remain in the database. A cleanup SQL
+  script is prepared; it runs on production cutover day.
+- Siigo production credentials and the clinic's real Provet Cloud account must be
+  requested by the owner.
+
+**Blocked on an operational decision by the owner:**
+- **D1 — password hashing.** `authenticate()` uses **unsalted SHA-256**.
+  The documented blocker ("middleware runs on Edge, where `node:crypto` does not
+  exist") is only half true: `authenticate()` is called *only* from
+  `loginAction`, a `"use server"` server action in `login/page.tsx:20`, which runs
+  on the **Node** runtime, where `scrypt` is available today. The real obstacle is
+  the import graph — `middleware.ts:3` imports from `@/services/auth`, which is a
+  re-export of `@/services/jwt`, so a `node:crypto` import in `auth.ts` would be
+  dragged into the Edge bundle. **It dissolves with a one-line change**: have
+  `middleware.ts` import directly from `@/services/jwt`. Not implemented because
+  changing the hash format invalidates the deployed `ADMIN_PASSWORD_HASH` and
+  `EMPLOYEE_PASSWORD_HASH` — until they are regenerated in Vercel, nobody can log
+  in. Needs its own session with an agreed deployment window.
+- **Vercel Hobby → Pro.** Hobby forbids commercial use on two independent
+  grounds: being paid to build the site, and the site processing billing. Hobby
+  also retains runtime logs for **1 hour**, which is unworkable for a legal
+  invoicing system — a 20:00 emission failure is undiagnosable by 08:00.
+- **`Partner-Id` regex.** `siigoApi.ts:26` accepts hyphens
+  (`/^[A-Za-z0-9-]+$/`); Siigo documents it as alphanumeric without special
+  characters. **Deliberately not tightened**: doing so blind could invalidate a
+  value already configured in production. Verify the real value first.
+
+**Technical sessions, no external blocker:**
+- **Chat 6b — Content-Security-Policy.** Still absent (see Security headers
+  above). Two findings condition its design: `middleware.ts:84`'s matcher
+  **excludes `/login`**, so a middleware-based CSP would not cover the
+  credential page; and `src/app/global-error.tsx` uses inline `style` attributes
+  in 8 places, which `style-src` blocks without `'unsafe-inline'` — the worst
+  possible failure surface, since it is the global error screen.
+- **Next.js migration.** 14.2.35 is EOL and unpatchable. The target is **the
+  latest release of the 16.x branch at migration time**, not a fixed number:
+  Next.js has shipped monthly security releases since July 2026, so any version
+  written down here expires within weeks. Do not go to 15.x — Maintenance LTS
+  ends 2026-10-21. Note that Next 16 renames `middleware.ts` to `proxy.ts` and
+  moves it to the **Node** runtime, not configurable; the API surface
+  (`NextRequest`, `NextResponse`, `config.matcher`) is unchanged, so the move is
+  an `mv` plus a function rename.
+- **`vitest.config.ts` → `.mts`.** Deferred since chat 5: line 7 uses
+  `__dirname`, and renaming alone breaks the `@` alias.
+- **150-line cap remediation:** `creditNote.ts` (154), `siigoApi.ts` (205),
+  `invoices/route.ts` (174), `QuickEditDrawer.tsx` (172), `app/page.tsx` (370).
+- **Rounding collision on `sum_total`.** Siigo recomputes each item total as
+  `Round(Quantity * UnitPrice - Discount, 2)`. Reading Provet's
+  `invoicerow.sum_total` verbatim can diverge by one peso and trigger
+  `invalid_total_payments`.
+- **Catalogue without `GET /item/`.** Two untried routes: `expose_consultation_item`
+  on `invoicerow` returns the item `code` and `name` inline, and Provet added
+  `POST /item/export/start/` and `GET /item/export/status/` on 2026-08-20 —
+  different endpoints, possibly different permissions.
+- **Re-verify the Vercel function limits.** `EVIDENCIA §3.1` states functions cut
+  the connection between 10 and 60 seconds; Vercel's own documentation states
+  **300 s on Hobby**. If true, the 20-second polling design rests on a constraint
+  that no longer holds. Related: Siigo recommends waiting **≥120 s** before
+  timing out on invoice and credit-note creation, so a function cutting at 10 s
+  would abort emissions Siigo does process.
+- **Provet pagination review.** Rate limits are per endpoint over a rolling 60 s
+  window, and a custom `page_size` consumes requests proportionally: asking for
+  500 with a default of 50 counts as 10 requests.
+- **Provet financial period lock.** `financial_period_lock_date` on
+  `GET /settings/department/<id>/` blocks back-dating invoices, payments and
+  credit notes. It appears in no project document.
 - **`invoices.emitted_by` proposed, not implemented** — see the A6 analysis
   above. Awaiting the owner's decision.
-- No `Content-Security-Policy` header (see above).
-- ~~`useEmissionOptions` sets `isModeReady` to true even when the emission-mode
-  fetch failed.~~ **Closed in the emission-gate session below.**
-- No component tests: `vitest.config.ts` runs `environment: "node"` over
-  `src/**/*.test.ts` only, with no jsdom or Testing Library in the repo. The
-  convention is to keep decisions in pure `.ts` mappers and the `.tsx` thin.
+- **No component tests.** `vitest.config.ts` runs `environment: "node"` over
+  `src/**/*.test.ts` only, with no jsdom or Testing Library. Deliberate: keep
+  decisions in pure `.ts` mappers and the `.tsx` thin.
+
+**Documentation corrections owed:**
+- **Resolución 948 health-sector fields do not apply.** A veterinary clinic is
+  not an SGSSS provider, so `healthcare_company`, `operation_type`, CUCON and the
+  EPS/ADRES/SOAT/ARL catalogues are out of scope. Remove the "if applicable" from
+  `01_PROJECT_REQUIREMENTS §1.2.4` so no future agent implements it.
+- **Missing from the error table:** `invalid_dian_resolution` (the electronic
+  resolution has exceeded its date and/or consecutive range),
+  `document_settings`, `blocked_transactions`, `duplicated_document`.
+- **Siigo blocks the API user** when errors exceed **80% of total requests over
+  7 days**. This collides with a sandbox that returns 500 on roughly 1 in 10
+  emissions and with the "fail loudly" architecture.
+- **Siigo's own documentation contradicts itself three times** on the credit-note
+  `reason` enum: the field table says "1 to 5", the DIAN reason table lists
+  1, 2, 3, 4, 6, 7, and the OpenAPI schema says 1–6. **Do not pin a Zod enum from
+  the docs.** Annulment is code **2**.
 
 **Infrastructure:**
-- Vercel Hobby is the current plan; Hobby's terms exclude commercial use, so
-  Vercel Pro is the correct production target.
 - Supabase backups depend on the plan tier and still need confirming in the
   panel.
+- `vercel.json` pins `"regions": ["iad1"]` (Washington) while Supabase sits in
+  `us-east-2` (Ohio). Worth revisiting when moving to Pro.
 
 ---
 
