@@ -44,6 +44,14 @@ Internal web application (Middleware API + Operational Dashboard) designed to au
 
 ## Last Update
 - **Date:** 2026-09-08
+- **Agent:** Claude (chat 6b — Content-Security-Policy, phase 1)
+- **Completed Task:** Added `Content-Security-Policy-Report-Only` as a sixth header on the existing `"source": "/(.*)"` rule in `vercel.json`. The five pre-existing headers, `framework` and `regions` are byte-identical. **Nothing under `src/` changed except one new test file.** `middleware.ts` untouched — its 9 tests pass unedited, `ADMIN_ONLY_RULES` / `requiresAdmin` / `config.matcher` and the 13 route-handler guards are exactly as chat 6a left them. New `src/test/vercelSecurityHeaders.test.ts` (8 tests) is the only thing that makes this change visible to any gate at all: `vercel.json` is not type-checked, not bundled, not executed by `next build` and read by no other test, so a deleted or JSON-broken policy would otherwise ship silently. It asserts shape only — no test in a Node environment can prove a policy does not break a browser, and jsdom remains a rejected project decision. That is documented debt, in the file's header comment.
+- **Verification:** `npx tsc --noEmit` ✅ | `npx vitest run` ✅ **637/637 (45 files, +8 tests, +1 file)** | `npx next build` ✅ 9/9 pages, **4 static, unchanged** | `ƒ Middleware` **40.1 kB, unchanged** | mutation testing on `vercelSecurityHeaders.test.ts`: **7 mutants, 7 killed** (delete the CSP; loosen `X-Frame-Options` to `SAMEORIGIN`; add `'unsafe-eval'`; flip to phase 2 silently; narrow `source` to `/settings/(.*)`, which would drop `/login`; open `connect-src` to an external origin; change `regions`).
+- **Not done — deliberately:** phase 2 (the enforcing header) waits on a clean report-only window. CVE-2026-44581 accepted rather than mitigated, with reasoning recorded under Security headers.
+- **Corrections to this document:** the `npm audit` figure was a single wrong number and is now two labelled counts; the `global-error.tsx` inline-style finding is refuted and closed.
+
+## Previous Update (chat 6a)
+- **Date:** 2026-09-08
 - **Agent:** Claude (chat 6a — route handler authorization, sanitisation, idempotency key)
 - **Completed Task:** Closed D0, D5, D6 and D7. (1) New pure mapper `src/mappers/routeAuthz.ts` (80 lines) holding the single access decision plus the two denial literals. (2) New service `src/services/routeGuard.ts` (66 lines) exposing `requireSession` / `requireAdmin` over `NextRequest`. (3) New shared test fixture `src/test/sessionRequest.ts` (115 lines), importing nothing from `vitest` so it stays inert at build time. (4) All 13 route handlers under `src/app/api/` now carry a guard; previously none did. (5) `middleware.ts` refactored to import the shared denial constants — routing policy untouched, its 9 tests pass unedited. (6) `siigoCreditNoteItemSchema.description` now uses `sanitizedText({ max: 200 })`. (7) `Idempotency-Key` regex hardened to `/^[A-Za-z0-9]+$/`. (8) `.env.example` created with the 22 variables the code actually reads, plus a `!.env.example` negation in `.gitignore`.
 - **Verification:** `npx tsc --noEmit` ✅ | `npx vitest run` ✅ **629/629 (44 files, +36 tests, +2 files)** | `npx next build` ✅ 9/9 pages, 4 static | mutation testing on `routeAuthz.ts`: 4 mutants, 4 killed.
@@ -115,9 +123,35 @@ counts describe the suite as it stood on that date and are left untouched.
 | Gate | Command | Result |
 | --- | --- | --- |
 | Types | `npx tsc --noEmit` | clean |
-| Tests | `npx vitest run` | **629 passed (629)** across **44 files** — timezone-independent, verified under `America/Bogota`, `UTC`, `Asia/Tokyo` and `Pacific/Kiritimati` |
+| Tests | `npx vitest run` | **637 passed (637)** across **45 files** — timezone-independent, verified under `America/Bogota`, `UTC`, `Asia/Tokyo` and `Pacific/Kiritimati` |
 | Build | `npx next build` | clean (**9/9** pages, **4 static**: `/`, `/_not-found`, `/settings/credentials`, `/settings/mapping`) — needs `DATABASE_URL` set, a placeholder is enough. Was 10/10 until chat 6a gave `/api/health` `force-dynamic`, which took it out of the static-generation phase. |
-| Deps | `npm audit` | **2 high**, both `next` (and its bundled `postcss`). No fix exists in 14.x. Was 7 before `vitest` 2.1.9 -> 4.1.11 |
+| Deps | `npm audit` | See the two counts below. No fix exists in 14.x for any of them |
+
+### `npm audit` — two different counts, do not conflate them
+Earlier revisions of this document reported a single figure and it was wrong.
+`npm audit` summarises **per package**; the advisories live in `via[]` and are
+**per advisory**. Measured 2026-09-08:
+
+| Count | Value |
+| --- | --- |
+| **Per package** (what the `npm audit` summary prints) | **2** — 1 critical (`next`), 1 high (`postcss`) |
+| **Per advisory** (sum of `via[]`) | **27** — 2 critical · 10 high · 13 moderate · 2 low |
+
+`next` alone carries 23 advisories, `postcss` 4. Every single one is fixed only
+in `>= 15.5.x`. **This is the migration argument, and it is now the strongest
+one in this document.**
+
+The two `critical` entries, verbatim from `npm audit --json`, both **assessed as
+not applicable to this deployment**:
+
+| npm `source` | GHSA | Range | Why it does not apply here |
+| --- | --- | --- | --- |
+| 1193677 | `GHSA-p293-qw3h-jr36` (CVE-2026-75604) | `>=13.4.0 <15.5.24` | Requires Pages Router **and** App Router on a Windows filesystem. Verified: no `pages/` or `src/pages/` exists — App Router only. Vercel runs Linux |
+| 1193733 | `GHSA-2xp9-vwfh-vxw4` | `>=10.0.0 <15.5.24` | Requires the Image Optimization API to decode an attacker-supplied AVIF. Zero `next/image` in `src/`, no `images.remotePatterns`, and Vercel disabled AVIF optimisation across its managed service |
+
+Both `source` ids sit far above the rest of the feed (1112593–1139510),
+consistent with ingestion after the 2026-08-25 release. If a future audit shows
+them missing, that is a feed-ingestion difference, not a fix. |
 
 **Install note:** `npm install` on npm 10.x crashes with
 `Cannot read properties of null (reading 'edgesOut')` while resolving vitest's
@@ -134,8 +168,108 @@ does not. What `vercel.json` actually defines, verified line by line:
 - `X-Content-Type-Options: nosniff` ✅
 - `Referrer-Policy: strict-origin-when-cross-origin` ✅
 - `Permissions-Policy: camera=(), microphone=(), geolocation=()` ✅
-- `Content-Security-Policy` ❌ **absent** — not in `vercel.json` and not in
-  `next.config.js` either. Still open.
+- `Content-Security-Policy-Report-Only` ✅ **added in chat 6b (phase 1)** —
+  `vercel.json` only, never `next.config.js`, never `middleware.ts`. One CSP
+  header, not two.
+
+```
+default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self'
+'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src
+'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors
+'none'; upgrade-insecure-requests
+```
+
+- `Content-Security-Policy` (enforcing) ❌ **still absent, deliberately.**
+  Phase 2 flips the key once a report-only window comes back clean. **Do not
+  flip it without that confirmation.**
+
+All six headers hang off the single existing rule, `"source": "/(.*)"`. That
+pattern covers **every** path including `/login`, which is why the policy lives
+in `vercel.json` and not in `middleware.ts`: `middleware.ts:84`'s matcher
+**excludes `/login`**, the one public page that handles credentials.
+
+`X-Frame-Options: DENY` is **kept alongside** `frame-ancestors 'none'`.
+`frame-ancestors` supersedes it in modern browsers, but both deny, there is no
+possible conflict, and removing it is pure risk for no gain. Deliberate
+redundancy.
+
+**Why not a nonce, measured rather than assumed.** A nonce policy was built and
+served on commit `2f29a24`. The response header carried the nonce correctly, but
+the prerendered HTML of the `○` pages did not:
+
+| Route | Type | Nonce in header | Nonce in HTML | Inline `<script>` **without** nonce |
+| --- | --- | --- | --- | --- |
+| `/settings/credentials` | `○` | present | **absent** | **5** |
+| `/settings/profile` | `ƒ` | present | present | 0 |
+| `/login` | `ƒ` | present | present | 0 |
+
+Static pages are prerendered at build time into a fixed file; a per-request
+nonce matches nothing in them. Under `script-src 'self' 'nonce-…'
+'strict-dynamic'` those 5 scripts are blocked: CSS loads, hydration never runs.
+**All 4 `○` pages die, including `/`, the dashboard.** Build stays green, 637
+tests stay green, `next build` still prints them as `○`. CSP2 ignores
+`'unsafe-inline'` whenever a nonce is present, so there is no fallback. Making
+them dynamic would work but reverts DP2 and costs the prerender. Rejected.
+
+**`global-error.tsx` — finding closed, REFUTED.** Earlier revisions warned that
+its 8 inline `style` attributes would be blocked by `style-src`. Measured by
+forcing a root-layout throw: Next 14.2.35 serves `<html id="__next_error__">`
+with an **empty `<body>`** and a `chunks/app/global-error-*.js` tag. Zero
+`style="` attributes in the HTML. The screen is rendered **client-side only**,
+and React applies `style={{}}` via CSSOM, which CSP does not govern. Control
+that validates the measurement: an ordinary page with `style={{color:"#0052CC"}}`
+**does** serialise to `style="color:#0052CC;padding:16px"`, so React's SSR
+serialiser behaves as expected — `global-error` simply never reaches it.
+
+The risk moves rather than disappearing, and it moves to a worse place: that
+`<body>` is empty, so the error screen depends entirely on its scripts running.
+A wrong `script-src` turns it into **a blank page on top of a 500**. The
+directive to be careful with is `script-src`, not `style-src`.
+
+**`'unsafe-eval'` is deliberately absent.** All 24 production chunks were
+grepped for `eval(` and `new Function(` — zero hits. React needs `'unsafe-eval'`
+in development only, and `vercel.json` does not apply to `next dev`. To be
+confirmed in the report-only window, not assumed.
+
+### CVE-2026-44581 — accepted risk, with reasoning
+`GHSA-ffhc-5mcf-pf4q`, npm `source` 1118944, moderate, CVSS **4.7**
+(`AC:H`/`UI:R`), EPSS ~13th percentile. Range `>=13.4.0 <15.5.16`; **14.2.35 is
+inside it and its branch never received the patch.**
+
+Next.js reads the **request** header `Content-Security-Policy`, extracts the
+`nonce-` token and reflects it into its own `<script>` tags. `getScriptNonceFromHeader`
+rejects `&`, `<`, `>` but **not** `"`, and the Flight sink writes
+`<script nonce=${JSON.stringify(nonce)}>` — `\` is not an HTML escape, so the
+attribute breaks out. **Applications do not opt in: the forwarding is
+unconditional.**
+
+Reproduced on `2f29a24` against a local production build:
+
+```
+GET /login   Content-Security-Policy: script-src 'nonce-x"src=data:text/javascript,alert(1)//'
+→ <script nonce="x\"src=data:text/javascript,alert(1)//">self.__next_f.push(...)
+   5 occurrences per response; same on /settings/profile
+```
+
+**Accepted, not fixed.** The reasoning, recorded so a later session does not
+relitigate it: reflected-only by itself, because browsers never send that header
+on their own; escalation to stored XSS needs a shared cache keyed without the
+CSP header, and **this deployment has none** — the 4 `○` pages are served as
+prerendered files and the `ƒ` pages carry no `s-maxage`.
+
+Two mitigations were considered and **both rejected**:
+- A static CSP does **not** help. `vercel.json` writes a *response* header; the
+  bug reads the *request* header.
+- `routes[].transforms` with `request.headers` / `delete` in `vercel.json` would
+  strip it at the CDN and would reach `/login`. Rejected: it is a CDN-layer
+  change **invisible to all three gates**, introduced in the very session that
+  was isolated because such changes exist, to mitigate a 4.7 that needs a cache
+  that was measured not to exist.
+
+**The correct framing is not one CVE.** Thirteen advisories were published on
+6–7 May 2026 and 14.2.35 received none of them, because it is EOL. This finding
+does not change the design of chat 6b; it changes the **priority of the
+migration**, which is now the immediate next session.
 
 ### Roadmap phases 1-6
 All shipped. That is not the same as "ready for production": the blockers below
@@ -831,13 +965,16 @@ below is post-plan work, ordered by what blocks it.
   value already configured in production. Verify the real value first.
 
 **Technical sessions, no external blocker:**
-- **Chat 6b — Content-Security-Policy.** Still absent (see Security headers
-  above). Two findings condition its design: `middleware.ts:84`'s matcher
-  **excludes `/login`**, so a middleware-based CSP would not cover the
-  credential page; and `src/app/global-error.tsx` uses inline `style` attributes
-  in 8 places, which `style-src` blocks without `'unsafe-inline'` — the worst
-  possible failure surface, since it is the global error screen.
-- **Next.js migration.** 14.2.35 is EOL and unpatchable. The target is **the
+- **Chat 6b — Content-Security-Policy. Phase 1 shipped, phase 2 pending.**
+  `Content-Security-Policy-Report-Only` is live in `vercel.json`. Phase 2 is a
+  one-word key change, `Content-Security-Policy-Report-Only` →
+  `Content-Security-Policy`, in a single line of `vercel.json`, **and only after
+  a report-only window comes back clean in a preview deployment**. Nothing else
+  changes. The `global-error.tsx` inline-style concern that used to sit here was
+  **refuted by measurement** and is closed.
+- **Next.js migration — NEXT SESSION, elevated above everything else in this
+  list.** 14.2.35 is EOL and unpatchable, and carries 27 open advisories
+  (2 critical, 10 high) plus the accepted CVE-2026-44581. The target is **the
   latest release of the 16.x branch at migration time**, not a fixed number:
   Next.js has shipped monthly security releases since July 2026, so any version
   written down here expires within weeks. Do not go to 15.x — Maintenance LTS
