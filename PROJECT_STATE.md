@@ -42,7 +42,192 @@ Internal web application (Middleware API + Operational Dashboard) designed to au
 
 ---
 
+## Current State — Backlog Consolidado (sesión 0, 2026-09-10)
+
+Fusión de `AUDITORIA_PROYECTO_2026-09-09.md` (22 hallazgos de proceso/infra) y
+`AUDITORIA_FACT_ELECT_VET_2026-09-09.md` (22 hallazgos de código), más lo medido
+en vivo el 2026-09-10. **Numeración única.** Los prefijos antiguos (`N`, `H`, `P`,
+`S`, `B`, `D`, `T`) se conservan entre paréntesis solo para poder rastrear el
+origen; la referencia válida a partir de hoy es la columna `#`.
+
+**Conflicto resuelto entre los dos informes:** el informe de proyecto decía
+"funcionalmente terminado"; el de código decía que la anulación no puede funcionar.
+**Gana el de código.** "Terminado" es falso mientras la anulación legal no exista.
+
+### Bloqueantes de corrección — sesión 2 (ruta crítica de la factura)
+
+| # | Origen | Qué | Evidencia |
+|---|---|---|---|
+| **C-1** | nuevo 2026-09-10 | **Omisión de abonos de Provet en la cola.** `provetToQueue.ts:105-115` construye `consultationByInvoiceId` desde `inv.consultation`, que es `null` en toda nota de crédito, así que el documento entero desaparece. Medido: factura 5 = 1699.04, abono de 125.00 sobre `invoicerow/3` de esa misma factura → la cola factura 1699.04 en vez de 1574.04. **Sobrefacturación de 125.00 con validez fiscal.** El join correcto es `credited_invoicerow` → fila → factura → consulta | `EVIDENCIA §2.8` |
+| **C-2** | N5 | `provetToQueue.ts:117` — `if (lineTotal <= 0) continue` descarta filas en silencio. **Confirmado con datos**: `invoicerow/37` tiene `sum_total=-29.22`. Distinto de C-1 y con fix distinto. La justificación se escribe como "descarta filas negativas reales"; **no** como "descarta descuentos", que sigue sin verificar | `EVIDENCIA §2.8 d/e` |
+| **C-3** | N16 | El `balanced` de `QuickEditDrawer.tsx:56` compara `detail.total` contra lo tecleado, nunca contra `sumLineTotals`. `values.paidAmount` no llega al payload | — |
+| **C-4** | N17 | `invoiceReconciliation.ts:92-94` — `created_end` sin hora se interpreta `T00:00:00` y excluye la factura del día. Devuelve `null`, la ruta lo lee como "no existe" y **emite una segunda factura timbrada**. Aplica idéntico a `GET /v1/credit-notes` | `API_SIIGO §Listar` |
+| **C-5** | N7 | `duplicated_document` llega como 400 y `provablyCreatedNothing` lo trata como "no se creó nada". Es el único 4xx que significa lo contrario | — |
+| **C-6** | N6 | La `X-Idempotency-Key` se valida después de tomar el claim; una clave malformada deja la consulta en `unknown` sin tocar Siigo | — |
+| **C-7** | N18 | Reconciliación truncada a 500 documentos: "no lo encontré" se convierte en "no existe" | — |
+
+### Bloqueante crítico — sesión 3 (nota crédito)
+
+| # | Origen | Qué |
+|---|---|---|
+| **C-8** | N8 | El mapper de nota crédito está construido contra un contrato inventado: falta `invoice` (GUID) y `date`, `reason` es string donde la API espera entero 1-6, importes negados donde la API los quiere positivos, `total` en raíz donde no es campo de request, y la respuesta 201 se lee en raíz cuando `cufe`/`cude`/`status` van **bajo `stamp`**. **Ninguna nota crédito puede emitirse hoy** |
+| **C-9** | N14 | `creditNote.test.ts` — 23 tests que blindan el contrato equivocado. **Borrarlos ANTES de tocar el mapper**, o un agente futuro revierte el fix |
+| **C-10** | N13 | La ruta de notas crédito no tiene claim, marcador ni reconciliación. **Corrección al informe:** `GET /v1/credit-notes` SÍ existe con los mismos filtros que facturas, y su respuesta trae `invoice: {id, name}` — **una NC se localiza por el GUID de su factura padre, sin marcador en `observations`**. Ancla más fuerte que la de facturas y menos trabajo del estimado |
+
+### Frontera de autorización — sesión 4
+
+| # | Origen | Qué |
+|---|---|---|
+| **A-1** | N15 | `PUT /api/catalog-mapping` y `POST /api/credentials/health` solo piden `requireSession`. Un `employee` puede cambiar por API el tipo de comprobante DIAN y todo el mapeo. Misma clase que D0; sobrevivió al chat 6a |
+| **A-2** | N19 | El comentario de `auth.ts:14-19` afirma que el hash es irreversible. `sha256` sin sal ni coste no lo es. **La afirmación es falsa y hoy sirve de argumento para aplazar D1** |
+| **A-3** | N20 | Sin revocación de sesión: cambiar la contraseña no invalida JWT vivos (24 h) |
+| **A-4** | nuevo | **`middleware.ts` → `proxy.ts` y decisión de runtime.** Diferido desde la sesión 1 a propósito (ver Decisiones de plataforma). Aquí viven los 29 tests de `middleware`/`routeGuard`/`routeAuthz` |
+
+### Higiene, desacople, CI — sesión 5
+
+| # | Origen | Qué |
+|---|---|---|
+| **H-1** | N10 **reclasificado** | **Rediseño del fetch de Provet, no ajuste de paginación.** `invoice__in` funciona (8 filas vs 223 sin filtro), así que `/invoicerow/` deja de traerse entera. `/consultationitem/` se queda como está: para esa colección no hay filtro por padre y la causa raíz escrita era correcta. Medir el tamaño de lote de `invoice__in`. **Prerrequisito de infraestructura** |
+| **H-2** | nuevo 2026-09-10 | **`provetApi.ts:71` pide `/invoice` sin barra final → 301.** Cada página son dos viajes de red. Seis literales |
+| **H-3** | N1 | `Partner-Id` acepta guiones que Siigo rechaza |
+| **H-4** | N2 **BAJO→MODERADO** | Decimales invertidos. Ya no es latente: `Amoxicillin 250mg` tiene `quantity 0.028` en el tenant y Siigo admite 2 decimales |
+| **H-5** | N3 | `observations` limitado a 500 donde Siigo permite 4.000 — y ese campo lleva el marcador de reconciliación |
+| **H-6** | N4 | `payments.due_date` no modelado; un medio de pago de cartera rompe toda emisión |
+| **H-7** | N12 | `fetchInvoiceFile` y `getSiigoAccessToken` sin timeout |
+| **H-8** | N23 | 12 `fetch` crudos en 5 archivos. No existe `src/services/apiClient.ts` |
+| **H-9** | L2/L4 | Tres implementaciones de `America/Bogota`, dos utilidades de redondeo |
+| **H-10** | D-c | **CI en GitHub Actions.** ~15 min. El mayor retorno por esfuerzo del backlog |
+| **H-11** | D-d | **Smoke test de emisión autenticado.** Habría atrapado 3 de los 4 fallos que escaparon a los tres gates |
+| **H-12** | D-j | Sanear texto también en `creditNote.ts:44` |
+| **H-13** | D-k | `customer_settings` en la tabla de traducción de errores |
+| **H-14** | P-1 rama A | **Detector de anulaciones en Provet.** Especificado y sin incógnitas: `/invoice/?credit_note__is=true&modified__gte=` → id del path de `credit_note_original_invoice` → factura → consulta. **Solo detector, nunca emisor automático.** Nota: C-1 hay que arreglarlo aunque este detector no se construya |
+
+### Con credenciales de producción — sesión 6
+
+| # | Origen | Qué |
+|---|---|---|
+| **P-1** | B1/B2 | Primera emisión real con `stamp.send: true` y captura del JSON crudo. **Nadie ha visto nunca un `stamp` con CUFE** |
+| **P-2** | N8 | Captura del 201 crudo de nota crédito y resolución de la contradicción del enum `reason` (la tabla lista 1,2,3,4,6,7; el esquema declara 1-6) |
+| **P-3** | N11 | Confirmar Fluid compute y fijar `maxDuration` explícito |
+| **P-4** | N17 | Confirmar si la ventana de reconciliación sobraba, y si `created` viene en COT o UTC |
+| **P-5** | — | CSP fase 2, precedida por el endpoint de recolección (H-3 del informe de proyecto): hoy la condición de salida es **inobservable** |
+| **P-6** | P-1 | Correr `GET /invoice/?credit_note__is=true` contra el tenant de **producción**. Decide si el detector H-14 hace falta |
+
+### Bloqueantes de terceros — no dependen de Jean
+
+| # | Qué | De quién |
+|---|---|---|
+| **T-1** | Credenciales de producción de Siigo y Provet | Dueña |
+| **T-2** | Resolución DIAN activa y `documentTypeId` de la cuenta | Dueña |
+| **T-3** | **Plan Vercel Pro.** El ToS se incumple hoy por dos vías | Dueña |
+| **T-4** | Plan de Supabase con backups | Dueña |
+| **T-5** | **Permiso `Settings` de Provet.** Cubre `/item/` Y `/settings/department/`. **Una sola petición, no dos.** La hipótesis de que los catálogos por tipo lo esquivaran es FALSA: los 7 endpoints dan 403 | Dueña / Provet |
+| **T-6** | ¿Se anula alguna vez desde Provet? P-6 puede responderlo sin preguntar | Dueña |
+
+### Cerrado en la sesión 0
+
+| Origen | Estado |
+|---|---|
+| H-1 (informe de proyecto) | **Cerrado.** `EVIDENCIA_APIS.md` y las dos referencias de API están commiteadas en la raíz (`a882791`, `0019ef5`) y añadidas a `.clinerules §1` |
+| H-2 (informe de proyecto) | **Cerrado.** Una sola definición del cap, en `.clinerules §CODE EFFICIENCY`: 150 líneas crudas en `/services`, `/mappers`, `/components`; `/src/app` fuera. 17 violaciones, no remediadas a propósito |
+| N21 | **Cerrado.** El repo es la única fuente. Prohibido duplicar gobernanza en el Project |
+| N22 | **Cerrado por Jean** en `instrucciones_proyecto.md` (quinta tabla `invoice_claims` + ruta `api/invoice-claims`) |
+| Gate 3 | **Corregido** en `.clinerules §2` y `2_AGENT §1`: `next build`, no `npm run lint` |
+| P-7 (`external_info`) | **Descartado, no diferido.** No existe en `/invoice/`. Sustituto registrado: `set_integration_status` |
+| Sobrescritura en `provetToQueue.ts:87-90` | **Hipótesis falsificada.** `consultation` es `null` en las NC, así que `.set()` nunca se sobrescribe. Registrada para que nadie la reabra. El fallo real es C-1, por omisión |
+| `status = 99` como marcador de anulación | **Sin evidencia.** `status` es `integer` `readOnly` sin enum publicado; las 4 filas medidas traen `3`. El marcador es `credit_note` |
+
+### Decidido NO hacer — no reabrir
+
+| Descartado | Por qué |
+|---|---|
+| Refactorizar los 17 archivos que exceden el cap | Deuda cosmética con riesgo de regresión real. Se arregló la regla |
+| Mitigar CVE-2026-44581 en `middleware.ts` | La sesión 1 lo cierra igual |
+| Migrar a Next.js 15.x como paso intermedio | EOL 2026-10-21, confirmado en endoflife.date |
+| `ANNULMENT_REASONS` con 5 motivos | El flujo real es siempre `reason: 2` |
+| Migrar `invoice_claims` a `external_info` | Imposible: el campo no existe en `invoice` |
+| `ts-prune` como tarea recurrente | Falsos positivos con `z.infer` |
+| Las 2 filas `invoices` sin `claim` como tarea de código | Limpieza de datos del día del corte. SQL preparado |
+| Subir `@hookform/resolvers` a 5.x en la sesión 1 | Arrastra un bump de Zod, que valida todos los payloads de Siigo. Otra sesión |
+
+---
+
+## Decisiones de plataforma — cerradas el 2026-09-10, no relitigar
+
+1. **Vercel Pro es el destino de producción.** La razón no es el precio: es cero
+   migración, y que Vercel es la implementación de referencia del middleware —que
+   en Next 16 pasa a llamarse Proxy— y sigue siendo un obstáculo arquitectónico
+   declarado para el resto de proveedores. **Toda la frontera de autorización de
+   esta app es middleware.**
+
+2. **Render Starter ($7/mes) queda como alternativa evaluada y NO descartada**,
+   con condición de entrada explícita: **bloqueada hasta que H-1 esté cerrado**.
+   Motivo medible: `provetApi.ts:144` hace `all.push(...results)` con
+   `page_size=1000` sobre seis colecciones, contra los 512 MB de Starter.
+   A favor de Render: región Ohio (`us-east-2`), donde vive Supabase; hoy el
+   despliegue está en `iad1`, Virginia.
+   *Actualización del 2026-09-10:* con `invoice__in` confirmado, la huella de
+   `/invoicerow/` no se reduce — **se elimina**. La condición se relaja.
+
+3. **Firebase App Hosting: descartado por ahora.** Limita el cacheo en apps Next.js
+   con middleware, y su free tier de 180.000 vCPU-segundos es justo contra el
+   sondeo de 20 s. **Firebase Auth y Firestore descartados sin condición:**
+   adoptarlos supondría reescribir la capa de autorización endurecida en los
+   chats 5 y 6a, y sustituir la atomicidad del `INSERT ... ON CONFLICT` de
+   `acquireInvoiceClaim`, que es el guardián contra el doble timbrado ante la DIAN.
+
+4. **H-1 (ex N10) sube de categoría:** sigue en la sesión 5, pero deja de ser
+   higiene de rate limit y pasa a ser además **prerrequisito de infraestructura**.
+
+5. **`maxDuration` explícito en `vercel.json` deja de ser opcional.** Con Pro son
+   300 s por defecto y 800 s de máximo; el peor caso medido de una emisión con
+   reintento y reconciliación ronda los 250 s. Eso cierra N11 sin migrar nada,
+   pero hay que **fijarlo, no asumirlo**, y confirmar antes Fluid compute.
+   *Matiz medido:* Fluid compute viene **habilitado por defecto**; el modo heredado
+   solo afecta a proyectos desplegados antes del 2025-04-23. Este es de 2026, así
+   que la verificación es una confirmación, no un bloqueante.
+
+6. **Edge congelado en la sesión 1.** `middleware.ts` se mantiene tal cual, con su
+   deprecación aceptada. Verificado empíricamente contra Next 16.3.4: el build
+   **pasa con exit 0** y emite solo un aviso —`The "middleware" file convention is
+   deprecated. Please use "proxy" instead.`— con codemod disponible
+   (`npx @next/codemod@canary middleware-to-proxy .`), **no ejecutado**. El paso a
+   `proxy.ts` y la decisión de runtime van a la sesión 4 (A-4). Razón: un cambio
+   por sesión. Si se rompe tras cambiar framework, nombre de archivo y runtime a la
+   vez, no se sabe cuál lo causó, y el síntoma es un `employee` con acceso de admin.
+   **Nota:** `proxy` NO soporta el runtime `edge` y su runtime `nodejs` no es
+   configurable, así que el paso a `proxy.ts` mueve toda la frontera de
+   autorización a Node. Es una decisión de arquitectura, no un `mv`.
+
+---
+
 ## Last Update
+- **Date:** 2026-09-10
+- **Agent:** Claude (sesión 0 — pipeline limpio y backlog único)
+- **Completed Task:** Sin cambios en `src/`. Fusión de los dos informes de auditoría
+  en un backlog único con numeración propia dentro de este documento; registro de las
+  seis decisiones de plataforma; una sola definición del cap de 150 líneas; corrección
+  del tercer gate en `.clinerules §2` y `2_AGENT §1`; los siete documentos de
+  gobernanza añadidos al protocolo de lectura de `.clinerules §1`.
+  `EVIDENCIA_APIS.md` gana las secciones **2.8 a 2.12**, todas medidas en vivo el
+  2026-09-10 contra `awstest.provetcloud.com/9174` con siete `GET` y ninguna escritura.
+- **Verificación en vivo, lo que cambió el plan:** (1) las notas de crédito de Provet
+  llegan con `consultation: null` y su omisión provoca sobrefacturación medida de
+  125.00 sobre la factura 5 → **hallazgo C-1, nuevo, sesión 2**; (2) `invoice__in`
+  funciona en `/invoicerow/` (8 vs 223) → **N10 pasa de paginación a rediseño**;
+  (3) `page_size` por defecto = **50**, así que el peso 20 de `page_size=1000` queda
+  medido; (4) los **siete** endpoints de catálogo dan 403 → **P-5 muerto, T5 real**;
+  (5) `/invoice` sin barra final devuelve **301** → hallazgo H-2; (6) el signo no
+  identifica un abono, solo `credit_note` y `credited_invoicerow`.
+- **Hipótesis mías falsificadas, registradas a propósito:** la sobrescritura de
+  `invoiceByConsultation` (`:87-90`) no ocurre; `credit_note__is` sí existe pese a no
+  estar en la referencia markdown; los "defaults" 39/11/16 eran conteos de registros,
+  no `page_size`. Tres errores de instrumentación que ningún gate habría detectado.
+- **Gates:** no aplican. Esta sesión no toca `src/` ni `package.json`.
+- **Next Pending Task:** sesión 1 — migración a Next.js 16.3.4 **y React 19**, con
+  `middleware.ts` intacto. Ver `prompt_sesion_1.md`.
+
+## Previous Update (chat 6b)
 - **Date:** 2026-09-08
 - **Agent:** Claude (chat 6b — Content-Security-Policy, phase 1)
 - **Completed Task:** Added `Content-Security-Policy-Report-Only` as a sixth header on the existing `"source": "/(.*)"` rule in `vercel.json`. The five pre-existing headers, `framework` and `regions` are byte-identical. **Nothing under `src/` changed except one new test file.** `middleware.ts` untouched — its 9 tests pass unedited, `ADMIN_ONLY_RULES` / `requiresAdmin` / `config.matcher` and the 13 route-handler guards are exactly as chat 6a left them. New `src/test/vercelSecurityHeaders.test.ts` (8 tests) is the only thing that makes this change visible to any gate at all: `vercel.json` is not type-checked, not bundled, not executed by `next build` and read by no other test, so a deleted or JSON-broken policy would otherwise ship silently. It asserts shape only — no test in a Node environment can prove a policy does not break a browser, and jsdom remains a rejected project decision. That is documented debt, in the file's header comment.
