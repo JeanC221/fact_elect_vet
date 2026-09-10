@@ -9,15 +9,18 @@ This document governs the operational behavior of all coding agents (GLM 5.2, Ki
 Every agent intervention MUST be strictly **atomic, self-contained, and scope-delimited**. No agent shall tackle multiple modules or unrelated files simultaneously.
 
 ### Mandatory Pre-Flight Checklist:
-Before writing or refactoring any code, the agent MUST read:
-1. `PROJECT_STATE.md` -> Identify current phase and the assigned **Next Pending Task**.
+Before writing or refactoring any code, the agent MUST read the seven governance
+documents listed in `.clinerules` §1. In short:
+1. `PROJECT_STATE.md` -> `## Current State` is the source of truth. The `Next Pending Task` lines below it are an append-only changelog, not live instructions.
 2. `01_PROJECT_REQUIREMENTS.md` -> Verify DIAN tax rules, API specs (Provet/Siigo), and domain constraints.
 3. `03_UI_UX_DESIGN_SPEC.md` -> Enforce clinical UI layouts, high-density rules, and color palettes.
+4. `EVIDENCIA_APIS.md` -> Observed API evidence. Takes priority over official docs under its own class rule.
+5. `API_SIIGO_REFERENCIA_COMPLETA.md` and `API_PROVET_CLOUD_REFERENCIA_COMPLETA.md` -> Captured official documentation.
 
 ### 4-Step Operational Cycle per Task:
 1. **Audit & Plan:** Inspect `/src` for existing helpers/mappers to reuse. Output a brief 3-step strategy. DO NOT duplicate existing code.
 2. **Delimited Execution:** Write or refactor ONLY the code strictly required for the assigned target files.
-3. **Automated Verification Loop:** Execute `npx tsc --noEmit`, `npx vitest run`, and `npm run lint`. Fix all compilation and schema errors automatically before proceeding.
+3. **Automated Verification Loop:** Execute `npx tsc --noEmit`, `npx vitest run`, and `env -u NODE_ENV npx next build`. Fix all compilation and schema errors before proceeding. **`npm run lint` is an alias of `tsc --noEmit`** — there is no ESLint in this project, so running it as a third gate verifies nothing new.
 4. **Update Project State:** Record progress, modified files, and the next pending task in `PROJECT_STATE.md`.
 
 ---
@@ -27,7 +30,7 @@ Before writing or refactoring any code, the agent MUST read:
 To ensure clean, maintainable, and non-redundant software:
 
 * **Reuse Before Creating (DRY Rule):** Always check `/src/services`, `/src/mappers`, and `/src/schemas` before creating new utilities. Reinventing existing helpers is strictly prohibited.
-* **Strict File Size Limit:** No single file under `/src` shall exceed **150 lines of code**. If logic grows beyond this limit, refactor into isolated sub-modules.
+* **Strict File Size Limit:** See `.clinerules` §CODE EFFICIENCY for the single authoritative definition: **150 raw lines** (`wc -l`) under `/src/services`, `/src/mappers` and `/src/components` only. `/src/app` is out of scope. The previous wording here ("no single file under `/src`") was one of three incompatible definitions of the same rule and is retired — it is not an alternative reading.
 * **Algorithmic Simplicity:** Use pure, functional transformations (Zod schemas / native JS array methods like `.map()`, `.reduce()`). Maximum allowed time complexity for data mapping is $O(n)$.
 * **Strict Layer Decoupling:**
   - `/services`: Direct HTTP API communication only.

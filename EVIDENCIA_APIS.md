@@ -369,6 +369,140 @@ Sección nueva. Todo verificado como ausente en `src/` por grep:
 
 ---
 
+### 2.8 OBSERVADO (clase A) — Notas de crédito de Provet: forma, join y signo
+
+**Medido el 2026-09-10** contra el tenant `awstest.provetcloud.com/9174` con las
+credenciales de sandbox. Siete `GET`, ninguna escritura. Todo lo de esta sección
+es **contrato del software de Provet**, no datos del tenant, salvo donde se diga.
+
+**a) Una nota de crédito es un registro de factura nuevo, sin consulta.**
+
+```
+id=5   credit_note=False  consultation=.../consultation/4/  total_with_vat=1699.04  status=3
+id=6   credit_note=True   consultation=None                 total_with_vat=125.00   status=3
+id=10  credit_note=False  consultation=None                 total_with_vat=-29.22   status=3
+id=13  credit_note=True   consultation=None                 total_with_vat=29.22    status=3
+```
+
+`consultation` es **`null` en toda nota de crédito**. El vínculo con el documento
+original va por `credit_note_original_invoice`, que es una **URI absoluta**, no un
+id: hay que extraer el id del path. A nivel de línea el vínculo es
+`invoicerow.credited_invoicerow`, también URI.
+
+**b) El signo NO identifica un abono.** Contraejemplos medidos, ambos:
+
+| Documento | `credit_note` | `total_with_vat` | `quantity` de su línea |
+|---|---|---|---|
+| id=13 | **true** | **+29.22** | **−1.0** |
+| id=6 | **true** | **+125.00** | **+2.0** |
+| id=10 | false | **−29.22** | +1.0 |
+
+Un abono puede llegar con importe positivo y cantidad positiva. Una factura
+ordinaria puede llegar con importe negativo. **Los únicos marcadores fiables son
+`invoice.credit_note` y `invoicerow.credited_invoicerow`.** Cualquier heurística
+por signo es incorrecta.
+
+**c) Un abono puede exceder la línea que abona.** `invoicerow/3` (factura 5) vale
+62.50 con `qty 1.0`; la línea de abono de la factura 6 vale 125.00 con `qty 2.0`.
+Ninguna reconciliación debe asumir `abono <= línea`.
+
+**d) Existen filas con `sum_total` negativo.** `invoicerow/37`: `sum_total=-29.22`,
+`qty=1.0`. Esto es lo que hace real —no teórico— el descarte silencioso de
+`provetToQueue.ts:117`.
+
+**e) `discount_amount` existe pero está a cero en todo el tenant** (`0.0` y `-0.0`).
+**El mecanismo del descuento sigue NO VERIFICADO:** no se sabe si Provet crea una
+fila negativa o lo aplica dentro de la fila. No escribir "descarta descuentos"
+como si estuviera medido.
+Trampa: `-0.0` en JSON se parsea como `-0` en JS, y `-0 <= 0` es `true`.
+
+**f) `status` es `integer` y `readOnly`, sin enum publicado.** Las cuatro filas
+traen `3`. **No hay evidencia del "estado 99 = anulada"** que se citó en
+auditorías previas. No usar `status` como marcador de anulación.
+
+### 2.9 OBSERVADO (clase A) — `/invoicerow/` SÍ se puede filtrar por su factura padre
+
+**Medido el 2026-09-10.**
+
+```
+GET /invoicerow/?invoice__in=11,48  ->  8 filas
+GET /invoicerow/                    ->  223 filas
+```
+
+El filtro **funciona**; no es el caso de "aceptado e ignorado". Esto corrige la
+causa raíz escrita en `provetApi.ts:100-130`, que generalizó desde un único caso
+medido (`consultationitem?consultation=`) a las seis colecciones.
+
+El esquema OpenAPI explica la diferencia: **`/consultationitem/` no declara ningún
+filtro por consulta — cero —** mientras que `/invoicerow/` declara `invoice__is`,
+`invoice__in`, `invoice__is_not`, `invoice__is_null`, `invoice__not_in`.
+`/invoice/` declara además `consultation__is`, `consultation__in`, `_status__is`,
+`credit_note__is`, `modified__gte` e `id__gt`.
+
+**Consecuencia:** `/invoicerow/` deja de traerse entera. `/consultationitem/`
+se queda como está — para esa colección la causa raíz escrita era correcta.
+
+**Pendiente de medir:** cuántos ids caben en un `invoice__in` antes de reventar el
+límite de longitud de URL. Hay que lotear; el tamaño del lote se mide, no se elige.
+
+### 2.10 OBSERVADO (clase A) — `page_size` por defecto = 50, y la barra final importa
+
+**Medido el 2026-09-10.** El esquema no publica el `page_size` por defecto.
+Llamando sin el parámetro, las colecciones con volumen suficiente devuelven **50**
+(`/invoice/`, `/invoicerow/`, `/consultationitem/`). `/consultation/` 39,
+`/client/` 11 y `/patient/` 16 **no son defaults**: son el total de registros del
+tenant, menor que la página. **El default es 50.**
+
+Con eso el peso del rate limit deja de ser estimación:
+
+| `page_size` | Peso `ceil(pedido/50)` | Páginas hasta agotar 60 req/min |
+|---|---|---|
+| **1000 (hoy)** | **20** | **3** |
+| 200 | 4 | 15 |
+| 50 | 1 | 60 |
+
+**Barra final:** `provetApi.ts:71` compone `${base}/invoice?page=1...`, sin barra.
+
+```
+GET /invoice   ->  301
+GET /invoice/  ->  200
+```
+
+Cada página de la sincronización son **dos viajes de red**. Si Provet contabiliza
+el `301` contra el presupuesto, el peso real es el doble del de la tabla. **No
+verificado**: se comprueba mirando la cabecera de rate limit antes y después de
+una llamada redirigida.
+
+### 2.11 OBSERVADO (clase A) — El 403 de catálogo cubre TODOS los tipos
+
+**Medido el 2026-09-10.** Los siete devuelven **403** con el token actual:
+`/item/`, `/medicine/`, `/procedure/`, `/supply/`, `/food/`,
+`/laboratoryanalysis/`, `/laboratoryanalysispanel/`.
+
+**La hipótesis de que los catálogos por tipo esquivaran el permiso de `/item/` es
+falsa.** El bloqueante no desaparece.
+
+`GET /settings/department/<id>/` también devuelve **403** para los departamentos 1
+y 2, así que **`financial_period_lock_date` no es verificable** con estas
+credenciales.
+
+El esquema OpenAPI nombra la familia de permisos como **`Settings: Items`**, distinta
+de `General: Consultations` y `Financial: Invoices`. Eso es evidencia del esquema,
+no una respuesta de la API: Provet devuelve `403` a secas. **Los dos 403 son la
+misma petición de permisos a la clínica, no dos.**
+
+### 2.12 DESCARTADO (clase A) — `external_info` no existe en `/invoice/`
+
+El objeto `external_info` (`external_id` + `metadata`) existe **únicamente** bajo
+`/unallocatedpayment/{...}/external_info/`. **No hay `external_info` en `invoice`**,
+así que no es una alternativa a la tabla `invoice_claims`. Cerrado, no diferido.
+
+El mecanismo nativo de write-back que sí existe es
+**`POST /consultation/{id}/set_integration_status/`** y **`/mark_sent/`**.
+Registrado como alternativa; no ejecutado.
+
+---
+
 ## 3. Entorno y despliegue — **clase B, todo caduca**
 
 > Nada de esta sección gana a la documentación fuera de su ventana de vigencia.

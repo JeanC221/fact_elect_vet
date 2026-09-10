@@ -4,11 +4,28 @@
 ---
 
 ## 1. MANDATORY READ-FIRST PROTOCOL
-Before writing, refactoring, or planning any code, you MUST inspect the following root files:
-1. `PROJECT_STATE.md` -> Read the `## Current State` section: it is the single source of truth for the verified state of the repo. The `Next Pending Task` lines further down are append-only changelog entries, not live instructions.
-2. `01_PROJECT_REQUIREMENTS.md` -> Validate business logic, DIAN tax rules, and API spec.
-3. `2_AGENT_WORKFLOW_RULES.md` -> Follow token rules, atomic scope, and agent matrix[cite: 1, 3].
-4. `03_UI_UX_DESIGN_SPEC.md` -> Apply strict clinical UI design constraints[cite: 4].
+Before writing, refactoring, or planning any code, you MUST inspect the following
+root files. All seven live in the repo. **None of them may be duplicated into the
+Project knowledge**: two unsynchronised copies already caused an agent to read a
+stale `.clinerules` with a broken reference for several sessions.
+
+1. `PROJECT_STATE.md` -> Its `## Current State` section is the single source of
+   truth for verified state. The `Next Pending Task` lines further down are an
+   append-only changelog, **not** live instructions.
+2. `01_PROJECT_REQUIREMENTS.md` -> Business logic, DIAN tax rules, API contract.
+3. `2_AGENT_WORKFLOW_RULES.md` -> Token rules, atomic scope, agent matrix.
+4. `03_UI_UX_DESIGN_SPEC.md` -> Strict clinical UI design constraints.
+5. `EVIDENCIA_APIS.md` -> Observed evidence from Siigo and Provet.
+   **Takes priority over official documentation**, under the class rule the
+   document itself defines: API contracts (class A) always win; platform limits
+   (class B) win only inside their stated validity window.
+6. `API_SIIGO_REFERENCIA_COMPLETA.md` -> Captured official Siigo doc, endpoint by
+   endpoint. Live source: `developers.siigo.com/docs/siigoapi/`.
+   `developers.siigolatam.com` is dead — do not cite it.
+7. `API_PROVET_CLOUD_REFERENCIA_COMPLETA.md` -> Captured official Provet doc.
+   Live source: `developers.provetcloud.com`, plus the raw OpenAPI schema at
+   `developers.provetcloud.com/restapi/0.1/openapi-schema-01.json`, which is
+   authoritative over the captured markdown when the two disagree.
 
 ---
 
@@ -16,48 +33,95 @@ Before writing, refactoring, or planning any code, you MUST inspect the followin
 
 ### Mode 1: PLAN MODE (Complex / Multi-file Tasks)
 - When assigned a new Task, output a concise 5-step strategy FIRST.
-- Specify target files, modified routes, Zod schemas, and test cases[cite: 1].
+- Specify target files, modified routes, Zod schemas, and test cases.
 - DO NOT edit files until the user or system approves the plan.
 
 ### Mode 2: ACT & VERIFY MODE (Execution)
-- Modify ONLY the target files listed under `Next Pending Task` in `PROJECT_STATE.md`[cite: 1].
-- Follow Test-Driven Development (TDD): Write or update Zod schemas & Vitest unit tests before logic implementation[cite: 1].
-- Execute the mandatory **Verification Loop** before finalizing:
-  1. `npx tsc --noEmit` (Zero TypeScript compilation errors allowed).
-  2. `npx vitest run` (100% test suite pass rate).
-  3. `npm run lint` (Zero unused variables or dead imports).
-- If any command fails, fix the errors automatically before updating `PROJECT_STATE.md`[cite: 1].
+- Modify ONLY the target files listed under the session's frozen scope.
+- Follow Test-Driven Development (TDD): write or update Zod schemas & Vitest unit
+  tests before logic implementation, with the RED phase explicitly confirmed.
+- Execute the mandatory **Verification Loop** before finalizing. All three green
+  or no progress:
+  1. `npx tsc --noEmit` (zero TypeScript errors).
+  2. `npx vitest run` (full suite, 100% pass).
+  3. `env -u NODE_ENV npx next build` (build completes).
+- **There is no ESLint in this project.** `npm run lint` is an alias of
+  `tsc --noEmit` and therefore identical to gate 1. It checks nothing new and is
+  not a valid third gate. `next build` is.
+- **The three gates do not see `vercel.json`.** A deleted or malformed header
+  ships silently. That is why `src/test/vercelSecurityHeaders.test.ts` exists;
+  generalise that shape-test pattern rather than removing it.
+- If any command fails, fix the errors before updating `PROJECT_STATE.md`.
 
 ---
 
 ## 3. DOMAIN & INTEGRATION LAWS (PROVET ↔ SIIGO DIAN)
 
-- **Mandatory API Headers:** All Siigo outgoing requests MUST include `Partner-Id` and a unique `Idempotency-Key` (max 30 chars) to avoid double invoicing[cite: 1, 8].
-- **Environment Safety:** Keep `stamp.send` set to `false` in Sandbox/Mock modes. Toggle to `true` strictly when running DIAN production flows[cite: 1, 2, 8].
-- **Runtime Validation:** All input payloads from Provet and output JSONs for `POST /v1/invoices` MUST pass strict Zod schema parsing before hitting the network[cite: 1, 8].
-- **Error Translation Layer:** Never expose raw API 500/429/400 stack traces to the UI. Map them to Spanish human-readable messages (`invalid_identification`, `invalid_total_payments`) with fast-edit triggers[cite: 1, 8].
+- **Mandatory API Headers:** All Siigo outgoing requests MUST include `Partner-Id`
+  and a unique `Idempotency-Key` (max 30 chars, `/^[A-Za-z0-9]+$/` — no hyphens,
+  so `crypto.randomUUID()` is not a valid key as-is).
+- **A 500 from Siigo consumes the Idempotency-Key permanently.** Any retry must
+  generate a fresh key.
+- **Environment Safety:** Keep `stamp.send` set to `false` in Sandbox/Mock modes.
+  Toggle to `true` strictly when running DIAN production flows.
+  **EXCEPTION — credit notes:** `stamp.send` is ALWAYS `true` on credit notes,
+  sandbox included, per DIAN Resolución 000042. Hardcoding it to `false` there is
+  a legal bug, not a safe default.
+- **Tolerance contract:** the schema tolerates extra fields (`.passthrough()`);
+  the logic NEVER tolerates absent ones. A `transform` returning `cufe: ""` and
+  `status: "Draft"` when the `stamp` carries no CUFE turns a DIAN-accepted invoice
+  into a silent draft. If the field is missing, throw.
+- **Runtime Validation:** All Provet input payloads and all outgoing JSON for
+  `POST /v1/invoices` and `POST /v1/credit-notes` MUST pass strict Zod parsing
+  before hitting the network.
+- **Error Translation Layer:** Never expose raw API 500/429/400 stack traces to
+  the UI. Map them to Spanish human-readable messages with fast-edit triggers.
+- **Fail loudly, never silently.** A silent fallback is a bug, not a safe default.
+  Documented and accepted exceptions: `login_rate_limit` (intentional fail-open).
+- **`invoicerow.sum_total` is read verbatim, never recalculated.** Reading it
+  verbatim does NOT authorise discarding rows with `sum_total <= 0`: negative rows
+  exist in the live tenant and dropping them produces silent over-invoicing.
+- **A Provet credit note is a new invoice record** with `credit_note: true` and
+  `consultation: null`. Neither the sign of `sum_total` nor the sign of `quantity`
+  identifies a credit: only `invoice.credit_note` and `invoicerow.credited_invoicerow` do.
+- **Invoice dates are computed in `America/Bogota`**, never from a raw
+  `new Date().toISOString()` (that is UTC and shifts the date at night).
+- **Never hardcode account-specific IDs** (document type, seller). They come from
+  `catalog_mapping`, throwing `MissingEmissionSettingError` /
+  `MissingCreditNoteSettingError` when absent.
 
 ---
 
 ## 4. UI/UX CLINICAL CONSTRAINTS
-- Strictly enforce `03_UI_UX_DESIGN_SPEC.md`[cite: 4].
-- Palette: Cool Grey (`#F4F6F8`), Pure White (`#FFFFFF`), Clinical Blue (`#0052CC`), Slate Text (`#1A202C`)[cite: 4].
-- Layout: Dense tabular display, compact padding (`p-2` to `p-4`), max border-radius `rounded-md` (6px)[cite: 4].
-- Strictly PROHIBITED: Glowing neon colors, floating cards with massive drop shadows, oversized rounded corners (`rounded-2xl`/`3xl`), and generic SaaS illustrations[cite: 4].
+- Strictly enforce `03_UI_UX_DESIGN_SPEC.md`.
+- Palette: Cool Grey (`#F4F6F8`), Pure White (`#FFFFFF`), Clinical Blue (`#0052CC`), Slate Text (`#1A202C`).
+- Layout: Dense tabular display, compact padding (`p-2` to `p-4`), max border-radius `rounded-md` (6px).
+- Strictly PROHIBITED: Glowing neon colors, floating cards with massive drop shadows, oversized rounded corners (`rounded-2xl`/`3xl`), and generic SaaS illustrations.
 
 ---
 
 ## 5. ZERO SMALL-TALK DIRECTIVE & OUTPUT FORMAT
 
-Do NOT print greetings, conversational confirmations, or filler text (e.g., "Hello!", "Sure, I can help")[cite: 1, 2].
+Do NOT print greetings, conversational confirmations, or filler text.
 
-All task completion responses MUST strictly adhere to this format[cite: 1]:
-1. **Technical Summary:** 3 lines max summarizing the code changes[cite: 1].
-2. **Code/Diff Block:** Exact modified files or clean targeted diffs[cite: 1].
-3. **Updated PROJECT_STATE.md:** Markdown snippet reflecting completed task, modified files, and the Next Pending Task for the next agent[cite: 1].
+All task completion responses MUST strictly adhere to this format:
+1. **Technical Summary:** 3 lines max summarizing the code changes.
+2. **Complete files, never partial diffs**, each with its full path from the repo
+   root. A partial diff already caused one route handler to overwrite another and
+   broke invoice emission in production undetected.
+3. **Updated PROJECT_STATE.md:** Markdown snippet reflecting the completed task,
+   modified files, and the next pending task.
 
 ## CODE EFFICIENCY & REUSE LAWS
 - REUSE BEFORE CREATING: Always search `/src` for existing helpers, interfaces, or mappers before writing new code. Reinventing existing utilities is strictly forbidden.
 - ALGORITHMIC SIMPLICITY: Prefer functional, pure transformations (Zod / native JS methods). Maximum complexity allowed for data transformation is O(n).
-- FILE SIZE LIMIT: No single file under `/src/services`, `/src/mappers`, or `/src/components` shall exceed 150 lines of code. Split into smaller modules if exceeded.
+- FILE SIZE LIMIT — **single authoritative definition.** No single file under
+  `/src/services`, `/src/mappers` or `/src/components` shall exceed **150 raw
+  lines** (`wc -l`, blanks and comments included). `/src/app` is explicitly OUT OF
+  SCOPE: those are composition pages and the limit is counterproductive there.
+  This supersedes every other wording of the rule in the repo. Under it there are
+  currently **17 violations**, deliberately not remediated — see the backlog.
+  Do not reinterpret this rule to make work pass a gate.
 - ZERO DUPLICATION: UI components must NEVER perform raw data mapping or direct API calls. Use existing `/services` and `/mappers` exclusively.
+- `src/mocks/` is NOT a test artifact — production files import it.
+- `ts-prune` reports false positives for exports feeding `export type X = z.infer<...>`.
