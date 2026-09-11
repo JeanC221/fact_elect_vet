@@ -9,7 +9,7 @@ import {
   type Patient,
 } from "@/schemas/provet";
 import type { SiigoInvoicePayload } from "@/schemas/siigo";
-import { provetToSiigoInvoice, TotalMismatchError, type ProvetToSiigoOptions } from "@/mappers/provetToSiigo";
+import { provetToSiigoInvoice, TotalMismatchError, CorruptInvoiceRowError, type ProvetToSiigoOptions } from "@/mappers/provetToSiigo";
 import type { CatalogMapping } from "@/mappers/catalogMapping";
 
 /** DIAN invoice lifecycle status, surfaced per consultation row. */
@@ -259,6 +259,16 @@ export function buildInvoicePayloadFromQuickEdit(
   // queue row — a disagreement stops emission here rather than producing a
   // payload that looks perfectly well-formed to Siigo.
   if (payloadOptions.enforceTotalMatch !== false) {
+    // C-2, layer 2. Checked before the mismatch so the corrupt row gets its own
+    // message: a non-finite line makes the mismatch delta `Infinity`, and
+    // "one of the two amounts is wrong" would be a misleading way to say
+    // "this line is not a number". Inside the same guard on purpose, so the
+    // annulment exemption keeps covering it — a corrupt row must not block
+    // reversing an invoice that is already out there.
+    const corrupt = (consultation?.items.map((i) => ({ name: i.name, lineTotal: i.unit_price * i.quantity })) ?? fallbackDetail?.items ?? [])
+      .find((i) => !Number.isFinite(i.lineTotal));
+    if (corrupt) throw new CorruptInvoiceRowError(corrupt.name, corrupt.lineTotal);
+
     const mismatch = consultation
       ? detectTotalMismatch(consultation.total, consultation.items.map((i) => ({ code: i.code, name: i.name, quantity: i.quantity, lineTotal: i.unit_price * i.quantity * (1 + i.tax_rate) - i.discount })))
       : fallbackDetail?.totalMismatch ?? null;

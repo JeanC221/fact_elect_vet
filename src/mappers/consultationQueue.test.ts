@@ -13,7 +13,7 @@ import {
 import { siigoInvoicePayloadSchema } from "@/schemas/siigo";
 import { toCents } from "@/schemas/provet";
 import { mockClients, mockConsultations, mockPatients } from "@/mocks/provet";
-import { TotalMismatchError, type ProvetToSiigoOptions } from "@/mappers/provetToSiigo";
+import { TotalMismatchError, CorruptInvoiceRowError, type ProvetToSiigoOptions } from "@/mappers/provetToSiigo";
 import type { CatalogMapping } from "@/mappers/catalogMapping";
 import { mockSiigoProducts } from "@/mocks/siigo";
 
@@ -321,6 +321,38 @@ describe("C-11 — emission is blocked when Provet's two totals disagree", () =>
       expect(err.message).toContain("187.50");
       expect(err.message).toContain("29.22");
     }
+  });
+
+  it("C-2 layer 2: throws by name on a line whose amount is not a number", () => {
+    // `provetToQueue.ts` keeps the non-finite value instead of dropping it —
+    // dropping it silently is the failure this project forbids, and the throw
+    // cannot live in the mapper without blanking the queue for every
+    // consultation (C-11, layer 1). This is where it surfaces.
+    const corruptItems = [
+      { code: "13", name: "Euthanasia", quantity: 1, lineTotal: 115 },
+      { code: "84", name: "Cerenia 24mg box", quantity: 1, lineTotal: Number.POSITIVE_INFINITY },
+    ];
+    const corrupt = { ...mismatched, total: 115, items: corruptItems, totalMismatch: detectTotalMismatch(115, corruptItems) };
+    try {
+      buildInvoicePayloadFromQuickEdit([], [], [], "C-12", values, options, corrupt);
+      expect.unreachable("should have thrown");
+    } catch (e) {
+      expect(e).toBeInstanceOf(CorruptInvoiceRowError);
+      const err = e as CorruptInvoiceRowError;
+      // Named before the mismatch check on purpose: the delta would be
+      // Infinity and "one of the two amounts is wrong" would be a lie.
+      expect(err.itemName).toBe("Cerenia 24mg box");
+      expect(err.message).toContain("Cerenia 24mg box");
+      expect(err.message).not.toContain("no coincide con la suma");
+    }
+  });
+
+  it("C-2 layer 2: a corrupt line does NOT block the annulment path either", () => {
+    const corruptItems = [{ code: "84", name: "Cerenia 24mg box", quantity: 1, lineTotal: Number.POSITIVE_INFINITY }];
+    const corrupt = { ...mismatched, items: corruptItems, totalMismatch: detectTotalMismatch(115, corruptItems) };
+    expect(() =>
+      buildInvoicePayloadFromQuickEdit([], [], [], "C-12", values, options, corrupt, { enforceTotalMatch: false }),
+    ).not.toThrow();
   });
 
   it("does NOT block the annulment path: a stamped invoice must stay voidable", () => {

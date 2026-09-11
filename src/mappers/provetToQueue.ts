@@ -132,7 +132,34 @@ export function buildQueueFromProvet(
     const cid = consultationByInvoiceId.get(invId);
     if (!cid) continue; // row belongs to an invoice with no linked consultation
     const lineTotal = r.sum_total;
-    if (!Number.isFinite(lineTotal) || lineTotal <= 0) continue;
+    // C-2. The old guard was `!Number.isFinite(lineTotal) || lineTotal <= 0`,
+    // which collapsed three unrelated cases into one silent `continue`:
+    //
+    //  NEGATIVE — real money. These are the credit-note lines that C-1 now
+    //    routes here, and dropping them makes the rest reconcile with the
+    //    header again, so the C-11 guard sees nothing and the consultation is
+    //    billed gross. Measured 2026-09-11 on the tenant: consulta #1 emits
+    //    2870.00 instead of 2682.50, #9 115.00 instead of 100.00, #10 24.11
+    //    instead of 0.00, #20 3344.38 instead of 2513.24. 1057.75 overbilled
+    //    across four consultations, all of it DIAN-stamped. Kept from now on.
+    //
+    //  ZERO — still dropped, and that is deliberate. Ten consultations (#18,
+    //    #23, #24, #28, #30, #32, #33, #34, #35, #36) carry a 0.00 line, always
+    //    the same item. Keeping it moves no total, and Siigo rejects it exactly
+    //    as it rejects a negative: `siigoInvoicePayloadSchema.taxed_price` is
+    //    `positive()`, measured 0 -> "Number must be greater than 0". Rendering
+    //    a giveaway needs `items.tax_base` and `items.taxpayer`, which exist in
+    //    neither the schema nor `provetToSiigo.ts`. Removing this branch would
+    //    trade 4 mis-billed consultations for 10 that stop emitting at all.
+    //
+    //  NON-FINITE — corrupt data, and dropping it silently is the failure this
+    //    project forbids. The value is kept so the consultation stops
+    //    reconciling and `buildInvoicePayloadFromQuickEdit` throws by name. The
+    //    throw is NOT here: `buildQueueFromProvet` must not throw, or a single
+    //    bad row blanks the queue for every consultation (C-11, layer 1).
+    //    Only `Infinity` reaches this point; `NaN` is already rejected by
+    //    `provetInvoiceRowRawSchema`, which fails the whole page fetch.
+    if (lineTotal === 0) continue;
     const list = itemsByConsultation.get(cid) ?? [];
     // The stable catalog key is the Provet item id, not the row id: row ids
     // are regenerated per invoice and would never match a saved mapping twice.

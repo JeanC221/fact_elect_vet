@@ -73,6 +73,39 @@ export class EmptyConsultationError extends Error {
 }
 
 /**
+ * C-2 — thrown when a line of this consultation carries a `sum_total` that is
+ * not a finite number. Corrupt input, and the one thing that must never happen
+ * to it is a silent `continue`: the amount would vanish from the invoice and
+ * the remaining lines would reconcile with the header, leaving nothing for any
+ * guard to catch.
+ *
+ * The detection lives in `provetToQueue.ts`, which KEEPS the value instead of
+ * dropping it; this is the second layer, at the payload boundary. Splitting it
+ * that way is deliberate: `buildQueueFromProvet` must not throw, or one bad row
+ * blanks the queue for every consultation (C-11, `PROJECT_STATE.md ->
+ * Resolved sesion 2`, layer 1).
+ *
+ * Only `Infinity` gets this far. `NaN` and non-numeric strings are rejected by
+ * `provetInvoiceRowRawSchema`, and since the rows are parsed with a single
+ * `safeParse` over the whole page, one of those already fails the entire fetch
+ * with `ProvetApiError("parse_failed")`.
+ */
+export class CorruptInvoiceRowError extends Error {
+  readonly itemName: string;
+  readonly lineTotal: number;
+  constructor(itemName: string, lineTotal: number) {
+    super(
+      `La línea "${itemName}" de esta consulta llega desde Provet con un importe que no es un número ` +
+        `(${String(lineTotal)}). No se emite: el dato está corrupto en origen y facturar sin él dejaría ` +
+        `la factura incompleta en silencio. Revise esa línea en Provet Cloud antes de continuar.`,
+    );
+    this.name = "CorruptInvoiceRowError";
+    this.itemName = itemName;
+    this.lineTotal = lineTotal;
+  }
+}
+
+/**
  * C-11 — thrown when Provet's own two accounts of the same consultation
  * disagree: the invoice header (`total_with_vat`) against the invoice rows
  * (`sum_total`). One of the two is wrong and nothing in this codebase can tell

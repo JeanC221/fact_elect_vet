@@ -181,53 +181,89 @@ describe("line amounts come from invoicerow.sum_total, never from quantity * pri
  * `invoice.total_with_vat` and its `items` come from `invoicerow.sum_total`,
  * and until now nothing in the codebase ever compared the two.
  *
- * The reproduction is invoice 12 of the live tenant, measured 2026-09-11:
- * `total_with_vat` is 158.28 while the rows this code keeps add up to 187.50,
- * because the `sum_total <= 0` filter on line 117 silently drops a -29.22 row
- * (C-2). The three amounts are the measured ones; how the 187.50 is split
- * across positive rows is synthetic, since only the totals were recorded.
+ * RE-BASED 2026-09-11 by C-2. The original reproduction was `factura #12`, and
+ * its whole premise was the bug: the `sum_total <= 0` filter dropped a -29.22
+ * row, so the kept rows added to 187.50 against a header of 158.28. C-2 keeps
+ * that row, the two sides reconcile, and the scenario stops existing. The old
+ * fixture also mixed amounts from different documents while presenting them as
+ * one measured invoice, which is the conflation that produced the withdrawn
+ * 1574.04; it is gone.
  *
- * Comparing the RAW rows against `total_with_vat` would pass here — Provet's
- * own arithmetic is consistent. The comparison has to be against the rows the
- * code actually kept, which is the whole point of the guard.
+ * The replacement is `consulta #8`, measured verbatim on 2026-09-11 and still
+ * mismatching after C-1 and C-2 — nothing in it is synthetic:
+ *
+ *   factura #11   consultation=#8   total_with_vat=2380.85
+ *                 rows #28..#33: 2000.00 / 62.50 / 125.00 / 50.00 / 100.00 / 43.35
+ *   NC #12        credit_note=true  consultation=null  original_consultation=#8
+ *                 total_with_vat=158.28
+ *                 rows #34..#36: -29.22 / 62.50 / 125.00
+ *
+ * C-1 routes the note's three rows to `consulta #8` and C-2 keeps the negative
+ * one, so items add to 2539.13 while the queue row's total is still the
+ * original invoice's header, 2380.85. The guard fires, the consultation is
+ * blocked, and it stays blocked until the header is netted — which is the
+ * finding that unblocks all six, not something C-2 was ever going to fix.
+ *
+ * Comparing the RAW rows of `factura #11` against its own `total_with_vat`
+ * would pass: Provet's arithmetic is self-consistent. The comparison has to be
+ * against the items the code actually builds, which is the whole point.
  */
 describe("C-11 — total_with_vat vs the line totals the code builds", () => {
-  const invoice12 = inv({
+  const invoice11 = inv({
+    id: "I-11",
+    url: "https://api.provet.test/invoice/11/",
+    consultation: "https://api.provet.test/consultation/8/",
+    credit_note: false,
+    original_consultation: null,
+    total: 2380.85,
+    total_vat: 0,
+    total_with_vat: 2380.85,
+  });
+  const creditNote12 = inv({
     id: "I-12",
     url: "https://api.provet.test/invoice/12/",
-    consultation: "C-12",
-    total: 132.99,
-    total_vat: 25.29,
+    consultation: null,
+    credit_note: true,
+    original_consultation: "https://api.provet.test/consultation/8/",
+    total: 158.28,
+    total_vat: 0,
     total_with_vat: 158.28,
   });
-  const rowsOf12: ProvetInvoiceRowRaw[] = [
-    row({ url: "https://api.provet.test/invoicerow/120/", invoice: "https://api.provet.test/invoice/12/", item: "https://api.provet.test/item/74/", name: "Consulta general", sum_total: 100.0 }),
-    row({ url: "https://api.provet.test/invoicerow/121/", invoice: "https://api.provet.test/invoice/12/", item: "https://api.provet.test/item/75/", name: "Amoxicillin 250mg", sum_total: 87.5 }),
-    row({ url: "https://api.provet.test/invoicerow/122/", invoice: "https://api.provet.test/invoice/12/", item: "https://api.provet.test/item/76/", name: "Ajuste", sum_total: -29.22 }),
+  const mk = (id: string, invoiceId: string, item: string, name: string, sum: number) =>
+    row({ url: `https://api.provet.test/invoicerow/${id}/`, invoice: `https://api.provet.test/invoice/${invoiceId}/`, item: `https://api.provet.test/item/${item}/`, name, quantity: 1, sum_total: sum });
+  const rowsOf11: ProvetInvoiceRowRaw[] = [
+    mk("28", "11", "155", "Splenectomy", 2000.0),
+    mk("29", "11", "157", "Suction SX", 62.5),
+    mk("30", "11", "156", "Cautery", 125.0),
+    mk("31", "11", "3", "Anesthesia Sevo", 50.0),
+    mk("32", "11", "6", "Anesthesia Vitals Monitoring", 100.0),
+    mk("33", "11", "165", "Nocita", 43.35),
   ];
+  const rowsOf12: ProvetInvoiceRowRaw[] = [
+    mk("34", "12", "155", "Splenectomy", -29.22),
+    mk("35", "12", "157", "Suction SX", 62.5),
+    mk("36", "12", "156", "Cautery", 125.0),
+  ];
+  const consultation8 = con({ id: "8", invoice: "https://api.provet.test/invoice/11/" });
 
-  it("flags invoice 12: the kept rows add up to 187.50 against a header of 158.28", () => {
-    const rows = buildQueueFromProvet(
-      [con({ id: "C-12", invoice: "https://api.provet.test/invoice/12/" })],
-      [cli()], [pat()], [invoice12], [], [], rowsOf12,
-    );
-    const r = rows[0];
-    expect(r.total).toBe(158.28);
-    expect(r.items.reduce((a, i) => a + i.lineTotal, 0)).toBe(187.5);
+  it("flags consulta #8: items add up to 2539.13 against a header of 2380.85", () => {
+    const r = buildQueueFromProvet(
+      [consultation8], [cli()], [pat()], [invoice11, creditNote12], [], [], [...rowsOf11, ...rowsOf12],
+    )[0];
+    expect(r.total).toBe(2380.85);
+    expect(r.items.reduce((a, i) => a + i.lineTotal, 0)).toBeCloseTo(2539.13, 2);
     expect(r.totalMismatch).not.toBeNull();
-    expect(r.totalMismatch?.expectedTotal).toBe(158.28);
-    expect(r.totalMismatch?.itemsTotal).toBe(187.5);
-    expect(r.totalMismatch?.deltaCents).toBe(2922);
+    expect(r.totalMismatch?.expectedTotal).toBe(2380.85);
+    expect(r.totalMismatch?.itemsTotal).toBe(2539.13);
+    expect(r.totalMismatch?.deltaCents).toBe(15828);
   });
 
-  it("does not flag a consultation whose kept rows add up to the header", () => {
-    const rows = buildQueueFromProvet(
-      [con({ id: "C-12", invoice: "https://api.provet.test/invoice/12/" })],
-      [cli()], [pat()],
-      [inv({ id: "I-12", url: "https://api.provet.test/invoice/12/", consultation: "C-12", total_with_vat: 187.5 })],
-      [], [], rowsOf12,
-    );
-    expect(rows[0].totalMismatch).toBeNull();
+  it("does not flag a consultation whose items add up to the header", () => {
+    const r = buildQueueFromProvet(
+      [consultation8], [cli()], [pat()], [invoice11], [], [], rowsOf11,
+    )[0];
+    expect(r.items.reduce((a, i) => a + i.lineTotal, 0)).toBeCloseTo(2380.85, 2);
+    expect(r.totalMismatch).toBeNull();
   });
 
   it("does not flag a consultation with no invoice at all (0 against 0)", () => {
@@ -238,12 +274,9 @@ describe("C-11 — total_with_vat vs the line totals the code builds", () => {
   });
 
   it("flags an invoice that has a header total but no rows at all", () => {
-    const rows = buildQueueFromProvet(
-      [con({ id: "C-12", invoice: "https://api.provet.test/invoice/12/" })],
-      [cli()], [pat()], [invoice12], [], [], [],
-    );
+    const rows = buildQueueFromProvet([consultation8], [cli()], [pat()], [invoice11], [], [], []);
     expect(rows[0].totalMismatch?.itemsTotal).toBe(0);
-    expect(rows[0].totalMismatch?.deltaCents).toBe(-15828);
+    expect(rows[0].totalMismatch?.deltaCents).toBe(-238085);
   });
 
   it("uses whole cent integers, not a float epsilon: 0.1 + 0.2 against 0.3 is NOT a mismatch", () => {
@@ -409,5 +442,124 @@ describe("C-1 — Provet credit notes must reach the consultation they reverse",
     const r = build([...rowsOf5, orphanRow], [invoice5, orphanNote]);
     expect(r.items.map((i) => i.lineTotal)).toEqual([11.54, 1500.0, 62.5, 125.0]);
     expect(r.totalMismatch).toBeNull();
+  });
+});
+
+/**
+ * C-2 — `if (lineTotal <= 0) continue` descarta dinero real en silencio.
+ *
+ * `provetToQueue.ts` tira toda fila cuyo `sum_total` no sea estrictamente
+ * positivo. Con C-1 dentro, las filas de abono de una nota de crédito YA
+ * llegan a la consulta que revierten, y este filtro las vuelve a tirar: el
+ * resto vuelve a cuadrar con la cabecera, el guard de C-11 no ve nada y la
+ * consulta se emite bruta.
+ *
+ * Medido sobre el tenant el 2026-09-11, con C-1 ya mergeado (a7475e3).
+ * Cuatro consultas se emiten hoy con el importe equivocado:
+ *
+ *   consulta  cabecera   abono descartado   se emite   debería
+ *        1     2870.00   -62.50 y -125.00    2870.00   2682.50
+ *        9      115.00            -15.00      115.00    100.00
+ *       10       24.11            -24.11       24.11      0.00
+ *       20     3344.38           -831.14     3344.38   2513.24
+ *
+ * DOS CLASES DISTINTAS BAJO EL MISMO `<= 0`. Además de esas cuatro, otras diez
+ * consultas (18, 23, 24, 28, 30, 32, 33, 34, 35, 36) pierden una fila de
+ * `sum_total` EXACTAMENTE 0 — siempre el mismo ítem, "PureVax DH2PP Vaccine".
+ * Ahí el filtro no borra dinero: quitarlo no mueve ningún total. Lo que sí
+ * haría es meter una línea de valor 0 en el payload, y `siigoInvoicePayloadSchema`
+ * la rechaza igual que a una negativa (`taxed_price` es `positive()`, medido:
+ * 0 -> "Number must be greater than 0"). Representar un obsequio exige
+ * `items.tax_base` y `items.taxpayer`, que no existen ni en el esquema ni en
+ * `provetToSiigo.ts`.
+ *
+ * Por eso C-2 deja de descartar las NEGATIVAS y sigue descartando los CEROS.
+ * Quitar el filtro entero rompería diez consultas que hoy emiten bien.
+ *
+ * La negativa tampoco llega nunca a Siigo: en las cuatro, items y cabecera
+ * dejan de cuadrar y el guard de C-11 bloquea antes de construir payload.
+ *
+ * Números medidos: las cabeceras, los abonos y la única fila de la factura 15
+ * (Euthanasia 115.00). El reparto de la factura 27 entre su fila de 75.00 y su
+ * fila de 0.00 es SINTÉTICO: solo está medida la fila 88 y la cabecera 75.00.
+ */
+describe("C-2 — el filtro `<= 0` descarta dinero real", () => {
+  const consultation9 = con({ id: "9", invoice: "https://api.provet.test/invoice/15/" });
+  const invoice15 = inv({
+    id: "I-15", url: "https://api.provet.test/invoice/15/",
+    consultation: "https://api.provet.test/consultation/9/",
+    credit_note: false, original_consultation: null,
+    total: 115, total_vat: 0, total_with_vat: 115,
+  });
+  const creditNote16 = inv({
+    id: "I-16", url: "https://api.provet.test/invoice/16/",
+    consultation: null, credit_note: true,
+    original_consultation: "https://api.provet.test/consultation/9/",
+    total: -15, total_vat: 0, total_with_vat: -15,
+  });
+  const row43 = row({
+    url: "https://api.provet.test/invoicerow/43/", invoice: "https://api.provet.test/invoice/15/",
+    item: "https://api.provet.test/item/13/", name: "Euthanasia",
+    quantity: 1, price_with_vat: 115, sum_total: 115,
+  });
+  const row44 = row({
+    url: "https://api.provet.test/invoicerow/44/", invoice: "https://api.provet.test/invoice/16/",
+    item: "https://api.provet.test/item/26/", name: "Extraction Incisor",
+    quantity: 1, price_with_vat: -15, sum_total: -15,
+  });
+
+  const q9 = () =>
+    buildQueueFromProvet([consultation9], [cli()], [pat()], [invoice15, creditNote16], [], [], [row43, row44])[0];
+
+  it("keeps the negative credit row instead of dropping it", () => {
+    expect(q9().items.map((i) => i.lineTotal)).toEqual([115, -15]);
+  });
+
+  it("blocks consultation 9 instead of billing it at 115.00", () => {
+    const r = q9();
+    expect(r.total).toBe(115);
+    expect(r.totalMismatch).not.toBeNull();
+    expect(r.totalMismatch?.deltaCents).toBe(-1500);
+  });
+
+  it("still drops a row whose sum_total is exactly 0", () => {
+    // Consultation 18 / invoice 27: row 88 "PureVax DH2PP Vaccine" is 0.00 and
+    // the header is 75.00. A zero line changes no total, and Siigo's payload
+    // schema rejects `taxed_price: 0` exactly as it rejects a negative, so
+    // letting it through would break ten consultations that emit fine today.
+    // Representing it as a giveaway needs `tax_base`/`taxpayer`: separate work.
+    const consultation18 = con({ id: "18", invoice: "https://api.provet.test/invoice/27/" });
+    const invoice27 = inv({
+      id: "I-27", url: "https://api.provet.test/invoice/27/",
+      consultation: "https://api.provet.test/consultation/18/",
+      credit_note: false, original_consultation: null,
+      total: 75, total_vat: 0, total_with_vat: 75,
+    });
+    const paid = row({ url: "https://api.provet.test/invoicerow/87/", invoice: "https://api.provet.test/invoice/27/", item: "https://api.provet.test/item/40/", name: "Exam Consultation", quantity: 1, price_with_vat: 75, sum_total: 75 });
+    const free = row({ url: "https://api.provet.test/invoicerow/88/", invoice: "https://api.provet.test/invoice/27/", item: "https://api.provet.test/item/41/", name: "PureVax DH2PP Vaccine", quantity: 1, price_with_vat: 0, sum_total: 0 });
+    const r = buildQueueFromProvet([consultation18], [cli()], [pat()], [invoice27], [], [], [paid, free])[0];
+    expect(r.items.map((i) => i.lineTotal)).toEqual([75]);
+    expect(r.totalMismatch).toBeNull();
+  });
+
+  it("does NOT silently drop a row whose sum_total is not finite", () => {
+    // Two layers, the same shape C-11 established: the mapper MARKS (it keeps
+    // the value, so the row stays visible and the consultation stops
+    // reconciling) and `buildInvoicePayloadFromQuickEdit` THROWS. The throw
+    // does not live here: `buildQueueFromProvet` must not throw, or one
+    // corrupt row blanks the queue for all 39 consultations — decided in
+    // C-11, `PROJECT_STATE.md -> Resolved sesion 2`, layer 1.
+    //
+    // Reachability, measured against the real schema on 2026-09-11:
+    //   "abc" / NaN -> REJECTED, "Expected number, received nan". The parse is
+    //                  a safeParse over the whole page, so one bad row already
+    //                  fails the fetch loudly with ProvetApiError parse_failed.
+    //   Infinity    -> ACCEPTED. A JSON number that overflows a double reaches
+    //                  the mapper intact. This is the live path.
+    const broken = row({ url: "https://api.provet.test/invoicerow/99/", invoice: "https://api.provet.test/invoice/15/", item: "https://api.provet.test/item/13/", name: "Rota", quantity: 1, sum_total: Number.POSITIVE_INFINITY });
+    const r = buildQueueFromProvet([consultation9], [cli()], [pat()], [invoice15], [], [], [row43, broken])[0];
+    expect(r.items).toHaveLength(2);
+    expect(r.items[1].lineTotal).toBe(Number.POSITIVE_INFINITY);
+    expect(r.totalMismatch).not.toBeNull();
   });
 });
