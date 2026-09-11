@@ -203,6 +203,58 @@ origen; la referencia válida a partir de hoy es la columna `#`.
 
 ## Last Update
 - **Date:** 2026-09-10
+- **Agent:** Claude (sesión 1 — Next.js 16.3.4 + React 19)
+- **Base commit:** `f53087a` (merge de la sesión 0b). El prompt de sesión asumía
+  `3ecc062`; el delta son 2 commits de documentación (`docs/audits/` + 7 líneas de
+  `.clinerules`), **cero archivos bajo `src/`, `package.json` o el lockfile**, así
+  que el baseline de la sesión 0 se re-midió íntegro y coincidió al dígito.
+- **Completed Task:** Migración de **Next.js 14.2.35 → 16.3.4** y **React 18.3.1 →
+  19.3.0** (con `react-dom` y `@types/react*` en la línea 19). `middleware.ts`
+  **intacto**, por decisión de plataforma nº 6: el build de 16.3.4 sale con exit 0
+  y solo emite el aviso de deprecación. El codemod `middleware-to-proxy` **no se
+  ejecutó**; va a la sesión 4 (A-4). Lockfile regenerado con `npx npm@12`
+  (`lockfileVersion: 3`), verificado después con `npm ci` en dos entornos: npm
+  10.9.7 (Linux, 196 paquetes) y **npm 11.12.1 (macOS de Jean, 197 paquetes)**.
+  La diferencia de uno es `fsevents@2.3.3`, dependencia opcional solo de macOS.
+- **Cambios de código, todos mecánicos:** el codemod `next-async-request-api`
+  reescribió 5 archivos (`src/app/actions.ts`,
+  `src/app/api/invoices/[id]/[format]/route.ts`, `src/app/login/page.tsx`,
+  `src/app/settings/page.tsx`, `src/app/settings/profile/page.tsx`): 7 llamadas
+  síncronas a `cookies()` pasan a `await`, y `params` del handler dinámico pasa a
+  `Promise`. Un sexto archivo lo arregló esta sesión a mano, porque el codemod no
+  toca los call sites de test: `src/app/api/invoices/[id]/[format]/route.test.ts`
+  pasa a `{ params: Promise.resolve({ id, format }) }`. **Era el único error de
+  `tsc` de toda la migración.**
+- **Verification:** `npx tsc --noEmit` ✅ exit 0 | `npx vitest run` ✅ **637/637
+  (45 files), sin cambio** | `env -u NODE_ENV npx next build` ✅ exit 0, **20 rutas,
+  4 estáticas, `(8/8)`** | `npm audit` **de 2 paquetes / 27 advisories a 0 / 0**.
+- **Lo que esta sesión descubrió y no estaba previsto:** (1) `next build` en 16
+  **reescribe `tsconfig.json`** (`jsx: preserve → react-jsx`, `include` +=
+  `.next/dev/types/**/*.ts`) **y `next-env.d.ts`** — ambos commiteados aquí, o un
+  árbol limpio deja de estarlo al primer build; (2) el contador de páginas pasa a
+  **`(8/8)`**, no `9/9`, sin que cambie ni una ruta; (3) `npm@12` **bloquea los
+  install scripts** por defecto (`esbuild` postinstall) y aun así vitest funciona,
+  porque el binario llega por dependencia opcional; (4) el codemod `upgrade`
+  **ofrece `middleware-to-proxy`** en el rango 14→16 y hay que deseleccionarlo a
+  mano; de los 10 codemods que ofrece, **ninguno salvo `next-async-request-api`
+  aplica a este repo**, medido grep a grep.
+- **Correcciones al prompt de la sesión, medidas:** `package.json` declaraba
+  `^14.2.5`, no `14.2.35` (eso era lo resuelto); las 7 `cookies()` estaban en **4**
+  archivos, no 5; el peer declarado de `next@16.3.4` admite `react ^18.2.0`, así
+  que "Next 16 no arranca con React 18" **no se sostiene a nivel de resolución de
+  dependencias** y no se verificó en runtime (irrelevante: se fue a 19 igual); y el
+  motivo escrito para aplazar `@hookform/resolvers` 5.x era falso — `^3.23.8` ya
+  resuelve a `zod 3.25.76`, que satisface `^3.25.0`. **La decisión de aplazarlo
+  sigue siendo correcta** por el rango declarado y por revalidar payloads de Siigo.
+- **Cobertura de esta migración: cero.** 30 archivos `.tsx`, 0 tests `.tsx`,
+  `vitest.config.ts` en `environment: "node"` con `include: ["src/**/*.test.ts"]`.
+  Los tres gates dan verde pase lo que pase en la UI. **El guion manual en preview
+  es parte del entregable, no un extra.**
+- **Next Pending Task:** sesión 2 — ruta crítica de la factura, C-1 a C-7. Ver
+  `prompt_sesion_2.md`.
+
+## Previous Update (sesión 0)
+- **Date:** 2026-09-10
 - **Agent:** Claude (sesión 0 — pipeline limpio y backlog único)
 - **Completed Task:** Sin cambios en `src/`. Fusión de los dos informes de auditoría
   en un backlog único con numeración propia dentro de este documento; registro de las
@@ -298,7 +350,7 @@ origen; la referencia válida a partir de hoy es la columna `#`.
 
 ---
 
-## Current State (verified 2026-09-08)
+## Current State (verified 2026-09-10 — sesión 1, Next 16.3.4 + React 19)
 
 Everything in this section was re-checked against the code in this commit. The
 per-task entries below the separator are an append-only changelog: their test
@@ -307,27 +359,56 @@ counts describe the suite as it stood on that date and are left untouched.
 ### Verification gates
 | Gate | Command | Result |
 | --- | --- | --- |
-| Types | `npx tsc --noEmit` | clean |
-| Tests | `npx vitest run` | **637 passed (637)** across **45 files** — timezone-independent, verified under `America/Bogota`, `UTC`, `Asia/Tokyo` and `Pacific/Kiritimati` |
-| Build | `npx next build` | clean (**9/9** pages, **4 static**: `/`, `/_not-found`, `/settings/credentials`, `/settings/mapping`) — needs `DATABASE_URL` set, a placeholder is enough. Was 10/10 until chat 6a gave `/api/health` `force-dynamic`, which took it out of the static-generation phase. |
-| Deps | `npm audit` | See the two counts below. No fix exists in 14.x for any of them |
+| Types | `npx tsc --noEmit` | clean, exit 0, no output. Verified **without a `.next/` directory present and with `tsconfig.tsbuildinfo` deleted** — `next-env.d.ts` now references `.next/types/*.d.ts`, and it still resolves clean on a fresh tree. There is no gate ordering dependency |
+| Tests | `npx vitest run` | **637 passed (637)** across **45 files** — unchanged by the migration; timezone-independent, verified under `America/Bogota`, `UTC`, `Asia/Tokyo` and `Pacific/Kiritimati` |
+| Build | `env -u NODE_ENV npx next build` | clean, exit 0 — needs `DATABASE_URL` set, a placeholder is enough. **The 14.x baseline no longer exists as written**: see the substitutes below |
+| Deps | `npm audit` | **0 packages, 0 advisories** — down from 2 / 27. The migration closed every one of them |
 
-### `npm audit` — two different counts, do not conflate them
-Earlier revisions of this document reported a single figure and it was wrong.
-`npm audit` summarises **per package**; the advisories live in `via[]` and are
-**per advisory**. Measured 2026-09-08:
+### Gate 3 baseline — rewritten for Next 16, measured 2026-09-10
+Next 16 builds with **Turbopack by default** and **drops the `size` and
+`First Load JS` columns**. The old `ƒ Middleware 40.1 kB` line is gone: it now
+prints as `ƒ Proxy (Middleware)` **with no kB**. That number is not comparable to
+anything and must not be carried forward. What *is* measurable, and what the next
+session compares against:
 
-| Count | Value |
+| Signal | Expected value |
 | --- | --- |
-| **Per package** (what the `npm audit` summary prints) | **2** — 1 critical (`next`), 1 high (`postcss`) |
-| **Per advisory** (sum of `via[]`) | **27** — 2 critical · 10 high · 13 moderate · 2 low |
+| Header line | `▲ Next.js 16.3.4 (Turbopack)` |
+| Static page counter | **`✓ Generating static pages using 1 worker (8/8)`** — **8/8, not 9/9.** Turbopack counts the phase differently; **no route changed** |
+| Route table | **20 routes**, **4 static `○`**: `/`, `/_not-found`, `/settings/credentials`, `/settings/mapping` — same four as under 14 |
+| Middleware line | the literal line **`ƒ Proxy (Middleware)`** is present, with **no kB** |
+| `.next/server/middleware-manifest.json` | **`"version": 3`**, **1 matcher**, `originalSource` = `/((?!login\|_next/static\|_next/image\|favicon.ico).*)` |
+| Expected warning, **exit 0 anyway** | `⚠ The "middleware" file convention is deprecated. Please use "proxy" instead.` — deliberate, platform decision nº 6. The suggested `middleware-to-proxy` codemod is **forbidden** until session 4 (A-4) |
+| Noise that **disappeared** | `⨯ Failed to patch lockfile ... reading 'os'`. If it comes back, something reverted `next` |
+| Local-only noise on Jean's machine | `⚠ Next.js ignored package-lock.json in /Users/jean because it is outside the current Git repository`. Turbopack walks up looking for lockfiles to infer the workspace root and finds a **stray `package-lock.json` in the home directory**. It says `ignored`: the build used the correct root and is valid. **Does not appear on Vercel**, which clones only the repo. Fix by deleting the stray file — **never** by adding `turbopack.root` to `next.config.js` |
 
-`next` alone carries 23 advisories, `postcss` 4. Every single one is fixed only
-in `>= 15.5.x`. **This is the migration argument, and it is now the strongest
-one in this document.**
+**`next build` edits two tracked files.** It rewrites `tsconfig.json`
+(`jsx: preserve → react-jsx`, and appends `.next/dev/types/**/*.ts` to `include`)
+and `next-env.d.ts` (adds two `import` lines to `.next/types/`). Both are
+committed in session 1 with the values the build produces, so a clean tree stays
+clean after a build. **Do not revert them**: the build will just write them again.
 
-The two `critical` entries, verbatim from `npm audit --json`, both **assessed as
-not applicable to this deployment**:
+### `npm audit` — closed by the session 1 migration
+**Measured 2026-09-10, after the migration: `found 0 vulnerabilities` — 0 packages
+and 0 advisories.** The counting rule below is kept because it is the part that is
+easy to get wrong again, not because the numbers are still open.
+
+`npm audit` summarises **per package**; the advisories live in `via[]` and are
+**per advisory**. Always report both, labelled. State immediately before the
+migration, on `next@14.2.35`:
+
+| Count | Value (pre-migration) | Value (post-migration) |
+| --- | --- | --- |
+| **Per package** (what the `npm audit` summary prints) | **2** — 1 critical (`next`), 1 high (`postcss`) | **0** |
+| **Per advisory** (sum of `via[]`) | **27** — 2 critical · 10 high · 13 moderate · 2 low | **0** |
+
+`next` alone carried 23 advisories, `postcss` 4, every one of them fixed only in
+`>= 15.5.x`. That was the migration argument and the migration consumed it. The
+two paragraphs below are kept as the record of why the two `critical` entries were
+accepted while 14.2.35 was still in production — **not as live findings**.
+
+The two `critical` entries, verbatim from the pre-migration `npm audit --json`,
+both **were assessed as not applicable to this deployment** (historical record):
 
 | npm `source` | GHSA | Range | Why it does not apply here |
 | --- | --- | --- | --- |
@@ -342,7 +423,24 @@ them missing, that is a feed-ingestion difference, not a fix. |
 `Cannot read properties of null (reading 'edgesOut')` while resolving vitest's
 optional peers — an arborist bug, reproducible in an empty project. Use
 `npx npm@12` to change dependencies. `npm ci` on npm 10 works normally against
-the committed lockfile.
+the committed lockfile — re-verified on 2026-09-10 against the npm 12 lockfile
+produced by the Next 16 migration: **196 packages on Linux / npm 10.9.7, 197 on
+Jean's macOS / npm 11.12.1**, clean in both. The extra package is `fsevents`, a
+macOS-only optional dependency — it also makes the blocked-scripts warning list
+**two** packages there instead of one.
+
+**Jean's npm is 11.12.1, not 10.9.7** (measured 2026-09-10). Earlier revisions of
+this document said 10.9.7 and that is now stale. The arborist `edgesOut` crash was
+only ever reproduced on 10.x; **it was not re-tested on 11.x**, so the rule stands
+unchanged out of caution: use `npx npm@12` for any dependency change. `npm ci` on
+11.12.1 works normally, verified in 5 s against this lockfile.
+
+**npm 12 blocks install scripts by default.** The install prints
+`1 package had install scripts blocked ... esbuild@0.28.2 (postinstall)`. This is
+expected noise and **must not be "fixed"** with an `allowScripts` entry: vitest
+works regardless, because the esbuild binary arrives through the
+`@esbuild/linux-x64`-style optional dependency, not through the postinstall.
+Verified: full suite green on an npm 12 install with the script blocked.
 
 ### Security headers — corrected
 The previous version of this document claimed `vercel.json` carried a CSP. It

@@ -20,7 +20,7 @@ const linkBase =
  * unauthenticated. Guarded by the edge middleware; this is defense-in-depth.
  */
 export default async function SettingsPage() {
-  const token = cookies().get(SESSION_COOKIE_NAME)?.value;
+  const token = (await cookies()).get(SESSION_COOKIE_NAME)?.value;
   const payload = token ? await verifySessionToken(token) : null;
   if (!payload) redirect("/login");
   const isAdmin = payload.admin === true;

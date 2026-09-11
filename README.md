@@ -6,7 +6,7 @@ Internal web application that automates DIAN-approved electronic invoicing for a
 
 ## Tech Stack
 
-- **Framework:** Next.js 14.2.5 (App Router, Server Components)
+- **Framework:** Next.js 16.3.4 + React 19.3.0 (App Router, Server Components)
 - **Language:** TypeScript 5.5 (strict mode)
 - **Validation:** Zod 3.23 (runtime schema validation)
 - **Styling:** Tailwind CSS 3.4 (clinical UI palette)

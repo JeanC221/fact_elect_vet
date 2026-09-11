@@ -23,7 +23,7 @@ function formatExpiry(exp: number): string {
  * prominent logout action. Redirects to /login if unauthenticated.
  */
 export default async function ProfilePage() {
-  const token = cookies().get(SESSION_COOKIE_NAME)?.value;
+  const token = (await cookies()).get(SESSION_COOKIE_NAME)?.value;
   const payload = token ? await verifySessionToken(token) : null;
   if (!payload) redirect("/login");
 
