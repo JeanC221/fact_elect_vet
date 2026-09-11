@@ -72,6 +72,36 @@ export class EmptyConsultationError extends Error {
   }
 }
 
+/**
+ * C-11 — thrown when Provet's own two accounts of the same consultation
+ * disagree: the invoice header (`total_with_vat`) against the invoice rows
+ * (`sum_total`). One of the two is wrong and nothing in this codebase can tell
+ * which, so neither may be stamped: whichever we picked, we would be picking
+ * blind on a document that is legally binding once the DIAN accepts it.
+ *
+ * Measured on the live tenant 2026-09-11: 7 of 52 invoices disagree today, all
+ * of them for the same reason (C-2, the `sum_total <= 0` filter). Invoice 12 is
+ * the one that matters — a positive, non-credit-note document where the code
+ * would bill 187.50 against a header of 158.28.
+ */
+export class TotalMismatchError extends Error {
+  readonly expectedTotal: number;
+  readonly itemsTotal: number;
+  readonly deltaCents: number;
+  constructor(m: { expectedTotal: number; itemsTotal: number; deltaCents: number }) {
+    const fmt = (n: number) => n.toFixed(2);
+    super(
+      `El total de Provet para esta consulta (${fmt(m.expectedTotal)}) no coincide con la suma de sus líneas ` +
+        `(${fmt(m.itemsTotal)}); diferencia de ${fmt(m.deltaCents / 100)}. No se emite: uno de los dos importes es ` +
+        `incorrecto y no hay forma de saber cuál. Revise la factura en Provet Cloud antes de continuar.`,
+    );
+    this.name = "TotalMismatchError";
+    this.expectedTotal = m.expectedTotal;
+    this.itemsTotal = m.itemsTotal;
+    this.deltaCents = m.deltaCents;
+  }
+}
+
 /** Empty-catalog default — emission REQUIRES an explicit dynamic payment mapping. */
 const DEFAULT_OPTIONS: ProvetToSiigoOptions = {
   mapping: { items: [], payments: [], version: 0, updatedAt: "1970-01-01T00:00:00.000Z", documentTypeId: null, creditNoteDocumentTypeId: null, sellerId: null },

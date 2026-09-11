@@ -4,6 +4,7 @@ import {
   buildInvoicePayloadFromQuickEdit,
   buildPaymentOptions,
   buildQuickEditDetail,
+  detectTotalMismatch,
   formatCOP,
   formatDate,
   quickEditFormSchema,
@@ -12,7 +13,7 @@ import {
 import { siigoInvoicePayloadSchema } from "@/schemas/siigo";
 import { toCents } from "@/schemas/provet";
 import { mockClients, mockConsultations, mockPatients } from "@/mocks/provet";
-import type { ProvetToSiigoOptions } from "@/mappers/provetToSiigo";
+import { TotalMismatchError, type ProvetToSiigoOptions } from "@/mappers/provetToSiigo";
 import type { CatalogMapping } from "@/mappers/catalogMapping";
 import { mockSiigoProducts } from "@/mocks/siigo";
 
@@ -199,12 +200,20 @@ describe("buildInvoicePayloadFromQuickEdit", () => {
 });
 
 describe("Siigo line shape: whole quantity, line total as unit price", () => {
-  const detail = (items: { code: string; name: string; quantity: number; lineTotal: number }[]) => ({
-    id: "C-38", clientName: "Sara Bobby", identificationType: "CC" as const, identificationNumber: "2111111234",
-    email: "s@b.com", phone: "3000000000", patientName: "Bobby", paymentMethod: "",
-    paymentMethodOptions: [], total: items.reduce((s, i) => s + i.lineTotal, 0),
-    createdAt: new Date("2026-09-04T10:00:00Z"), items,
-  });
+  const detail = (items: { code: string; name: string; quantity: number; lineTotal: number }[]) => {
+    // Header total is the sum of the lines on purpose: these fixtures exercise
+    // the Siigo line shape, not C-11. detectTotalMismatch is called rather
+    // than hardcoding null so the fixture cannot drift out of agreement
+    // silently and start testing a case it does not describe.
+    const total = items.reduce((s, i) => s + i.lineTotal, 0);
+    return {
+      id: "C-38", clientName: "Sara Bobby", identificationType: "CC" as const, identificationNumber: "2111111234",
+      email: "s@b.com", phone: "3000000000", patientName: "Bobby", paymentMethod: "",
+      paymentMethodOptions: [], total,
+      createdAt: new Date("2026-09-04T10:00:00Z"), items,
+      totalMismatch: detectTotalMismatch(total, items),
+    };
+  };
   const values = {
     name: "Sara Bobby", identificationType: "CC" as const, identificationNumber: "2111111234",
     email: "s@b.com", phone: "3000000000", paymentMethod: "Tarjeta Debito MMA", paidAmount: 0,
@@ -267,5 +276,64 @@ describe("Siigo line shape: whole quantity, line total as unit price", () => {
     );
     expect(payload!.items[0].taxed_price).toBe(31.57);
     expect(payload!.items[0].price).toBeUndefined();
+  });
+});
+
+describe("C-11 — emission is blocked when Provet's two totals disagree", () => {
+  const items = [
+    { code: "74", name: "Consulta general", quantity: 1, lineTotal: 100.0 },
+    { code: "75", name: "Amoxicillin 250mg", quantity: 1, lineTotal: 87.5 },
+  ];
+  /** Invoice 12 of the live tenant: header 158.28, kept lines 187.50. */
+  const mismatched = {
+    id: "C-12", clientName: "Sara Bobby", identificationType: "CC" as const, identificationNumber: "2111111234",
+    email: "s@b.com", phone: "3000000000", patientName: "Bobby", paymentMethod: "",
+    paymentMethodOptions: [], total: 158.28,
+    createdAt: new Date("2026-09-04T10:00:00Z"), items,
+    totalMismatch: detectTotalMismatch(158.28, items),
+  };
+  const values = {
+    name: "Sara Bobby", identificationType: "CC" as const, identificationNumber: "2111111234",
+    email: "s@b.com", phone: "3000000000", paymentMethod: "Tarjeta Debito MMA", paidAmount: 158.28,
+  };
+  const options = {
+    mapping: { items: [], payments: [{ provetMethod: "Tarjeta Debito MMA", siigoPaymentTypeId: 5637 }], version: 1, updatedAt: "2026-09-04T00:00:00.000Z", documentTypeId: 60345, creditNoteDocumentTypeId: null, sellerId: 629 },
+    siigoProducts: [], mode: "sandbox" as const, documentTypeId: 60345, sellerId: 629,
+  };
+
+  it("throws instead of returning a well-formed payload for the wrong amount", () => {
+    expect(() =>
+      buildInvoicePayloadFromQuickEdit([], [], [], "C-12", values, options, mismatched),
+    ).toThrow(TotalMismatchError);
+  });
+
+  it("names both amounts and the difference in the message the staff sees", () => {
+    try {
+      buildInvoicePayloadFromQuickEdit([], [], [], "C-12", values, options, mismatched);
+      expect.unreachable("should have thrown");
+    } catch (e) {
+      expect(e).toBeInstanceOf(TotalMismatchError);
+      const err = e as TotalMismatchError;
+      expect(err.expectedTotal).toBe(158.28);
+      expect(err.itemsTotal).toBe(187.5);
+      expect(err.deltaCents).toBe(2922);
+      expect(err.message).toContain("158.28");
+      expect(err.message).toContain("187.50");
+      expect(err.message).toContain("29.22");
+    }
+  });
+
+  it("does NOT block the annulment path: a stamped invoice must stay voidable", () => {
+    const payload = buildInvoicePayloadFromQuickEdit(
+      [], [], [], "C-12", values, options, mismatched, { enforceTotalMatch: false },
+    );
+    expect(payload).toBeDefined();
+    expect(siigoInvoicePayloadSchema.safeParse(payload).success).toBe(true);
+  });
+
+  it("builds normally when the two totals agree", () => {
+    const agreed = { ...mismatched, total: 187.5, totalMismatch: detectTotalMismatch(187.5, items) };
+    expect(agreed.totalMismatch).toBeNull();
+    expect(buildInvoicePayloadFromQuickEdit([], [], [], "C-12", values, options, agreed)).toBeDefined();
   });
 });

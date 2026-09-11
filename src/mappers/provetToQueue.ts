@@ -8,6 +8,7 @@ import type {
   ProvetInvoiceRowRaw,
 } from "@/schemas/provetApi";
 import type { ConsultationQueueRow, InvoiceStatus, ProvetStatus, QuickEditItem } from "@/mappers/consultationQueue";
+import { detectTotalMismatch } from "@/mappers/consultationQueue";
 import { identificationTypes } from "@/schemas/provet";
 
 export function extractId(rel: string | null | undefined): string | null {
@@ -131,6 +132,8 @@ export function buildQueueFromProvet(
     const invoice = invoiceByConsultation.get(con.id);
     const provetStatus: ProvetStatus = con.finished || invoice ? "closed" : "pending";
     const { type: identificationType, number: identificationNumber } = inferIdentification(client);
+    const items = itemsByConsultation.get(con.id) ?? [];
+    const total = invoice?.total_with_vat ?? invoice?.total ?? 0;
     return {
       id: con.id,
       clientId: con.client ?? "",
@@ -140,13 +143,14 @@ export function buildQueueFromProvet(
       identificationNumber,
       email: client?.email?.trim() || "",
       phone: clientKey ? pickPhoneNumber(phonesByClient.get(clientKey)) : "",
-      items: itemsByConsultation.get(con.id) ?? [],
+      items,
       patientName: patient?.name ?? "Paciente desconocido",
-      total: invoice?.total_with_vat ?? invoice?.total ?? 0,
+      total,
       paymentMethod: "Pendiente",
       provetStatus,
       invoiceStatus: "Draft",
       createdAt: new Date(con.created),
+      totalMismatch: detectTotalMismatch(total, items),
     };
   });
 }

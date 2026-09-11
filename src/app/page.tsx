@@ -152,6 +152,7 @@ export default function HomePage() {
       total: row.total,
       items: row.items,
       createdAt: row.createdAt,
+      totalMismatch: row.totalMismatch,
     };
     return fallback;
   }, [selectedId, rows, options.mapping]);
@@ -245,6 +246,7 @@ export default function HomePage() {
             total: row.total,
             items: row.items,
             createdAt: row.createdAt,
+            totalMismatch: row.totalMismatch,
           }
         : annulTarget.formSnapshot
         ? {
@@ -260,6 +262,7 @@ export default function HomePage() {
             total: annulTarget.total,
             items: [],
             createdAt: annulTarget.emittedAt,
+            totalMismatch: null,
           }
         : undefined;
       if (!fallbackDetail) throw new Error("missing_source_data");
@@ -272,7 +275,10 @@ export default function HomePage() {
         paymentMethod: annulTarget.paymentMethod || fallbackDetail.paymentMethodOptions[0]?.provetMethod || "",
         paidAmount: fallbackDetail.total,
       };
-      const original = buildInvoicePayloadFromQuickEdit(mockConsultations, mockClients, mockPatients, annulTarget.consultationId, formValues, options, fallbackDetail);
+      // enforceTotalMatch: false — see QuickEditPayloadOptions. The invoice is
+      // already stamped at the DIAN; blocking its credit note over a Provet
+      // total disagreement would leave the wrong document legally alive.
+      const original = buildInvoicePayloadFromQuickEdit(mockConsultations, mockClients, mockPatients, annulTarget.consultationId, formValues, options, fallbackDetail, { enforceTotalMatch: false });
       if (!original) throw new Error("missing_source_data");
       const cn = toCreditNotePayload(original, { id: annulTarget.invoiceId, cufe: annulTarget.cufe }, reason, { documentTypeId: await readCreditNoteDocumentTypeId() });
       siigoCreditNoteSchema.parse(cn);
@@ -309,12 +315,18 @@ export default function HomePage() {
     try {
       const payload = buildInvoicePayloadFromQuickEdit(mockConsultations, mockClients, mockPatients, selectedId, values, options, selectedDetail ?? undefined);
       if (!payload) throw new Error("No se pudo construir el payload de factura.");
+      // C-11 / D. Provet's own header total for this consultation, sent so the
+      // server can check it against the lines without a Provet round-trip.
+      // Thrown rather than defaulted: a missing value would silently disable
+      // the server-side half of the guard.
+      const expectedTotal = selectedDetail?.total;
+      if (expectedTotal === undefined) throw new Error("No se pudo determinar el total de Provet para esta consulta.");
       const idemKey = generateIdempotencyKey();
       const response = await retryWithBackoff(async () => {
         const res = await fetch("/api/invoices", {
           method: "POST",
           headers: { "Content-Type": "application/json", "X-Idempotency-Key": idemKey },
-          body: JSON.stringify({ consultationId: selectedId, payload }),
+          body: JSON.stringify({ consultationId: selectedId, expectedTotal, payload }),
         });
         const data = await res.json();
         if (!res.ok) throw new SiigoApiError(data.error?.code ?? "default", data.error?.message ?? "Error al emitir la factura.");

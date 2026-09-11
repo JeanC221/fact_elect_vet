@@ -1,12 +1,13 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Clock, FileText, Loader2, RefreshCw, Search } from "lucide-react";
+import { AlertTriangle, Clock, FileText, Loader2, RefreshCw, Search } from "lucide-react";
 import { StatusBadge } from "./StatusBadge";
 import { SortableHeader } from "./SortableHeader";
 import { Pagination, PAGE_SIZE_OPTIONS, type PageSizeOption } from "./Pagination";
 import { nextSortState, sortRows, type SortState } from "@/mappers/tableSort";
 import {
+  formatCOP,
   formatDate,
   type ConsultationQueueRow,
 } from "@/mappers/consultationQueue";
@@ -135,6 +136,17 @@ export function ConsultationQueue({ rows, onInvoiceClick, isRefreshing, isInitia
                   </td>
                   <td className="border-l border-grid-line px-3 py-2 font-medium text-slate-text">
                     {row.total}
+                    {/* C-11: the disagreement is shown where the number is, not
+                        as a separate badge, so the two amounts sit side by side. */}
+                    {row.totalMismatch && (
+                      <div
+                        className="mt-0.5 inline-flex items-center gap-0.5 text-2xs font-medium text-status-rejected-text"
+                        title={`La factura de Provet dice ${formatCOP(row.totalMismatch.expectedTotal)} y sus líneas suman ${formatCOP(row.totalMismatch.itemsTotal)}.`}
+                      >
+                        <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden="true" />
+                        Líneas: {formatCOP(row.totalMismatch.itemsTotal)}
+                      </div>
+                    )}
                   </td>
                   <td className="border-l border-grid-line px-3 py-2 text-slate-text">
                     {row.paymentMethod}
@@ -160,7 +172,8 @@ export function ConsultationQueue({ rows, onInvoiceClick, isRefreshing, isInitia
                         try { onInvoiceClick?.(row.id); }
                         catch (err) { console.error("[ConsultationQueue] Failed to open Quick-Edit drawer for", row.id, err); }
                       }}
-                      disabled={disableActions}
+                      disabled={disableActions || row.totalMismatch !== null}
+                      title={row.totalMismatch ? "Los totales de Provet no cuadran para esta consulta. Corríjala en Provet Cloud antes de facturar." : undefined}
                       className="inline-flex items-center gap-1 rounded-md bg-clinical-blue px-2 py-1 text-xs font-semibold text-white hover:bg-clinical-blue-hover active:bg-clinical-blue-active disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       <FileText className="h-3 w-3" aria-hidden="true" />

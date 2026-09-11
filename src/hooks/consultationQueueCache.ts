@@ -11,7 +11,14 @@ import { mergeQueueRows } from "@/mappers/provetToQueue";
  * working tab — a fresh tab always re-fetches instead of showing stale rows —
  * while still surviving / <-> /settings client navigation and same-tab reloads.
  */
-const CACHE_KEY = "fact_vet.consultationQueue";
+/**
+ * Versioned on purpose. A snapshot written before C-11 shipped has no
+ * `totalMismatch` field, and `undefined` there would paint a possibly
+ * mis-totalled consultation as if it had been checked and cleared. Bumping the
+ * key makes those snapshots unreadable instead of quietly wrong. Bump it again
+ * whenever a field the UI trusts is added to ConsultationQueueRow.
+ */
+const CACHE_KEY = "fact_vet.consultationQueue.v2";
 
 /** SSR-safe access to the browser sessionStorage (null when unavailable). */
 function getStorage(): Storage | null {

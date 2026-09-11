@@ -56,9 +56,14 @@ export function QuickEditDrawer({ detail, isSubmitting, errorMessage, errorDetai
   const balanced = toCents(detail?.total ?? 0) - toCents(values.paidAmount) === 0;
   const missingFallback = detail !== null && detail.items.length === 0 && !fallbackItemCode;
   const missingSiigoSettings = !documentTypeId || !sellerId;
+  // C-11. Provet's header total and its own invoice rows disagree for this
+  // consultation. Unlike the two checks above, this one cannot be fixed from
+  // Ajustes — the source data itself is wrong — so it is styled as a rejection,
+  // not as a pending configuration step.
+  const totalMismatch = detail?.totalMismatch ?? null;
   // gate.canEmit is part of canSubmit so the button is genuinely disabled,
   // not merely refused after the click as the old modeNotReady check was.
-  const canSubmit = parsed.success && balanced && !isSubmitting && detail !== null && values.paymentMethod !== "" && !missingFallback && !missingSiigoSettings && gate.canEmit;
+  const canSubmit = parsed.success && balanced && !isSubmitting && detail !== null && values.paymentMethod !== "" && !missingFallback && !missingSiigoSettings && !totalMismatch && gate.canEmit;
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
@@ -158,6 +163,16 @@ export function QuickEditDrawer({ detail, isSubmitting, errorMessage, errorDetai
             <div className="flex items-start gap-2 rounded-md border border-status-draft-border bg-status-draft-bg px-2 py-2 text-xs text-status-draft-text">
               <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
               <span>Falta configurar {!documentTypeId && !sellerId ? "el tipo de documento y el vendedor" : !documentTypeId ? "el tipo de documento" : "el vendedor"} de Siigo en Ajustes → Mapeo de Catálogo antes de poder emitir.</span>
+            </div>
+          )}
+          {totalMismatch && (
+            <div className="flex items-start gap-2 rounded-md border border-status-rejected-border bg-status-rejected-bg px-2 py-2 text-xs text-status-rejected-text">
+              <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+              <span>
+                Los totales de Provet no cuadran: la factura dice {formatCOP(totalMismatch.expectedTotal)} y sus líneas
+                suman {formatCOP(totalMismatch.itemsTotal)}. No se puede emitir hasta corregirlo en Provet Cloud:
+                uno de los dos importes es incorrecto y no hay forma de saber cuál.
+              </span>
             </div>
           )}
           <EmissionModeBanner gate={gate} isRetrying={isRetryingMode} onRetry={onRetryMode} />

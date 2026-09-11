@@ -174,3 +174,88 @@ describe("line amounts come from invoicerow.sum_total, never from quantity * pri
     expect(r.items).toHaveLength(1);
   });
 });
+
+/**
+ * C-11 — the assert that was missing entirely: the queue's `total` comes from
+ * `invoice.total_with_vat` and its `items` come from `invoicerow.sum_total`,
+ * and until now nothing in the codebase ever compared the two.
+ *
+ * The reproduction is invoice 12 of the live tenant, measured 2026-09-11:
+ * `total_with_vat` is 158.28 while the rows this code keeps add up to 187.50,
+ * because the `sum_total <= 0` filter on line 117 silently drops a -29.22 row
+ * (C-2). The three amounts are the measured ones; how the 187.50 is split
+ * across positive rows is synthetic, since only the totals were recorded.
+ *
+ * Comparing the RAW rows against `total_with_vat` would pass here — Provet's
+ * own arithmetic is consistent. The comparison has to be against the rows the
+ * code actually kept, which is the whole point of the guard.
+ */
+describe("C-11 — total_with_vat vs the line totals the code builds", () => {
+  const invoice12 = inv({
+    id: "I-12",
+    url: "https://api.provet.test/invoice/12/",
+    consultation: "C-12",
+    total: 132.99,
+    total_vat: 25.29,
+    total_with_vat: 158.28,
+  });
+  const rowsOf12: ProvetInvoiceRowRaw[] = [
+    row({ url: "https://api.provet.test/invoicerow/120/", invoice: "https://api.provet.test/invoice/12/", item: "https://api.provet.test/item/74/", name: "Consulta general", sum_total: 100.0 }),
+    row({ url: "https://api.provet.test/invoicerow/121/", invoice: "https://api.provet.test/invoice/12/", item: "https://api.provet.test/item/75/", name: "Amoxicillin 250mg", sum_total: 87.5 }),
+    row({ url: "https://api.provet.test/invoicerow/122/", invoice: "https://api.provet.test/invoice/12/", item: "https://api.provet.test/item/76/", name: "Ajuste", sum_total: -29.22 }),
+  ];
+
+  it("flags invoice 12: the kept rows add up to 187.50 against a header of 158.28", () => {
+    const rows = buildQueueFromProvet(
+      [con({ id: "C-12", invoice: "https://api.provet.test/invoice/12/" })],
+      [cli()], [pat()], [invoice12], [], [], rowsOf12,
+    );
+    const r = rows[0];
+    expect(r.total).toBe(158.28);
+    expect(r.items.reduce((a, i) => a + i.lineTotal, 0)).toBe(187.5);
+    expect(r.totalMismatch).not.toBeNull();
+    expect(r.totalMismatch?.expectedTotal).toBe(158.28);
+    expect(r.totalMismatch?.itemsTotal).toBe(187.5);
+    expect(r.totalMismatch?.deltaCents).toBe(2922);
+  });
+
+  it("does not flag a consultation whose kept rows add up to the header", () => {
+    const rows = buildQueueFromProvet(
+      [con({ id: "C-12", invoice: "https://api.provet.test/invoice/12/" })],
+      [cli()], [pat()],
+      [inv({ id: "I-12", url: "https://api.provet.test/invoice/12/", consultation: "C-12", total_with_vat: 187.5 })],
+      [], [], rowsOf12,
+    );
+    expect(rows[0].totalMismatch).toBeNull();
+  });
+
+  it("does not flag a consultation with no invoice at all (0 against 0)", () => {
+    const rows = buildQueueFromProvet([con()], [cli()], [pat()], [], [], [], []);
+    expect(rows[0].total).toBe(0);
+    expect(rows[0].items).toEqual([]);
+    expect(rows[0].totalMismatch).toBeNull();
+  });
+
+  it("flags an invoice that has a header total but no rows at all", () => {
+    const rows = buildQueueFromProvet(
+      [con({ id: "C-12", invoice: "https://api.provet.test/invoice/12/" })],
+      [cli()], [pat()], [invoice12], [], [], [],
+    );
+    expect(rows[0].totalMismatch?.itemsTotal).toBe(0);
+    expect(rows[0].totalMismatch?.deltaCents).toBe(-15828);
+  });
+
+  it("uses whole cent integers, not a float epsilon: 0.1 + 0.2 against 0.3 is NOT a mismatch", () => {
+    const rows = buildQueueFromProvet(
+      [con({ id: "C-12", invoice: "https://api.provet.test/invoice/12/" })],
+      [cli()], [pat()],
+      [inv({ id: "I-12", url: "https://api.provet.test/invoice/12/", consultation: "C-12", total_with_vat: 0.3 })],
+      [], [],
+      [
+        row({ url: "https://api.provet.test/invoicerow/130/", invoice: "https://api.provet.test/invoice/12/", item: "https://api.provet.test/item/74/", sum_total: 0.1 }),
+        row({ url: "https://api.provet.test/invoicerow/131/", invoice: "https://api.provet.test/invoice/12/", item: "https://api.provet.test/item/75/", sum_total: 0.2 }),
+      ],
+    );
+    expect(rows[0].totalMismatch).toBeNull();
+  });
+});
