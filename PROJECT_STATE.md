@@ -59,12 +59,13 @@ origen; la referencia válida a partir de hoy es la columna `#`.
 | # | Origen | Qué | Evidencia |
 |---|---|---|---|
 | **C-1** | nuevo 2026-09-10 | **Omisión de abonos de Provet en la cola.** `provetToQueue.ts:105-115` construye `consultationByInvoiceId` desde `inv.consultation`, que es `null` en toda nota de crédito, así que el documento entero desaparece. Medido: factura 5 = 1699.04, abono de 125.00 sobre `invoicerow/3` de esa misma factura → la cola factura 1699.04 en vez de 1574.04. **Sobrefacturación de 125.00 con validez fiscal.** El join correcto es `credited_invoicerow` → fila → factura → consulta | `EVIDENCIA §2.8` |
-| **C-2** | N5 | `provetToQueue.ts:117` — `if (lineTotal <= 0) continue` descarta filas en silencio. **Confirmado con datos**: `invoicerow/37` tiene `sum_total=-29.22`. Distinto de C-1 y con fix distinto. La justificación se escribe como "descarta filas negativas reales"; **no** como "descarta descuentos", que sigue sin verificar | `EVIDENCIA §2.8 d/e` |
-| **C-3** | N16 | El `balanced` de `QuickEditDrawer.tsx:56` compara `detail.total` contra lo tecleado, nunca contra `sumLineTotals`. `values.paidAmount` no llega al payload | — |
+| **C-2** | N5 | `provetToQueue.ts:117` — `if (lineTotal <= 0) continue` descarta filas en silencio. **CUANTIFICADO el 2026-09-11: 7 de 52 facturas del tenant no cuadran, y en las 7 la causa es esta.** El caso que importa es la **factura 12**: `total_with_vat` 158.28, lo que emitiría el código **187.50** → **+29.22 de sobrefacturación** en un documento positivo que **no** es nota de crédito. Las facturas **10** y **32** traen total negativo **sin** ser notas de crédito, lo que vuelve a confirmar que el signo no identifica un abono. Distinto de C-1 y con fix distinto. La justificación se escribe como "descarta filas negativas reales"; **no** como "descarta descuentos", que sigue sin verificar | `EVIDENCIA §2.8 d/e` + medición 2026-09-11 |
+| **C-3** | N16 **ampliado** | Tres fallos en la misma costura del drawer. (a) El `balanced` de `QuickEditDrawer.tsx:56` compara `detail.total` contra lo tecleado, nunca contra `sumLineTotals`. (b) `values.paidAmount` no llega al payload. (c) **`formatCOP` redondea al mostrar**, medido el 2026-09-11: `consultationQueue.ts:38` usa `maximumFractionDigits: 0`, así que **33.5 se pinta `$34`** (y 32.5 → `$33`). La columna Total de la cola imprime el número crudo y el drawer lo pasa por `formatCOP`: **el mismo importe sale como 33.5 en una pantalla y $34 en la otra**. Muerde en `QuickEditDrawer.tsx:134`, que es el monto que el staff teclea para cuadrar el pago. **El payload a Siigo NO está afectado**: `provetToSiigo.ts` nunca llama a `formatCOP` | medición 2026-09-11 |
 | **C-4** | N17 | `invoiceReconciliation.ts:92-94` — `created_end` sin hora se interpreta `T00:00:00` y excluye la factura del día. Devuelve `null`, la ruta lo lee como "no existe" y **emite una segunda factura timbrada**. Aplica idéntico a `GET /v1/credit-notes` | `API_SIIGO §Listar` |
 | **C-5** | N7 | `duplicated_document` llega como 400 y `provablyCreatedNothing` lo trata como "no se creó nada". Es el único 4xx que significa lo contrario | — |
 | **C-6** | N6 | La `X-Idempotency-Key` se valida después de tomar el claim; una clave malformada deja la consulta en `unknown` sin tocar Siigo | — |
 | **C-7** | N18 | Reconciliación truncada a 500 documentos: "no lo encontré" se convierte en "no existe" | — |
+| **C-11** | nuevo 2026-09-11 | **Assert `sum(invoicerow.sum_total) == invoice.total_with_vat` por consulta, fail-loud.** Hoy el total mostrado sale de `total_with_vat` y las líneas de `sum_total`, **sin una sola comparación entre ambos en todo el código** — `EVIDENCIA §2.6` lo llama el control de mayor retorno del backlog. Es el guard que detectó las 7 facturas de C-2. **Se construye ANTES de tocar C-1 y C-2**, porque arreglar esos dos cambia la suma y este assert es lo que demuestra que quedó bien | `EVIDENCIA §2.6` |
 
 ### Bloqueante crítico — sesión 3 (nota crédito)
 
@@ -123,6 +124,26 @@ origen; la referencia válida a partir de hoy es la columna `#`.
 | **T-4** | Plan de Supabase con backups | Dueña |
 | **T-5** | **Permiso `Settings` de Provet.** Cubre `/item/` Y `/settings/department/`. **Una sola petición, no dos.** La hipótesis de que los catálogos por tipo lo esquivaran es FALSA: los 7 endpoints dan 403 | Dueña / Provet |
 | **T-6** | ¿Se anula alguna vez desde Provet? P-6 puede responderlo sin preguntar | Dueña |
+
+### Evidencia medida el 2026-09-11 — no repetir como hallazgo nuevo
+
+- **El tenant de sandbox NO es colombiano — bloquea decidir decimales.** Medido
+  el 2026-09-11 sobre `awstest.provetcloud.com/9174`: una línea de la factura 5
+  trae **`vat_percentage` 12.4 %**, que en Colombia no existe (19 %, 5 % o 0 %),
+  los importes llevan céntimos y los datos son de 2021. Es el tenant de
+  demostración genérico de Provet. **Cualquier política de decimales o de
+  redondeo escrita contra estos datos habrá que reescribirla** cuando llegue el
+  tenant real (T-1). Lo que sí se puede hacer sin esperar es C-11, que grita
+  ante un descuadre sea cual sea la moneda.
+- **Una línea puede llevar un cargo fijo que no sale de `price × quantity`.**
+  Medido el 2026-09-11, factura 5 fila 1 (`Amoxicillin 250mg`): `price 48.93`,
+  `price_with_vat 55.00`, `quantity 0.028` → 1.54, y sin embargo
+  `sum_total = 11.54`. **Faltan 10.00 exactos** que no salen de ningún campo de
+  precio. La aritmética interna sí cuadra (`sum 10.27` + `sum_vat 1.27`, con
+  12.4 % sobre 10.27). No es un error de Provet: es un cargo fijo dentro de la
+  línea (dispensación o mínimo por administración). **Es la demostración
+  numérica de por qué `sum_total` se lee literal.** Registrado como evidencia,
+  no como tarea.
 
 ### Cerrado en la sesión 0
 

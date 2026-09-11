@@ -24,21 +24,49 @@ decide con eso, no con el hash.**
 
 ## 1. Alcance congelado
 
-### Entra — los siete hallazgos de la ruta crítica
+### Entra — los ocho hallazgos de la ruta crítica
 
 | # | Origen | Qué |
 |---|---|---|
 | **C-1** | nuevo 2026-09-10 | **Omisión de abonos de Provet.** `provetToQueue.ts:105-115` arma `consultationByInvoiceId` desde `inv.consultation`, que es `null` en toda nota de crédito → el documento entero desaparece. Medido: factura 5 = 1699.04 con abono de 125.00 sobre `invoicerow/3` → la cola factura **1699.04 en vez de 1574.04**. Sobrefacturación con validez fiscal. El join correcto es `credited_invoicerow` → fila → factura → consulta. Evidencia: `EVIDENCIA §2.8` |
-| **C-2** | N5 | `provetToQueue.ts:117` — `if (lineTotal <= 0) continue` descarta filas en silencio. Confirmado: `invoicerow/37` tiene `sum_total=-29.22`. **Fix distinto al de C-1.** Justificación exacta: "descarta filas negativas reales"; **no** "descarta descuentos", que sigue sin verificar |
-| **C-3** | N16 | `QuickEditDrawer.tsx:56` — `balanced` compara `detail.total` contra lo tecleado, nunca contra `sumLineTotals`; `values.paidAmount` no llega al payload |
+| **C-2** | N5 | `provetToQueue.ts:117` — `if (lineTotal <= 0) continue` descarta filas en silencio. **CUANTIFICADO el 2026-09-11: 7 de 52 facturas del tenant no cuadran, y en las 7 la causa es esta.** El caso que importa es la **factura 12**: `total_with_vat` 158.28 contra los **187.50** que emitiría el código → **+29.22 de sobrefacturación** en un documento positivo que **no** es nota de crédito. Las facturas **10** y **32** traen total negativo **sin** ser NC. Las otras cuatro (16, 17, 19, 31) son NC que el código deja en 0.00. **Fix distinto al de C-1.** Justificación exacta: "descarta filas negativas reales"; **no** "descarta descuentos", que sigue sin verificar |
+| **C-3** | N16 **ampliado** | Tres fallos en la misma costura. (a) `QuickEditDrawer.tsx:56` — `balanced` compara `detail.total` contra lo tecleado, nunca contra `sumLineTotals`. (b) `values.paidAmount` no llega al payload. (c) **`formatCOP` redondea al mostrar**: `consultationQueue.ts:38` usa `maximumFractionDigits: 0`, así que **33.5 se pinta `$34`** y 32.5 → `$33`. La cola imprime el número crudo y el drawer lo pasa por `formatCOP`: **el mismo importe sale como 33.5 en una pantalla y $34 en la otra** (consulta 39 del tenant). Muerde en `QuickEditDrawer.tsx:134`, el monto que el staff teclea para cuadrar. **El payload a Siigo NO está afectado** |
 | **C-4** | N17 | `invoiceReconciliation.ts:92-94` — `created_end` sin hora se interpreta `T00:00:00` y excluye la factura del día → devuelve `null` → la ruta lo lee como "no existe" y **emite una segunda factura timbrada**. Idéntico en `GET /v1/credit-notes` |
 | **C-5** | N7 | `duplicated_document` llega como 400 y `provablyCreatedNothing` lo trata como "no se creó nada". Es el único 4xx que significa lo contrario |
 | **C-6** | N6 | La `X-Idempotency-Key` se valida **después** de tomar el claim: una clave malformada deja la consulta en `unknown` sin haber tocado Siigo |
 | **C-7** | N18 | Reconciliación truncada a 500 documentos: "no lo encontré" se convierte en "no existe" |
+| **C-11** | nuevo 2026-09-11 | **Assert `sum(invoicerow.sum_total) == invoice.total_with_vat` por consulta, fail-loud.** Hoy el total mostrado sale de `total_with_vat` y las líneas de `sum_total`, **sin una sola comparación entre ambos en todo el código** — `EVIDENCIA §2.6` lo llama el control de mayor retorno del backlog. Es el guard que detectó las 7 facturas de C-2. **Se construye ANTES de tocar C-1 y C-2**: arreglar esos dos cambia la suma, y este assert es lo que demuestra que quedó bien |
 
 **Uno a la vez, con los tres gates completos entre hallazgo y hallazgo.** Orden
-sugerido: C-1 → C-2 (mismo archivo, fixes distintos, no los fusiones) → C-4 → C-7
-(misma familia: reconciliación que miente) → C-5 → C-6 → C-3.
+**obligatorio al principio**: **C-11 primero** — es el guard que demuestra que
+los dos siguientes quedaron bien. Luego C-1 → C-2 (mismo archivo, fixes
+distintos, **no los fusiones**). Después, orden sugerido: C-4 → C-7 (misma
+familia: reconciliación que miente) → C-5 → C-6 → C-3.
+
+### Decisión de formato ya tomada por Jean — no se relitiga
+
+**La UI nunca redondea.** `formatCOP` pasa a mostrar **siempre dos decimales**,
+también en importes enteros. Formato es-CO, verificado ejecutándolo:
+
+| Valor | Se pinta |
+|---|---|
+| 33.5 | `$33,50` |
+| 1500 | `$1.500,00` |
+| 1699.04 | `$1.699,04` |
+| −29.22 | `$-29,22` |
+
+Tres avisos al implementarlo:
+
+1. **No basta con cambiar `maximumFractionDigits`.** Hay **tres** llamadas a
+   `formatCOP`: dos en `QuickEditDrawer.tsx` (líneas 134 y 148) y una en
+   `InvoiceSnapshotDrawer.tsx:70`. El snapshot es el delicado: muestra lo **ya
+   emitido**, así que el número en pantalla debe coincidir exactamente con el del
+   documento timbrado.
+2. **Caen tests.** `consultationQueue.test.ts` fija el formato actual. Revisar
+   uno por uno si el test estaba bien o blindaba el bug — no adaptarlos en bloque.
+3. **El signo queda como `$-29,22`, no `-$29,22`.** Con C-2 arreglado las filas
+   negativas pasan a ser visibles, así que hay que decidir dónde va el signo.
+   Decisión de UI pendiente: no la tomes sin preguntar a Jean.
 
 ### NO entra — explícito
 
@@ -90,6 +118,47 @@ aparece. Se arregla borrando ese archivo, **nunca** añadiendo `turbopack.root` 
 
 ---
 
+## 2 bis. Herramienta de diagnóstico disponible
+
+`diagnose_provet_totales.mjs`, en `~/Downloads` de Jean, **fuera del repo a
+propósito**. Solo GET, sin dependencias, sin importar nada del proyecto. Es lo
+que produjo las mediciones del 2026-09-11:
+
+    node --env-file=.env.local ~/Downloads/diagnose_provet_totales.mjs --scan --days 2500
+    node --env-file=.env.local ~/Downloads/diagnose_provet_totales.mjs --invoice 12
+
+`--scan` lista solo las facturas donde `total_with_vat` no cuadra con la suma de
+filas, marcando la causa (C-1, C-2, pago de redondeo). `--invoice` vuelca
+cabecera, filas con todos sus campos de importe, y pagos. **La ventana por
+defecto son 30 días y el tenant tiene datos de 2021: sin `--days 2500` devuelve
+cero facturas.** Dos erratas ya corregidas en él, por si se reusa el patrón:
+`invoicerow` **no tiene `unit_price`** (son `price`, `price_with_vat`, `sum`,
+`sum_vat`, `sum_total`), y un escaneo de cero facturas no es un escaneo limpio.
+
+### Evidencia medida el 2026-09-11 — no repetir como hallazgo nuevo
+
+- **El tenant de sandbox NO es colombiano.** Una línea de la factura 5 trae
+  **`vat_percentage` 12.4 %**, que en Colombia no existe (19 %, 5 % o 0 %); los
+  importes llevan céntimos y los datos son de 2021. Es el tenant de demostración
+  genérico de Provet. **Cualquier política de decimales o redondeo escrita contra
+  estos datos habrá que reescribirla** cuando llegue el tenant real (T-1). La
+  decisión de formato de arriba es de presentación y no depende de la moneda, así
+  que esa sí se puede aplicar ya.
+- **Una línea puede llevar un cargo fijo que no sale de `price × quantity`.**
+  Factura 5, fila 1 (`Amoxicillin 250mg`): `price 48.93`, `price_with_vat 55.00`,
+  `quantity 0.028` → 1.54, y sin embargo `sum_total = 11.54`. **Faltan 10.00
+  exactos.** La aritmética interna cuadra (`sum 10.27` + `sum_vat 1.27`, 12.4 %
+  sobre 10.27). No es un error: es un cargo fijo dentro de la línea. **Es la
+  demostración numérica de por qué `sum_total` se lee literal y nunca se
+  recalcula.**
+- **`/invoicepayment/` no sirve hoy como fuente de verdad del medio de pago.** La
+  factura 5 tiene un único pago de **0.00** con `type=0 tarjeta`. Si C-11 o
+  cualquier otro ítem decide leer ese endpoint, hay que revalidarlo contra
+  producción, no contra este tenant.
+- **Descartado con medición: no hay pago de redondeo.** La hipótesis de que
+  Provet cuadrara a peso entero con un `payment_type=3` se comprobó y es falsa en
+  este tenant. No volver a proponerla sin datos nuevos.
+
 ## 3. El riesgo real de esta sesión
 
 **No es el framework, es que C-1 y C-2 tocan dinero facturado.** Un error aquí no
@@ -120,6 +189,11 @@ Abrir el drawer · `Esc` · `Ctrl+Enter` · el lápiz de importe · que el botó
 bloquee cuando no cuadra · y, lo específico de C-3, **que `paidAmount` llegue al
 payload y que `balanced` se calcule contra `sumLineTotals`**. Con las dos cuentas,
 admin y empleado.
+
+**Caso concreto de regresión, ya reproducido:** la **consulta 39** del tenant
+(cliente Sara Bobby, paciente Teddy, total **33.5**). Hoy la cola muestra `33.5`
+y el drawer `$34`. Después del fix los dos deben mostrar **`$33,50`**, y el
+importe que viaja a Siigo debe seguir siendo **33.5**, no 34.
 
 **Aspecto concreto de un fallo silencioso:** la página carga, el botón responde, y
 el importe emitido es el equivocado. No hay traza en consola.
