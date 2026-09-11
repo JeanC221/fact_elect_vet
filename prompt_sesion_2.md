@@ -35,13 +35,15 @@ decide con eso, no con el hash.**
 | **C-5** | N7 | `duplicated_document` llega como 400 y `provablyCreatedNothing` lo trata como "no se creó nada". Es el único 4xx que significa lo contrario |
 | **C-6** | N6 | La `X-Idempotency-Key` se valida **después** de tomar el claim: una clave malformada deja la consulta en `unknown` sin haber tocado Siigo |
 | **C-7** | N18 | Reconciliación truncada a 500 documentos: "no lo encontré" se convierte en "no existe" |
-| **C-11** | nuevo 2026-09-11 | **Assert `sum(invoicerow.sum_total) == invoice.total_with_vat` por consulta, fail-loud.** Hoy el total mostrado sale de `total_with_vat` y las líneas de `sum_total`, **sin una sola comparación entre ambos en todo el código** — `EVIDENCIA §2.6` lo llama el control de mayor retorno del backlog. Es el guard que detectó las 7 facturas de C-2. **Se construye ANTES de tocar C-1 y C-2**: arreglar esos dos cambia la suma, y este assert es lo que demuestra que quedó bien |
+| **C-11** | nuevo 2026-09-11 · **enunciado corregido el 2026-09-11 al abrir la sesión 2** | **Assert por consulta entre los dos números que el propio código produce: `sum(items[].lineTotal)` contra `row.total` (que sale de `invoice.total_with_vat`), fail-loud.** Hoy el total mostrado sale de `total_with_vat` y las líneas de `sum_total`, **sin una sola comparación entre ambos en todo el código** — `EVIDENCIA §2.6` lo llama el control de mayor retorno del backlog. **Dos correcciones al enunciado original, ambas aceptadas por Jean:** (a) **el assert NO detecta C-1.** Una nota de crédito de Provet es una **factura distinta** (id 6), no una fila de la factura 5, así que la suma de filas de la 5 cuadra con su `total_with_vat` 1699.04 **antes y después** de C-1. Lo que sí hace, y es más útil, es **empezar a fallar en la consulta 4 una vez C-1 esté arreglado** (items 1574.04 contra total 1699.04): es el guard que impide dejar C-1 a medias, obligando a que corrija también el `total` de la fila de cola y no solo los items. (b) **Comparar filas crudas contra `total_with_vat` da VERDE en la factura 12** y por tanto no sirve: mide la aritmética de Provet, no el pipeline. La comparación válida es contra las filas **ya filtradas por el código**. Para C-2 sí dispara hoy, en las 7 facturas. **Se construye ANTES de tocar C-1 y C-2** |
 
 **Uno a la vez, con los tres gates completos entre hallazgo y hallazgo.** Orden
-**obligatorio al principio**: **C-11 primero** — es el guard que demuestra que
-los dos siguientes quedaron bien. Luego C-1 → C-2 (mismo archivo, fixes
-distintos, **no los fusiones**). Después, orden sugerido: C-4 → C-7 (misma
-familia: reconciliación que miente) → C-5 → C-6 → C-3.
+**obligatorio al principio**: **C-11 primero** — dispara hoy sobre C-2 y, una vez
+arreglado C-1, es lo que demuestra que ese fix quedó completo (ver la corrección
+(a) en la fila de C-11: no lo detecta antes del fix, falla después si el fix es
+parcial). Luego C-1 → C-2 (mismo archivo, fixes distintos, **no los fusiones**).
+Después, orden sugerido: C-4 → C-7 (misma familia: reconciliación que miente) →
+C-5 → C-6 → C-3.
 
 ### Decisión de formato ya tomada por Jean — no se relitiga
 
@@ -68,11 +70,48 @@ Tres avisos al implementarlo:
    negativas pasan a ser visibles, así que hay que decidir dónde va el signo.
    Decisión de UI pendiente: no la tomes sin preguntar a Jean.
 
+### Decisiones de C-11 tomadas por Jean el 2026-09-11 — no se relitigan
+
+1. **Mecanismo: A + D.**
+   - **A** — el mapper calcula el descuadre y lo materializa por fila
+     (`ConsultationQueueRow.totalMismatch`); la fila se pinta bloqueada y el
+     constructor del payload **lanza** en vez de emitir. `buildQueueFromProvet`
+     **no** lanza: 7 de 52 facturas descuadran hoy y eso dejaría la cola entera
+     en blanco.
+   - **D** — el cliente manda `expectedTotal` (el `total_with_vat` de Provet) en
+     el body de `POST /api/invoices` y la ruta verifica que `sum(items)` coincide.
+     **Sin round-trip a Provet.** No protege contra un cliente malicioso y no
+     pretende hacerlo: **el modelo de amenaza aquí son los bugs, no la malicia.**
+     Funciona porque los dos números vienen de fuentes distintas —la cabecera de
+     Provet y las filas ya filtradas—, así que el fallo de C-2 queda atrapado en
+     el servidor y no solo en la UI. Coste asumido: un campo en el esquema Zod de
+     la ruta y **revisar uno a uno los 22 tests de `invoices/route.test.ts`**,
+     porque cambia el contrato de entrada.
+   - **B descartada** (lanzar desde `buildQueueFromProvet`). **C descartada para
+     esta sesión** por desproporcionada: pasa a **C-12**, sesión 4.
+2. **Tolerancia: céntimos enteros, no epsilon.** Se reusa `toCents` de
+   `src/schemas/provet.ts:29`, que el repo **ya** usa para exactamente esta
+   comparación en `provet.ts:116` (`toCents(subtotal + tax_total) === toCents(total)`)
+   y en `QuickEditDrawer.tsx:56`. Prohibido introducir una constante tipo
+   `Math.abs(delta) >= 0.005`: es arbitraria, aproximada, y **un epsilon de coma
+   flotante en un control fiscal es una decisión que dentro de seis meses nadie
+   sabe justificar**. Siigo tope 2 decimales y el COP no tiene fracciones
+   menores; que el tenant de sandbox no sea colombiano no cambia nada aquí.
+3. **Sin exenciones, y no hace falta añadir ninguna.** La aritmética exime sola
+   el caso vacío: sin factura, 0 contra 0, no dispara. **Factura con total y cero
+   filas sí dispara y debe disparar** — emitir eso ya pasaría por
+   `EmptyConsultationError`, que es fail-loud por otra vía, así que bloquear es
+   coherente. **No metas una exención explícita: un guard fiscal con casos
+   especiales es donde se esconden los bugs.** El falso positivo por paginación
+   está descartado: `fetchInvoiceRows` sigue los `next` hasta el final y **lanza**
+   al superar `MAX_PAGES = 50` en vez de truncar.
+
 ### NO entra — explícito
 
 | Qué | Por qué |
 |---|---|
 | `middleware.ts` → `proxy.ts` | Decisión de plataforma nº 6. Sesión 4 (A-4) |
+| **C-12** (assert server-side re-fetcheando Provet en la ruta de emisión) | Sesión 4. Es la única variante no evadible; la de esta sesión (A + D) **sí es evadible por un POST directo** |
 | C-8, C-9, C-10 (nota crédito) | Sesión 3. C-9 (borrar los 23 tests del contrato inventado) va **antes** de tocar el mapper, y eso es trabajo de la sesión 3, no de esta |
 | A-1 … A-4, H-*, P-* | Sesiones 4 en adelante |
 | Cualquier bump de dependencia | La sesión 1 acaba de mover `next` y `react`. **No se tocan `package.json` ni el lockfile en esta sesión** |

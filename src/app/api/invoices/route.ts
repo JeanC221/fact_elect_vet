@@ -19,6 +19,7 @@ import {
   releaseInvoiceClaim,
 } from "@/services/invoiceClaims";
 import { requireSession } from "@/services/routeGuard";
+import { toCents } from "@/schemas/provet";
 
 export const dynamic = "force-dynamic";
 
@@ -30,8 +31,61 @@ export const dynamic = "force-dynamic";
  */
 const invoiceRequestSchema = z.object({
   consultationId: z.string().trim().min(1).max(100),
+  /**
+   * C-11 / decision D — Provet's invoice header total (`total_with_vat`) for
+   * this consultation, sent alongside the payload so the server can check the
+   * two independent amounts against each other without a Provet round-trip.
+   *
+   * Required, not optional: an optional field would let a caller skip the
+   * check by omission, which is the silent fallback this whole guard exists to
+   * remove.
+   *
+   * This does NOT make the route safe against a malicious client — a crafted
+   * request can send an `expectedTotal` that agrees with a wrong `items`. The
+   * threat model here is bugs, not malice, and against a bug it works,
+   * because the two numbers come from different places: the Provet header and
+   * the already-filtered rows. The non-evadable version is C-12, session 4.
+   */
+  expectedTotal: z.number().finite().max(1e12),
   payload: siigoInvoicePayloadSchema,
 });
+
+/** Thrown before the claim is taken — see the call site for why the order matters. */
+class EmissionTotalMismatchError extends Error {
+  constructor(readonly detail: string) {
+    super(detail);
+    this.name = "EmissionTotalMismatchError";
+  }
+}
+
+/**
+ * Sum the payload the way Siigo will: quantity x VAT-inclusive unit price.
+ *
+ * `taxed_price` is required on every line here. The mapper only ever emits
+ * `taxed_price` (siigoInvoiceItemSchema allows `price` as the exclusive-VAT
+ * alternative), and a payload built with `price` is not comparable against a
+ * VAT-inclusive Provet header at all — so that case is refused rather than
+ * compared wrongly.
+ */
+function assertPayloadMatchesProvetTotal(
+  payload: z.infer<typeof siigoInvoicePayloadSchema>,
+  expectedTotal: number,
+): void {
+  const untaxed = payload.items.filter((i) => i.taxed_price === undefined);
+  if (untaxed.length > 0) {
+    throw new EmissionTotalMismatchError(
+      "El payload trae líneas con `price` en vez de `taxed_price`, que no son comparables con el total de Provet. No se emite.",
+    );
+  }
+  const itemsTotal = payload.items.reduce((sum, i) => sum + i.quantity * (i.taxed_price ?? 0), 0);
+  if (toCents(itemsTotal) === toCents(expectedTotal)) return;
+  const fmt = (n: number) => n.toFixed(2);
+  throw new EmissionTotalMismatchError(
+    `El total de Provet para esta consulta (${fmt(expectedTotal)}) no coincide con la suma de las líneas del ` +
+      `documento (${fmt(itemsTotal)}); diferencia de ${fmt((toCents(itemsTotal) - toCents(expectedTotal)) / 100)}. ` +
+      `No se emite: uno de los dos importes es incorrecto y no hay forma de saber cuál. Revise la factura en Provet Cloud.`,
+  );
+}
 
 /**
  * Can we prove Siigo created nothing?
@@ -63,8 +117,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   let claimHeld = false;
   try {
     const body = await req.json();
-    const { consultationId: id, payload } = invoiceRequestSchema.parse(body);
+    const { consultationId: id, expectedTotal, payload } = invoiceRequestSchema.parse(body);
     consultationId = id;
+
+    // C-11 / D. Checked here, BEFORE the claim is acquired and before Siigo is
+    // touched: exactly the ordering bug C-6 describes in reverse. A payload
+    // that fails this check has not reached Siigo, so the consultation must
+    // not be left holding a claim in `unknown`.
+    assertPayloadMatchesProvetTotal(payload, expectedTotal);
 
     // One emission attempt = one marker, reused across the internal retry so
     // reconciliation stays stable. The Idempotency-Key, by contrast, must be
@@ -162,6 +222,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     if (err instanceof SiigoApiError) {
       const status = err.status ?? 502;
       return NextResponse.json({ error: { code: err.code, message: err.message } }, { status });
+    }
+    if (err instanceof EmissionTotalMismatchError) {
+      return NextResponse.json({ error: { code: "total_mismatch", message: err.message } }, { status: 400 });
     }
     if (err instanceof z.ZodError) {
       const detail = err.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join(" | ");

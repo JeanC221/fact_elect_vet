@@ -28,7 +28,21 @@ function authed(url: string, init: RequestInit = {}) {
   return requestWithCookie(url, sessionCookie, init);
 }
 
-const validPayload = siigoInvoicePayloadSchema.parse(mockSiigoInvoicePayloads[0]);
+/**
+ * The mock fixture's line carries `price` (VAT-exclusive). The mapper never
+ * emits that — `provetToSiigo.ts` always sends `taxed_price`, because Provet's
+ * `sum_total` is already VAT-inclusive — and the C-11/D check in the route
+ * refuses a `price`-based payload rather than comparing a VAT-exclusive sum
+ * against a VAT-inclusive Provet header. So the line is overridden here to
+ * match what production actually sends. The mock itself is left alone: it is
+ * shared with the credit-note tests, which are session 3 territory.
+ */
+const validPayload = siigoInvoicePayloadSchema.parse({
+  ...mockSiigoInvoicePayloads[0],
+  items: [{ code: "SERV-CG-01", description: "Consulta General Veterinaria", quantity: 1, taxed_price: 80000 }],
+});
+/** Provet's `total_with_vat` for the consultation behind `validPayload`. */
+const EXPECTED_TOTAL = 80000;
 const CONSULTATION_ID = "provet-consult-9911";
 
 const mockAccessToken = "tok-live-123";
@@ -107,7 +121,7 @@ function makeRequest(body: unknown, idempotencyKey?: string): NextRequest {
   return authed("http://localhost/api/invoices", { method: "POST", headers, body: JSON.stringify(body) });
 }
 
-const validBody = { consultationId: CONSULTATION_ID, payload: validPayload };
+const validBody = { consultationId: CONSULTATION_ID, expectedTotal: EXPECTED_TOTAL, payload: validPayload };
 
 describe("POST /api/invoices", () => {
   beforeEach(() => {
@@ -179,7 +193,7 @@ describe("POST /api/invoices", () => {
   });
 
   it("returns 400 for a Zod-invalid payload and takes no claim", async () => {
-    const res = await POST(makeRequest({ consultationId: CONSULTATION_ID, payload: { ...validPayload, seller: -1 } }));
+    const res = await POST(makeRequest({ consultationId: CONSULTATION_ID, expectedTotal: EXPECTED_TOTAL, payload: { ...validPayload, seller: -1 } }));
     const json = await res.json();
 
     expect(res.status).toBe(400);
@@ -188,8 +202,99 @@ describe("POST /api/invoices", () => {
     expect(submitInvoice).not.toHaveBeenCalled();
   });
 
+  it("returns 400 total_mismatch when the payload lines do not add up to Provet's header total", async () => {
+    // Invoice 12 of the live tenant, in the shape it reaches the route:
+    // Provet's header says 158.28, the lines built from the filtered rows say
+    // 187.50. Neither may be stamped.
+    const res = await POST(makeRequest({
+      consultationId: CONSULTATION_ID,
+      expectedTotal: 158.28,
+      payload: siigoInvoicePayloadSchema.parse({
+        ...validPayload,
+        items: [
+          { code: "SERV-CG-01", description: "Consulta general", quantity: 1, taxed_price: 100 },
+          { code: "SERV-AMX-01", description: "Amoxicillin 250mg", quantity: 1, taxed_price: 87.5 },
+        ],
+        payments: [{ id: 5636, value: 187.5 }],
+      }),
+    }));
+    const json = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(json.error.code).toBe("total_mismatch");
+    expect(json.error.message).toContain("158.28");
+    expect(json.error.message).toContain("187.50");
+    // The check runs BEFORE the claim is taken and before Siigo is touched:
+    // a refused request must not wedge the consultation in `unknown`.
+    expect(claims.size).toBe(0);
+    expect(submitInvoice).not.toHaveBeenCalled();
+  });
+
+  it("catches the mismatch across several lines, not just a single wrong one", async () => {
+    const res = await POST(makeRequest({
+      consultationId: CONSULTATION_ID,
+      expectedTotal: 300,
+      payload: siigoInvoicePayloadSchema.parse({
+        ...validPayload,
+        items: [
+          { code: "A", description: "A", quantity: 2, taxed_price: 100 },
+          { code: "B", description: "B", quantity: 3, taxed_price: 33.34 },
+        ],
+        payments: [{ id: 5636, value: 300.02 }],
+      }),
+    }));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.code).toBe("total_mismatch");
+  });
+
+  it("accepts cent-level float drift, because both sides are compared as whole cents", async () => {
+    vi.mocked(submitInvoice).mockResolvedValue({ id: "INV-DRIFT", number: 1, cufe: "CUFE-DRIFT", status: "Accepted" as const, observations: undefined });
+    const res = await POST(makeRequest({
+      consultationId: CONSULTATION_ID,
+      expectedTotal: 0.3,
+      payload: siigoInvoicePayloadSchema.parse({
+        ...validPayload,
+        items: [
+          { code: "A", description: "A", quantity: 1, taxed_price: 0.1 },
+          { code: "B", description: "B", quantity: 1, taxed_price: 0.2 },
+        ],
+        payments: [{ id: 5636, value: 0.3 }],
+      }),
+    }));
+    expect(res.status).toBe(200);
+  });
+
+  it("refuses a VAT-exclusive `price` payload rather than comparing it wrongly", async () => {
+    const res = await POST(makeRequest({
+      consultationId: CONSULTATION_ID,
+      expectedTotal: 80000,
+      payload: siigoInvoicePayloadSchema.parse(mockSiigoInvoicePayloads[0]),
+    }));
+    const json = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(json.error.code).toBe("total_mismatch");
+    expect(json.error.message).toContain("taxed_price");
+    expect(claims.size).toBe(0);
+    expect(submitInvoice).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 when expectedTotal is missing: the check cannot be skipped by omission", async () => {
+    const res = await POST(makeRequest({ consultationId: CONSULTATION_ID, payload: validPayload }));
+    const json = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(json.error.code).toBe("invalid_payload");
+    expect(json.error.message).toContain("expectedTotal");
+    expect(claims.size).toBe(0);
+    expect(submitInvoice).not.toHaveBeenCalled();
+  });
+
   it("returns 400 when consultationId is missing, so an unlinked invoice can never be stamped", async () => {
-    const res = await POST(makeRequest(validPayload));
+    // `expectedTotal` is supplied so the only thing wrong with this request is
+    // the missing consultationId — otherwise the test would pass for the wrong
+    // reason once the C-11/D field became mandatory.
+    const res = await POST(makeRequest({ expectedTotal: EXPECTED_TOTAL, payload: validPayload }));
     const json = await res.json();
 
     expect(res.status).toBe(400);

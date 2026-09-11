@@ -46,6 +46,7 @@ const row = (over: Partial<ConsultationQueueRow> = {}): ConsultationQueueRow => 
   provetStatus: "closed",
   invoiceStatus: "Draft",
   createdAt: new Date("2026-08-15T09:30:00.000Z"),
+  totalMismatch: null,
   ...over,
 });
 

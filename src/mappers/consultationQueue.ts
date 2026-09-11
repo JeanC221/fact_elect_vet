@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   hasMaxDecimals,
+  toCents,
   identificationSchema,
   identificationTypes,
   type Client,
@@ -8,7 +9,7 @@ import {
   type Patient,
 } from "@/schemas/provet";
 import type { SiigoInvoicePayload } from "@/schemas/siigo";
-import { provetToSiigoInvoice, type ProvetToSiigoOptions } from "@/mappers/provetToSiigo";
+import { provetToSiigoInvoice, TotalMismatchError, type ProvetToSiigoOptions } from "@/mappers/provetToSiigo";
 import type { CatalogMapping } from "@/mappers/catalogMapping";
 
 /** DIAN invoice lifecycle status, surfaced per consultation row. */
@@ -21,6 +22,30 @@ export type ProvetStatus = "pending" | "closed";
 /** Editable line item view-model for the Quick-Edit drawer (tax-inclusive line total). */
 export interface QuickEditItem { code: string; name: string; quantity: number; lineTotal: number; }
 
+/**
+ * C-11 — a measured disagreement between the two independent amounts Provet
+ * gives us for the same consultation: the invoice header (`total_with_vat`,
+ * which becomes `row.total`) and the invoice rows (`sum_total`, which become
+ * `row.items`). Until this field existed, nothing in the codebase ever
+ * compared them, and `EVIDENCIA §2.6` calls that assert the highest-return
+ * control in the backlog.
+ *
+ * `null` means the two agree to the cent. Anything else means one of the two
+ * is wrong and we cannot tell which, so the consultation must not be emitted:
+ * either amount could be the one the DIAN stamps.
+ */
+export interface QueueTotalMismatch {
+  /** `invoice.total_with_vat`, verbatim. */
+  expectedTotal: number;
+  /** Sum of the line totals this code actually built for the consultation. */
+  itemsTotal: number;
+  /**
+   * `itemsTotal - expectedTotal` in whole cents. Integer on purpose: a float
+   * delta in a fiscal control is a number nobody can justify six months later.
+   */
+  deltaCents: number;
+}
+
 export interface ConsultationQueueRow {
   id: string; clientId: string; clientName: string; clientDoc: string;
   /** Colombian document type inferred from Provet's client record — see provetToQueue.ts. */
@@ -32,6 +57,35 @@ export interface ConsultationQueueRow {
   items: QuickEditItem[];
   patientName: string; total: number; paymentMethod: string;
   provetStatus: ProvetStatus; invoiceStatus: InvoiceStatus; createdAt: Date;
+  /** C-11 guard. `null` when header and rows agree to the cent. */
+  totalMismatch: QueueTotalMismatch | null;
+}
+
+/**
+ * C-11 — compare the invoice header against the lines this code actually kept.
+ *
+ * Two things this deliberately does NOT do:
+ *
+ * 1. It does not compare the RAW Provet rows against `total_with_vat`. Provet's
+ *    own arithmetic is self-consistent, so that comparison passes on invoice 12
+ *    of the live tenant while the queue still bills 187.50 against a header of
+ *    158.28. The number that matters is the one the code produced.
+ * 2. It does not use a float tolerance. `toCents` is the repo's existing drift
+ *    absorber (`provet.ts:29`), applied here in exactly the shape it already
+ *    has in `provet.ts:116` — round both sides once, compare integers — rather
+ *    than rounding each line first, which would be a new and different rule.
+ *
+ * No special cases: a consultation with no invoice compares 0 against 0 and
+ * passes on its own arithmetic, and an invoice carrying a header total with no
+ * rows behind it is flagged, which is what we want — emitting it would hit
+ * `EmptyConsultationError` anyway.
+ */
+export function detectTotalMismatch(expectedTotal: number, items: QuickEditItem[]): QueueTotalMismatch | null {
+  const itemsCents = toCents(items.reduce((acc, i) => acc + i.lineTotal, 0));
+  const expectedCents = toCents(expectedTotal);
+  if (itemsCents === expectedCents) return null;
+  const itemsTotal = itemsCents / 100;
+  return { expectedTotal, itemsTotal, deltaCents: itemsCents - expectedCents };
 }
 
 /** COP currency formatter (es-CO grouping, deterministic "$95.200"). */
@@ -65,6 +119,7 @@ export function buildConsultationQueue(consultations: Consultation[], clients: C
   return consultations.map((c) => {
     const client = clientMap.get(c.client_id);
     const patient = patientMap.get(c.patient_id);
+    const items = c.items.map((i) => ({ code: i.code, name: i.name, quantity: i.quantity, lineTotal: i.unit_price * i.quantity * (1 + i.tax_rate) - i.discount }));
     return {
       id: c.id, clientId: c.client_id,
       clientName: client?.name ?? "Cliente desconocido",
@@ -73,10 +128,11 @@ export function buildConsultationQueue(consultations: Consultation[], clients: C
       identificationNumber: client?.identification.number ?? "",
       email: client?.email ?? "",
       phone: client?.phone ?? "",
-      items: c.items.map((i) => ({ code: i.code, name: i.name, quantity: i.quantity, lineTotal: i.unit_price * i.quantity * (1 + i.tax_rate) - i.discount })),
+      items,
       patientName: patient?.name ?? "Paciente desconocido",
       total: c.total, paymentMethod: c.payment_method,
       provetStatus: c.status, invoiceStatus: "Draft", createdAt: c.created_at,
+      totalMismatch: detectTotalMismatch(c.total, items),
     };
   });
 }
@@ -91,6 +147,8 @@ export interface QuickEditDetail {
   email: string; phone: string; patientName: string;
   paymentMethod: string; paymentMethodOptions: PaymentOption[];
   total: number; items: QuickEditItem[]; createdAt: Date;
+  /** C-11 guard, carried through from the queue row. `null` when they agree. */
+  totalMismatch: QueueTotalMismatch | null;
 }
 
 /** Zod schema for the Quick-Edit form (reuses identificationSchema for NIT/Cédula rules). */
@@ -125,6 +183,7 @@ export function buildQuickEditDetail(consultations: Consultation[], clients: Cli
   const client = clients.find((c) => c.id === consultation.client_id);
   const patient = patients.find((p) => p.id === consultation.patient_id);
   const paymentMethodOptions = buildPaymentOptions(mapping);
+  const items = consultation.items.map((i) => ({ code: i.code, name: i.name, quantity: i.quantity, lineTotal: i.unit_price * i.quantity * (1 + i.tax_rate) - i.discount }));
   return {
     id: consultation.id,
     clientName: client?.name ?? "Cliente desconocido",
@@ -135,7 +194,8 @@ export function buildQuickEditDetail(consultations: Consultation[], clients: Cli
     patientName: patient?.name ?? "Paciente desconocido",
     paymentMethod: "", paymentMethodOptions,
     total: consultation.total, createdAt: consultation.created_at,
-    items: consultation.items.map((i) => ({ code: i.code, name: i.name, quantity: i.quantity, lineTotal: i.unit_price * i.quantity * (1 + i.tax_rate) - i.discount })),
+    items,
+    totalMismatch: detectTotalMismatch(consultation.total, items),
   };
 }
 
@@ -169,13 +229,41 @@ function toSiigoLine(it: QuickEditItem): Consultation["items"][number] {
   };
 }
 
+/**
+ * C-11 escape hatch, deliberately explicit and deliberately ugly to write.
+ *
+ * The guard must NOT block an annulment. A credit note is issued against an
+ * invoice the DIAN has already stamped: refusing to build it because the
+ * consultation's totals disagree would leave the wrong document legally alive
+ * with no way to void it — strictly worse than the problem the guard exists to
+ * prevent. So the annul path opts out by name, at its call site, and every
+ * other caller gets the guard whether it thought about it or not.
+ */
+export interface QuickEditPayloadOptions {
+  /** Default true. Only the credit-note/annulment path may set this to false. */
+  enforceTotalMatch?: boolean;
+}
+
 export function buildInvoicePayloadFromQuickEdit(
   consultations: Consultation[], clients: Client[], patients: Patient[],
   id: string, values: QuickEditFormValues, options?: ProvetToSiigoOptions, fallbackDetail?: QuickEditDetail,
+  payloadOptions: QuickEditPayloadOptions = {},
 ): SiigoInvoicePayload | undefined {
   const consultation = consultations.find((c) => c.id === id);
   const client = consultation ? clients.find((c) => c.id === consultation.client_id) : undefined;
   const patient = consultation ? patients.find((p) => p.id === consultation.patient_id) : undefined;
+
+  // C-11. Checked before either branch below, and before anything is built:
+  // this is the last point where the two Provet amounts are both still in
+  // scope. Whichever source the detail came from — a real consultation or the
+  // queue row — a disagreement stops emission here rather than producing a
+  // payload that looks perfectly well-formed to Siigo.
+  if (payloadOptions.enforceTotalMatch !== false) {
+    const mismatch = consultation
+      ? detectTotalMismatch(consultation.total, consultation.items.map((i) => ({ code: i.code, name: i.name, quantity: i.quantity, lineTotal: i.unit_price * i.quantity * (1 + i.tax_rate) - i.discount })))
+      : fallbackDetail?.totalMismatch ?? null;
+    if (mismatch) throw new TotalMismatchError(mismatch);
+  }
 
   if (consultation && client) {
     const overriddenClient: Client = { ...client, name: values.name, identification: { type: values.identificationType, number: values.identificationNumber }, email: values.email, phone: values.phone };

@@ -65,7 +65,7 @@ origen; la referencia válida a partir de hoy es la columna `#`.
 | **C-5** | N7 | `duplicated_document` llega como 400 y `provablyCreatedNothing` lo trata como "no se creó nada". Es el único 4xx que significa lo contrario | — |
 | **C-6** | N6 | La `X-Idempotency-Key` se valida después de tomar el claim; una clave malformada deja la consulta en `unknown` sin tocar Siigo | — |
 | **C-7** | N18 | Reconciliación truncada a 500 documentos: "no lo encontré" se convierte en "no existe" | — |
-| **C-11** | nuevo 2026-09-11 | **Assert `sum(invoicerow.sum_total) == invoice.total_with_vat` por consulta, fail-loud.** Hoy el total mostrado sale de `total_with_vat` y las líneas de `sum_total`, **sin una sola comparación entre ambos en todo el código** — `EVIDENCIA §2.6` lo llama el control de mayor retorno del backlog. Es el guard que detectó las 7 facturas de C-2. **Se construye ANTES de tocar C-1 y C-2**, porque arreglar esos dos cambia la suma y este assert es lo que demuestra que quedó bien | `EVIDENCIA §2.6` |
+| **C-11** ✅ **CERRADO 2026-09-11 (sesión 2)** — ver `## Resolved — sesión 2` | nuevo 2026-09-11 · enunciado corregido el 2026-09-11 al abrir la sesión 2 | **Assert por consulta entre los dos números que el propio código produce: `sum(items[].lineTotal)` contra `row.total` (que sale de `invoice.total_with_vat`), fail-loud.** Hoy el total mostrado sale de `total_with_vat` y las líneas de `sum_total`, **sin una sola comparación entre ambos en todo el código** — `EVIDENCIA §2.6` lo llama el control de mayor retorno del backlog. **Corrección (a): el assert NO detecta C-1.** La nota de crédito es una factura distinta (id 6), no una fila de la factura 5; la suma de filas de la 5 cuadra con su `total_with_vat` 1699.04 antes y después de C-1. Lo que sí hace es **fallar en la consulta 4 una vez C-1 esté arreglado** (items 1574.04 contra total 1699.04), impidiendo dejar ese fix a medias. **Corrección (b): comparar filas CRUDAS contra `total_with_vat` da verde en la factura 12** — mide la aritmética de Provet, no el pipeline; la comparación válida es contra las filas ya filtradas por el código. Para C-2 sí dispara hoy, en las 7 facturas. **Se construye ANTES de tocar C-1 y C-2.** Tolerancia: `toCents` (`provet.ts:29`), céntimos enteros, **nunca un epsilon de coma flotante**. Mecanismo: **A + D** — flag por fila + `expectedTotal` verificado en `POST /api/invoices`. **El guard de A es evadible por un POST directo a `/api/invoices`: la ruta NO queda protegida por él, solo por D, y D tampoco resiste a un cliente malicioso — su modelo de amenaza son los bugs, no la malicia.** Ver C-12 | `EVIDENCIA §2.6` |
 
 ### Bloqueante crítico — sesión 3 (nota crédito)
 
@@ -75,6 +75,77 @@ origen; la referencia válida a partir de hoy es la columna `#`.
 | **C-9** | N14 | `creditNote.test.ts` — 23 tests que blindan el contrato equivocado. **Borrarlos ANTES de tocar el mapper**, o un agente futuro revierte el fix |
 | **C-10** | N13 | La ruta de notas crédito no tiene claim, marcador ni reconciliación. **Corrección al informe:** `GET /v1/credit-notes` SÍ existe con los mismos filtros que facturas, y su respuesta trae `invoice: {id, name}` — **una NC se localiza por el GUID de su factura padre, sin marcador en `observations`**. Ancla más fuerte que la de facturas y menos trabajo del estimado |
 
+### Resolved — sesión 2, C-11 (2026-09-11)
+
+Base: `412619b` (`Session updated`, commit de documentación con un solo padre,
+no merge). Delta contra el merge de la sesión 1 (`0684cfb`): solo
+`PROJECT_STATE.md` y `prompt_sesion_2.md`, cero archivos bajo `src/`.
+Baseline verificado antes de tocar nada: 45 files / 637 tests, `tsc` limpio,
+build `(8/8)`, 20 rutas, 4 estáticas, `npm audit` 0/0.
+
+**Tres capas, todas con los tres gates verdes entre sub-paso y sub-paso:**
+
+1. **Detección** — `detectTotalMismatch(expectedTotal, items)` en
+   `src/mappers/consultationQueue.ts`, aplicada por los dos constructores de
+   cola (`buildQueueFromProvet` y `buildConsultationQueue`). Materializa
+   `ConsultationQueueRow.totalMismatch` y `QuickEditDetail.totalMismatch`.
+   Compara `toCents(Σ lineTotal)` contra `toCents(total)` — **la misma forma
+   exacta que `provet.ts:116`**, no un epsilon. `buildQueueFromProvet` NO lanza:
+   7 de 52 facturas descuadran hoy y lanzar dejaría la cola entera en blanco.
+2. **Bloqueo** — `TotalMismatchError` (`provetToSiigo.ts`) lanzado por
+   `buildInvoicePayloadFromQuickEdit` antes de construir nada.
+3. **Servidor (decisión D)** — `expectedTotal` **obligatorio** en el body de
+   `POST /api/invoices`; `assertPayloadMatchesProvetTotal` compara
+   `Σ quantity × taxed_price` con `toCents`. Responde `400 total_mismatch`.
+   **Se comprueba ANTES de `acquireInvoiceClaim` y antes de tocar Siigo**, para
+   que un request rechazado no deje la consulta en `unknown` (el error de orden
+   que describe C-6, al revés). Un payload con `price` (IVA excluido) se
+   **rechaza**, no se compara: no es comparable contra un header
+   `total_with_vat`, y el mapper solo emite `taxed_price`.
+4. **UI** — fila de cola: segunda línea roja bajo el Total con la suma de las
+   líneas, y botón `Facturar` deshabilitado con `title` explicativo. Drawer:
+   banner en paleta `status-rejected` (no `status-draft`, porque esto no se
+   arregla desde Ajustes) y `canSubmit` en falso.
+
+**Excepción deliberada — la anulación NO se bloquea.**
+`buildInvoicePayloadFromQuickEdit` lo usa también el flujo de nota crédito. Una
+factura ya timbrada en una consulta descuadrada tiene que seguir siendo
+anulable: bloquearla dejaría el documento equivocado vivo ante la DIAN sin forma
+de revertirlo, que es estrictamente peor que el problema que el guard evita. La
+exención es explícita y se nombra en el punto de llamada
+(`QuickEditPayloadOptions.enforceTotalMatch: false`), nunca escondida en los
+datos; cualquier llamador nuevo hereda el guard por defecto.
+
+**Efecto colateral corregido:** `consultationQueueCache` usa `sessionStorage`
+sin esquema, así que un snapshot escrito antes de este cambio deserializa con
+`totalMismatch` **undefined** — falsy — y pintaría una consulta descuadrada como
+verificada. Clave versionada a `fact_vet.consultationQueue.v2`. **Bumpear la
+clave siempre que se añada a `ConsultationQueueRow` un campo del que dependa la
+UI.**
+
+**Contrato de entrada cambiado.** `POST /api/invoices` ahora exige
+`expectedTotal`. Cualquier cliente que no lo mande recibe `400 invalid_payload`.
+Es obligatorio y no opcional a propósito: opcional permitiría saltarse el
+control por omisión.
+
+**Gates finales:** `tsc --noEmit` exit 0 · `vitest run` **45 files / 651 tests**
+(637 → 651) · `env -u NODE_ENV npx next build` exit 0, `(8/8)`, 20 rutas, 4
+estáticas, `ƒ Proxy (Middleware)`. `tsconfig.json` y `next-env.d.ts` sin
+modificar tras el build.
+
+**Nueve mutantes, nueve muertos** (4 en detección, 5 en bloqueo/D). Los dos que
+importan: el que compara **filas crudas** en vez de filtradas — la hipótesis
+original de C-11 — y el que quita la exención de la anulación.
+
+**Sin cobertura automática:** los dos `.tsx`. `vitest.config.ts` usa
+`environment: "node"` y no hay jsdom ni testing-library instalados, así que
+probarlos exigiría dependencias nuevas. Verificación manual en preview, guion en
+la entrega.
+
+**Deuda registrada, no pagada:** `consultationQueue.ts` pasa de 197 a 284 líneas
+(límite `.clinerules` 150). Tercera vez que crece en esta sesión. Decidir si se
+parte cuando se toque C-3.
+
 ### Frontera de autorización — sesión 4
 
 | # | Origen | Qué |
@@ -83,6 +154,7 @@ origen; la referencia válida a partir de hoy es la columna `#`.
 | **A-2** | N19 | El comentario de `auth.ts:14-19` afirma que el hash es irreversible. `sha256` sin sal ni coste no lo es. **La afirmación es falsa y hoy sirve de argumento para aplazar D1** |
 | **A-3** | N20 | Sin revocación de sesión: cambiar la contraseña no invalida JWT vivos (24 h) |
 | **A-4** | nuevo | **`middleware.ts` → `proxy.ts` y decisión de runtime.** Diferido desde la sesión 1 a propósito (ver Decisiones de plataforma). Aquí viven los 29 tests de `middleware`/`routeGuard`/`routeAuthz` |
+| **C-12** | nuevo 2026-09-11 (sesión 2) | **Assert de total server-side re-fetcheando Provet dentro de `POST /api/invoices`.** Es la **única** variante del control de C-11 que no se puede evadir. La de la sesión 2 no lo es: **A** vive en el mapper y en la UI, y **D** (`expectedTotal` en el body) lo manda el propio cliente, así que **un POST directo a `/api/invoices` con un `expectedTotal` coherente con un `items` equivocado pasa los dos**. A+D atrapan bugs, no malicia — que es exactamente su modelo de amenaza declarado. Coste de C-12: un round-trip a Provet por emisión. **No se implementó en la sesión 2 por desproporcionada, no por innecesaria** |
 
 ### Higiene, desacople, CI — sesión 5
 
