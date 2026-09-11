@@ -79,6 +79,26 @@ export const provetInvoiceRawSchema = z
     total_vat: z.coerce.number().default(0),
     total_with_vat: z.coerce.number().default(0),
     consultation: rel.nullable().catch(null),
+    /**
+     * C-1 — `true` on a Provet credit note. Provet has no document-type field:
+     * `credit_note` is a plain boolean and the amounts are SIGNED, not
+     * absolute. Measured 2026-09-11 over the 52 invoices of the tenant, the
+     * `invoice` object exposes 45 keys and none is a type discriminator.
+     */
+    credit_note: z.boolean().catch(false),
+    /**
+     * C-1 — the consultation this document reverses. A Provet credit note
+     * always carries `consultation: null`, which is why the whole document
+     * used to fall out of the queue; the link lives here instead.
+     *
+     * Measured 2026-09-11 over all 52 invoices: populated on credit notes
+     * only, never on an ordinary invoice, and in the 6 credit notes that reach
+     * a consultation it resolves to the same one as walking
+     * `credit_note_original_invoice -> invoice -> consultation`. The other 2
+     * (13 and 14) are null here AND null through that walk, because they
+     * credit documents that have no consultation at all. One hop, no fallback.
+     */
+    original_consultation: rel.nullable().catch(null),
     client: rel.nullable().catch(null),
     invoice_number: txt.nullable().catch(null),
   })

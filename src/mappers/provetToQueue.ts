@@ -102,9 +102,26 @@ export function buildQueueFromProvet(
   // through the invoice. `sum_total` is read verbatim: it is the amount Provet
   // itself charges, already accounting for dosage units, package sizes and
   // dispensing rules that cannot be reconstructed from quantity * price.
+  //
+  // C-1: a Provet credit note is a separate `invoice` record that always
+  // carries `consultation: null`, so joining on `consultation` alone dropped
+  // every credit note on the floor and queued the consultation at its gross
+  // amount. The reversed consultation is named by `original_consultation`.
+  //
+  // Measured 2026-09-11 over the 52 invoices of the tenant: 8 credit notes;
+  // `original_consultation` appears on credit notes only and never on an
+  // ordinary invoice, so this fallback cannot steal a row from a consultation
+  // that owns it; and in the 6 notes that reach a consultation it agrees with
+  // walking `credit_note_original_invoice -> invoice -> consultation`, while
+  // the other 2 are null by both routes because they credit documents with no
+  // consultation. Hence one hop and no fallback chain.
+  //
+  // Deliberately NOT applied to `invoiceByConsultation` above: that map feeds
+  // the queue row's `total`, and a credit note's header is not the
+  // consultation's invoice. Letting it in would overwrite 1699.04 with 125.00.
   const consultationByInvoiceId = new Map<string, string>();
   for (const inv of invoices) {
-    const cid = extractId(inv.consultation);
+    const cid = extractId(inv.consultation) ?? extractId(inv.original_consultation);
     const invId = extractId(inv.url) ?? inv.id;
     if (cid && invId) consultationByInvoiceId.set(invId, cid);
   }

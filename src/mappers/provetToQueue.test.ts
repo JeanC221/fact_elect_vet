@@ -51,7 +51,8 @@ const pat = (over: Partial<ProvetPatientRaw> = {}): ProvetPatientRaw => ({
 });
 const inv = (over: Partial<ProvetInvoiceRaw> = {}): ProvetInvoiceRaw => ({
   id: "I-1", url: null, status: "paid", total: 80000, total_vat: 12797, total_with_vat: 92797,
-  consultation: "C-1", client: "CL-1", invoice_number: "INV-1", ...over,
+  consultation: "C-1", credit_note: false, original_consultation: null,
+  client: "CL-1", invoice_number: "INV-1", ...over,
 });
 
 describe("extractId", () => {
@@ -257,5 +258,156 @@ describe("C-11 — total_with_vat vs the line totals the code builds", () => {
       ],
     );
     expect(rows[0].totalMismatch).toBeNull();
+  });
+});
+
+
+/**
+ * C-1 — a Provet credit note never reaches the consultation it reverses, so
+ * the consultation is queued as if the refund had never happened.
+ *
+ * `consultationByInvoiceId` is built from `invoice.consultation`, and every
+ * Provet credit note carries `consultation: null`. The credit note resolves to
+ * nothing, all of its rows hit the `if (!cid) continue`, and the document
+ * vanishes. The link to the consultation lives in `invoice.original_consultation`.
+ *
+ * SCOPE: C-1 is the join and nothing else. The credit row arrives with its
+ * LITERAL `sum_total` and no sign handling, because the sign convention of
+ * Provet credit notes is not determined (see below). The queue row's own
+ * `total` is left alone. The consequence is intentional and is the point of
+ * the fix: items and total stop agreeing, the C-11 guard fires, and the
+ * consultation is BLOCKED instead of being silently billed gross. Netting the
+ * total is a separate finding.
+ *
+ * Measured against the sandbox tenant on 2026-09-11, verbatim from the API:
+ *
+ *   invoice 5   credit_note=false  consultation=/consultation/4/  original_consultation=null
+ *               total_with_vat=1699.04
+ *               rows 1..4: sum_total 11.54 / 1500.00 / 62.50 / 125.00
+ *   invoice 6   credit_note=true   consultation=null              original_consultation=/consultation/4/
+ *               total_with_vat=125.00
+ *               row 6: sum_total=125.00 quantity=2 credited_invoicerow=/invoicerow/3/
+ *
+ * Every number in this fixture is literal. Nothing is recalculated from
+ * `quantity * price_with_vat`: that product disagrees with `sum_total` on 6 of
+ * the tenant's rows because Provet embeds dispensing charges directly in `sum`
+ * (invoicerow/48 carries 4.4502 of fee inside a `sum` of 21.4502) and applies
+ * line discounts through `percentage_change`/`discount_amount`
+ * (invoicerow/111: -20%, original_sum_total 43.35, sum_total 34.68).
+ *
+ * NOT asserted here, deliberately — the sign convention is undetermined. The
+ * credit rows of notes 13, 17, 19 and 31 are the credited row with `quantity`
+ * negated; note 6 has `quantity: +2` against the `quantity: 1` of the row it
+ * credits, and notes 12, 14 and 16 carry no `credited_invoicerow` at all. No
+ * net amount for consultation 4 is claimed by this test.
+ */
+describe("C-1 — Provet credit notes must reach the consultation they reverse", () => {
+  const invoice5 = inv({
+    id: "I-5",
+    url: "https://api.provet.test/invoice/5/",
+    consultation: "https://api.provet.test/consultation/4/",
+    credit_note: false,
+    original_consultation: null,
+    total: 1697.77,
+    total_vat: 1.27,
+    total_with_vat: 1699.04,
+  });
+  const creditNote6 = inv({
+    id: "I-6",
+    url: "https://api.provet.test/invoice/6/",
+    consultation: null,
+    credit_note: true,
+    original_consultation: "https://api.provet.test/consultation/4/",
+    total: 125.0,
+    total_vat: 0,
+    total_with_vat: 125.0,
+  });
+  const rowsOf5: ProvetInvoiceRowRaw[] = [
+    row({ url: "https://api.provet.test/invoicerow/1/", invoice: "https://api.provet.test/invoice/5/", item: "https://api.provet.test/item/75/", name: "Amoxicillin 250mg", quantity: 0.028, price_with_vat: 55, sum_total: 11.54 }),
+    row({ url: "https://api.provet.test/invoicerow/2/", invoice: "https://api.provet.test/invoice/5/", item: "https://api.provet.test/item/155/", name: "Splenectomy", quantity: 1, price_with_vat: 1500, sum_total: 1500.0 }),
+    row({ url: "https://api.provet.test/invoicerow/3/", invoice: "https://api.provet.test/invoice/5/", item: "https://api.provet.test/item/157/", name: "Suction SX", quantity: 1, price_with_vat: 62.5, sum_total: 62.5 }),
+    row({ url: "https://api.provet.test/invoicerow/4/", invoice: "https://api.provet.test/invoice/5/", item: "https://api.provet.test/item/156/", name: "Cautery", quantity: 1, price_with_vat: 125, sum_total: 125.0 }),
+  ];
+  const creditRow6 = row({
+    url: "https://api.provet.test/invoicerow/6/",
+    invoice: "https://api.provet.test/invoice/6/",
+    item: "https://api.provet.test/item/157/",
+    name: "Suction SX",
+    quantity: 2,
+    price_with_vat: 62.5,
+    sum_total: 125.0,
+  });
+  const consultation4 = con({ id: "4", invoice: "https://api.provet.test/invoice/5/" });
+
+  const build = (rows: ProvetInvoiceRowRaw[], invoices: ProvetInvoiceRaw[]) =>
+    buildQueueFromProvet([consultation4], [cli()], [pat()], invoices, [], [], rows)[0];
+
+  it("routes the credit note's rows to the consultation it reverses", () => {
+    const r = build([...rowsOf5, creditRow6], [invoice5, creditNote6]);
+    expect(r.items).toHaveLength(5);
+    expect(r.items.map((i) => i.lineTotal)).toEqual([11.54, 1500.0, 62.5, 125.0, 125.0]);
+  });
+
+  it("reads the credit row's sum_total verbatim, with no sign handling", () => {
+    const r = build([...rowsOf5, creditRow6], [invoice5, creditNote6]);
+    expect(r.items[4]).toEqual({ code: "157", name: "Suction SX", quantity: 2, lineTotal: 125.0 });
+  });
+
+  it("blocks the consultation instead of billing it gross: the C-11 guard fires", () => {
+    const r = build([...rowsOf5, creditRow6], [invoice5, creditNote6]);
+    // The queue row's own total still comes from the ORIGINAL invoice's header.
+    // Netting it is a separate finding; leaving it is what makes the guard fire.
+    expect(r.total).toBe(1699.04);
+    expect(r.totalMismatch).not.toBeNull();
+    expect(r.totalMismatch?.deltaCents).toBe(12500);
+  });
+
+  it("does not let the credit note's header become the consultation's total", () => {
+    const r = build([...rowsOf5, creditRow6], [invoice5, creditNote6]);
+    expect(r.total).not.toBe(125.0);
+  });
+
+  it("leaves a consultation with no credit note exactly as before", () => {
+    const r = build(rowsOf5, [invoice5]);
+    expect(r.items.map((i) => i.lineTotal)).toEqual([11.54, 1500.0, 62.5, 125.0]);
+    expect(r.total).toBe(1699.04);
+    expect(r.totalMismatch).toBeNull();
+  });
+
+  it("prefers the invoice's own consultation over the one it reverses", () => {
+    // No invoice in the tenant carries both fields today, so nothing catches a
+    // flipped precedence at runtime — but flipping it would silently reroute a
+    // consultation's own rows to a different consultation. `consultation` is
+    // the document's own visit and always wins; `original_consultation` only
+    // answers "which visit does this reverse".
+    const both = inv({
+      id: "I-5", url: "https://api.provet.test/invoice/5/",
+      consultation: "https://api.provet.test/consultation/4/",
+      credit_note: false,
+      original_consultation: "https://api.provet.test/consultation/99/",
+      total: 1697.77, total_vat: 1.27, total_with_vat: 1699.04,
+    });
+    const r = build(rowsOf5, [both]);
+    expect(r.items.map((i) => i.lineTotal)).toEqual([11.54, 1500.0, 62.5, 125.0]);
+    expect(r.totalMismatch).toBeNull();
+  });
+
+  it("ignores a credit note whose original_consultation is null (notes 13 and 14)", () => {
+    // Note 14 credits note 13, which credits invoice 10; none of them has a
+    // consultation, so there is nothing to attribute and nothing must leak
+    // into consultation 4.
+    const orphanNote = inv({
+      id: "I-14", url: "https://api.provet.test/invoice/14/",
+      consultation: null, credit_note: true, original_consultation: null,
+      total: 29.22, total_vat: 0, total_with_vat: 29.22,
+    });
+    const orphanRow = row({
+      url: "https://api.provet.test/invoicerow/42/", invoice: "https://api.provet.test/invoice/14/",
+      item: "https://api.provet.test/item/122/", name: "Bandage Supplies", quantity: 1,
+      price_with_vat: 29.22, sum_total: 29.22,
+    });
+    const r = build([...rowsOf5, orphanRow], [invoice5, orphanNote]);
+    expect(r.items.map((i) => i.lineTotal)).toEqual([11.54, 1500.0, 62.5, 125.0]);
+    expect(r.totalMismatch).toBeNull();
   });
 });
