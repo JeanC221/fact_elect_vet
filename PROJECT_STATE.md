@@ -61,11 +61,83 @@ origen; la referencia válida a partir de hoy es la columna `#`.
 | **C-1** | nuevo 2026-09-10 | **Omisión de abonos de Provet en la cola.** `provetToQueue.ts:105-115` construye `consultationByInvoiceId` desde `inv.consultation`, que es `null` en toda nota de crédito, así que el documento entero desaparece. Medido: factura 5 = 1699.04, abono de 125.00 sobre `invoicerow/3` de esa misma factura → la cola factura 1699.04 en vez de 1574.04. **Sobrefacturación de 125.00 con validez fiscal.** El join correcto es `credited_invoicerow` → fila → factura → consulta | `EVIDENCIA §2.8` |
 | **C-2** | N5 | `provetToQueue.ts:117` — `if (lineTotal <= 0) continue` descarta filas en silencio. **CUANTIFICADO el 2026-09-11: 7 de 52 facturas del tenant no cuadran, y en las 7 la causa es esta.** El caso que importa es la **factura 12**: `total_with_vat` 158.28, lo que emitiría el código **187.50** → **+29.22 de sobrefacturación** en un documento positivo que **no** es nota de crédito. Las facturas **10** y **32** traen total negativo **sin** ser notas de crédito, lo que vuelve a confirmar que el signo no identifica un abono. Distinto de C-1 y con fix distinto. La justificación se escribe como "descarta filas negativas reales"; **no** como "descarta descuentos", que sigue sin verificar | `EVIDENCIA §2.8 d/e` + medición 2026-09-11 |
 | **C-3** | N16 **ampliado** | Tres fallos en la misma costura del drawer. (a) El `balanced` de `QuickEditDrawer.tsx:56` compara `detail.total` contra lo tecleado, nunca contra `sumLineTotals`. (b) `values.paidAmount` no llega al payload. (c) **`formatCOP` redondea al mostrar**, medido el 2026-09-11: `consultationQueue.ts:38` usa `maximumFractionDigits: 0`, así que **33.5 se pinta `$34`** (y 32.5 → `$33`). La columna Total de la cola imprime el número crudo y el drawer lo pasa por `formatCOP`: **el mismo importe sale como 33.5 en una pantalla y $34 en la otra**. Muerde en `QuickEditDrawer.tsx:134`, que es el monto que el staff teclea para cuadrar el pago. **El payload a Siigo NO está afectado**: `provetToSiigo.ts` nunca llama a `formatCOP` | medición 2026-09-11 |
+| **C-16** | nuevo 2026-09-11 (C-2) | **Una consulta revertida entera se factura igual.** `consulta #10`: `factura #18` = 24.11, `NC #19` la abona por −24.11, neto **0.00**. Con C-1 y C-2 dentro deja de emitir 24.11 y pasa a bloquearse, pero con el mensaje de `TotalMismatchError` — *"uno de los dos importes es incorrecto"*— que **es falso**: los dos son correctos y suman cero. Estado propio y mensaje propio: no hay factura que emitir, no hay descuadre que revisar. Detección independiente de la convención de signo: `Σ items == 0` con `total != 0`. **Se ejecuta ANTES que C-4.** Único de los seis bloqueados que hoy factura dinero que no existe | medición 2026-09-11 |
 | **C-4** | N17 | `invoiceReconciliation.ts:92-94` — `created_end` sin hora se interpreta `T00:00:00` y excluye la factura del día. Devuelve `null`, la ruta lo lee como "no existe" y **emite una segunda factura timbrada**. Aplica idéntico a `GET /v1/credit-notes` | `API_SIIGO §Listar` |
 | **C-5** | N7 | `duplicated_document` llega como 400 y `provablyCreatedNothing` lo trata como "no se creó nada". Es el único 4xx que significa lo contrario | — |
 | **C-6** | N6 | La `X-Idempotency-Key` se valida después de tomar el claim; una clave malformada deja la consulta en `unknown` sin tocar Siigo | — |
 | **C-7** | N18 | Reconciliación truncada a 500 documentos: "no lo encontré" se convierte en "no existe" | — |
 | **C-11** ✅ **CERRADO 2026-09-11 (sesión 2)** — ver `## Resolved — sesión 2` | nuevo 2026-09-11 · enunciado corregido el 2026-09-11 al abrir la sesión 2 | **Assert por consulta entre los dos números que el propio código produce: `sum(items[].lineTotal)` contra `row.total` (que sale de `invoice.total_with_vat`), fail-loud.** Hoy el total mostrado sale de `total_with_vat` y las líneas de `sum_total`, **sin una sola comparación entre ambos en todo el código** — `EVIDENCIA §2.6` lo llama el control de mayor retorno del backlog. **Corrección (a): el assert NO detecta C-1.** La nota de crédito es una factura distinta (id 6), no una fila de la factura 5; la suma de filas de la 5 cuadra con su `total_with_vat` 1699.04 antes y después de C-1. Lo que sí hace es **fallar en la consulta 4 una vez C-1 esté arreglado** (items 1574.04 contra total 1699.04), impidiendo dejar ese fix a medias. **Corrección (b): comparar filas CRUDAS contra `total_with_vat` da verde en la factura 12** — mide la aritmética de Provet, no el pipeline; la comparación válida es contra las filas ya filtradas por el código. Para C-2 sí dispara hoy, en las 7 facturas. **Se construye ANTES de tocar C-1 y C-2.** Tolerancia: `toCents` (`provet.ts:29`), céntimos enteros, **nunca un epsilon de coma flotante**. Mecanismo: **A + D** — flag por fila + `expectedTotal` verificado en `POST /api/invoices`. **El guard de A es evadible por un POST directo a `/api/invoices`: la ruta NO queda protegida por él, solo por D, y D tampoco resiste a un cliente malicioso — su modelo de amenaza son los bugs, no la malicia.** Ver C-12 | `EVIDENCIA §2.6` |
+
+### Abiertos por la sesión 2 — desbloqueo y contrato de datos
+
+Numeración: `C-1..C-12` y `H-13..H-14` estaban tomados; éstos arrancan en 15.
+`C-16` no vive aquí: está insertado arriba, encima de C-4, que es su orden de
+ejecución.
+
+| # | Origen | Qué | Evidencia |
+|---|---|---|---|
+| **C-15** | nuevo 2026-09-11 (C-1 + C-2) | **Neteo de la nota de crédito en el `total` de la fila de cola — desbloquea las SEIS consultas bloqueadas.** C-1 enruta el abono a su consulta y C-2 deja de tirarlo, así que `items` ya refleja la nota; el `total` sigue saliendo crudo de `invoice.total_with_vat` de la factura original, los dos dejan de cuadrar y el guard de C-11 bloquea. **Sin este hallazgo, C-1 y C-2 solo convierten sobrefacturación silenciosa en bloqueo explícito y nada vuelve a emitirse.** Bloqueadas hoy: `consulta #1, #4, #8, #9, #10, #20`. Requisito previo: la **convención de signo de las notas de crédito no está determinada** — `NC #13/#17/#19/#31` son la fila abonada con la cantidad negada, `NC #6` trae `quantity: +2` contra el `quantity: 1` de la fila que abona, y `NC #12/#14/#16` no traen `credited_invoicerow`. Medido: `invoice` expone 45 claves y **ninguna es tipo de documento**, `credit_note` es booleano y los importes vienen firmados | volcado crudo de las 8 NC, 2026-09-11 |
+| **C-17** | nuevo 2026-09-11 (C-2) | **`sum_total: z.coerce.number().default(0)` convierte un campo ausente en un importe plausible.** Medido: `sum_total: null` o ausente → `0`, y el filtro lo descarta como si fuera un obsequio. Es **la misma clase de fallo que el `cufe: ""`** — un `.default()` que fabrica un valor creíble para un dato que no llegó — y viola el contrato de tolerancia del proyecto: el esquema tolera campos extra, la lógica no tolera campos ausentes. **Desbloqueante: medir cuántas filas del tenant vienen sin `sum_total`. Si son cero, quitar el `.default(0)` es gratis.** `NaN` y las cadenas no numéricas ya las rechaza el esquema, y como el parse es un `safeParse` sobre la página entera, una sola fila así tira el fetch con `ProvetApiError("parse_failed")` | medición 2026-09-11 |
+| **H-18** | nuevo 2026-09-11 (C-2) | **Las líneas de obsequio no se pueden representar.** Diez consultas (`#18, #23, #24, #28, #30, #32, #33, #34, #35, #36`) traen una fila de `sum_total` exactamente `0`, siempre el mismo ítem. C-2 las sigue descartando **a propósito**: no mueven ningún total y `siigoInvoicePayloadSchema.taxed_price` es `positive()` — medido, `0` → *"Number must be greater than 0"*. Emitirlas exige `items.tax_base` y `items.taxpayer`, que no existen ni en `src/schemas/siigo.ts` ni en `provetToSiigo.ts`. Sin esto, quitar el filtro cambiaría 4 consultas mal facturadas por 10 que dejan de emitir | `API_SIIGO §3.1` + medición 2026-09-11 |
+
+**Abierto sin numerar — no es un hallazgo, es una medición pendiente.** El
+`sum_total` de `row #48` (21.4502 de `sum` contra 170 × 0.1 = 17.00) y de
+`row #112` (754.4484 contra 150 × 5 = 750.00) lleva **4.45 embebidos** que con
+IVA 12.4% son los **5.00** de diferencia; `row #113` lleva 8.90 → 10.00. El
+`is_dispense_fee_item` de esas filas es `null`, así que el cargo no existe como
+fila aparte. **No está explicado de dónde sale.** No bloquea nada mientras se
+trabaje con cabeceras y con `sum_total` literal, y es exactamente por esto que
+`sum_total` nunca se recalcula.
+
+### Resolved — sesión 2, C-2 (2026-09-11)
+
+Base: `a7475e3` (merge del PR #18, C-1). Baseline verificado antes de tocar
+nada: 45 files / 658 tests, `tsc` limpio, build `(8/8)`, 20 rutas, 4 estáticas,
+`npm audit` 0/0.
+
+**El filtro `<= 0` tapaba tres casos sin relación.** `if (lineTotal === 0)
+continue` los separa:
+
+1. **Negativos — se conservan.** Es dinero real. Medido sobre el tenant con
+   C-1 dentro: `consulta #1` emite 2870.00 en vez de 2682.50, `#9` 115.00 en
+   vez de 100.00, `#10` 24.11 en vez de 0.00, `#20` 3344.38 en vez de 2513.24.
+   **1057.75 sobrefacturados con validez fiscal.** Las cuatro pasan a estar
+   bloqueadas por el guard de C-11.
+2. **Ceros — se siguen descartando, a propósito.** Ver `H-18`. Quitar el filtro
+   entero cambiaría 4 consultas mal facturadas por 10 que dejan de emitir.
+3. **No finitos — se conservan, y `CorruptInvoiceRowError` los para en la
+   frontera del payload.** Dos capas, la misma forma de C-11: el mapper marca,
+   `buildInvoicePayloadFromQuickEdit` lanza. **El throw NO va en el mapper**:
+   `buildQueueFromProvet` no lanza (C-11, capa 1) o una fila corrupta deja la
+   cola entera en blanco. Dentro del guard `enforceTotalMatch`, así que la
+   exención de la anulación lo cubre. Solo `Infinity` llega hasta ahí.
+
+**Fixture de C-11 rebasado.** Su reproducción era `factura #12` y su premisa
+era el propio bug: el filtro tiraba el −29.22 y las filas conservadas sumaban
+187.50 contra una cabecera de 158.28. C-2 conserva esa fila, los dos lados
+cuadran y el escenario deja de existir. Además mezclaba importes de documentos
+distintos presentándolos como una factura medida — la conflación de la que
+salió el 1574.04 retirado. Sustituido por `consulta #8`, medido literal y sin
+nada sintético: `factura #11` (2380.85, 6 filas) más `NC #12` (158.28, 3 filas)
+→ items 2539.13 contra cabecera 2380.85. Paga la deuda registrada en C-11.
+
+**Corrección al enunciado de C-2.** Decía que el caso que importa es la
+`factura #12`, "un documento positivo que **no** es nota de crédito". Medido:
+`credit_note: true`, `consultation: null`, `original_consultation: #8`. Y las
+`factura #10` y `#32`, negativas y no notas de crédito, **no tienen consulta y
+nunca entran en la cola**, así que no sobrefacturan nada. La justificación real
+de C-2 son las notas de crédito, no esas dos.
+
+**Mutación: 5 mutantes, 5 muertos.** Volver a `<= 0` · quitar el filtro entero
+· volver a tirar los no finitos · quitar el throw de la capa 2 · sacar la capa
+2 del guard de la anulación.
+
+Gates al cerrar: `tsc` exit 0 · **45 files / 664 tests** · build exit 0 `(8/8)`,
+20 rutas, 4 estáticas · `npm audit` 0/0.
+
+**Pendiente de verificación manual:** ninguna nueva. C-2 no toca UI. El mensaje
+de `CorruptInvoiceRowError` viaja por la misma capa visual de C-11 que sigue
+sin verse renderizada.
 
 ### Bloqueante crítico — sesión 3 (nota crédito)
 
