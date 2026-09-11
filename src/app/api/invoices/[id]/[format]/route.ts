@@ -42,8 +42,9 @@ const formatSchema = z.enum(["pdf", "xml"]);
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: { id: string; format: string } },
+  props: { params: Promise<{ id: string; format: string }> }
 ): Promise<NextResponse> {
+  const params = await props.params;
   const guard = await requireSession(req);
   if (!guard.ok) return guard.response;
   // Validate the id FIRST: an invalid id must never reach the Siigo URL or the

@@ -40,8 +40,10 @@ function authed(url: string, init: RequestInit = {}) {
 
 // Built per call, not once at module scope: the session cookie is issued in
 // `beforeAll`, so a module-level request would carry an empty cookie.
+// `params` is a Promise since Next 16 (async request APIs): the handler awaits
+// `props.params`, so the test must hand it a real Promise, not a plain object.
 const call = (id: string, format: string) =>
-  GET(authed("http://localhost/api/invoices/x/pdf"), { params: { id, format } });
+  GET(authed("http://localhost/api/invoices/x/pdf"), { params: Promise.resolve({ id, format }) });
 
 describe("GET /api/invoices/[id]/[format] — route param validation", () => {
   beforeEach(() => {

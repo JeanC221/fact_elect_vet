@@ -12,7 +12,7 @@ import {
 } from "@/services/sessionCookies";
 
 export default async function LoginPage() {
-  const token = cookies().get(SESSION_COOKIE_NAME)?.value;
+  const token = (await cookies()).get(SESSION_COOKIE_NAME)?.value;
   if (token && (await verifySessionToken(token))) {
     redirect("/");
   }
@@ -45,8 +45,8 @@ export default async function LoginPage() {
     }
     await writeRateLimitState(parsed.data.email, recordSuccess());
     // redirect() throws NEXT_REDIRECT — must stay outside the try/catch above.
-    cookies().set(createSessionCookie(sessionToken));
-    cookies().set(createRoleCookie(isAdmin));
+    (await cookies()).set(createSessionCookie(sessionToken));
+    (await cookies()).set(createRoleCookie(isAdmin));
     redirect("/");
   }
 

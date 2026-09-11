@@ -9,7 +9,7 @@ import { clearRoleCookie, clearSessionCookie } from "@/services/sessionCookies";
  * Lives in a dedicated "use server" module so the client dashboard can invoke it.
  */
 export async function logoutAction(): Promise<void> {
-  cookies().set(clearSessionCookie());
-  cookies().set(clearRoleCookie());
+  (await cookies()).set(clearSessionCookie());
+  (await cookies()).set(clearRoleCookie());
   redirect("/login");
 }
