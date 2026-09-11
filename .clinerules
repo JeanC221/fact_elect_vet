@@ -27,6 +27,13 @@ stale `.clinerules` with a broken reference for several sessions.
    `developers.provetcloud.com/restapi/0.1/openapi-schema-01.json`, which is
    authoritative over the captured markdown when the two disagree.
 
+**`docs/audits/` is NOT part of this protocol.** It holds superseded audit reports
+and the retired six-session plan, archived on 2026-09-10 for traceability only.
+Every file there carries a header stating it is not a source of truth, and both
+audits contain claims **falsified by live measurement** — listed in their headers.
+Do not read them to decide what to do, and never execute anything from them. The
+live backlog is `PROJECT_STATE.md` → `## Current State — Backlog Consolidado`.
+
 ---
 
 ## 2. OPERATIONAL MODES & EXECUTION FLOW
