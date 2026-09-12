@@ -76,7 +76,7 @@ ejecución.
 
 | # | Origen | Qué | Evidencia |
 |---|---|---|---|
-| **C-15** | nuevo 2026-09-11 (C-1 + C-2) | **Neteo de la nota de crédito en el `total` de la fila de cola — desbloquea las SEIS consultas bloqueadas.** C-1 enruta el abono a su consulta y C-2 deja de tirarlo, así que `items` ya refleja la nota; el `total` sigue saliendo crudo de `invoice.total_with_vat` de la factura original, los dos dejan de cuadrar y el guard de C-11 bloquea. **Sin este hallazgo, C-1 y C-2 solo convierten sobrefacturación silenciosa en bloqueo explícito y nada vuelve a emitirse.** Bloqueadas hoy: `consulta #1, #4, #8, #9, #10, #20`. Requisito previo: la **convención de signo de las notas de crédito no está determinada** — `NC #13/#17/#19/#31` son la fila abonada con la cantidad negada, `NC #6` trae `quantity: +2` contra el `quantity: 1` de la fila que abona, y `NC #12/#14/#16` no traen `credited_invoicerow`. Medido: `invoice` expone 45 claves y **ninguna es tipo de documento**, `credit_note` es booleano y los importes vienen firmados | volcado crudo de las 8 NC, 2026-09-11 |
+| **C-15** | nuevo 2026-09-11 (C-1 + C-2) · **reescrito el 2026-09-11** | **Confirmación humana del neto cuando la consulta tiene nota de crédito.** C-1 enruta el abono a su consulta y C-2 deja de tirarlo, así que `items` ya refleja la nota; el `total` sigue saliendo crudo de `invoice.total_with_vat` de la factura original, los dos dejan de cuadrar y el guard de C-11 bloquea. El drawer muestra las líneas de la factura y las del abono con el neto calculado, y una persona de la clínica **confirma el importe** antes de emitir. **No se deduce ninguna convención de signo: se le enseña a alguien lo que Provet dice y decide.** Toca UI, así que va junto a C-3, en la sesión que tenga preview y guion de verificación manual. Ver abajo por qué NO se netea automáticamente | volcado crudo de las 8 NC + volcado de `consultation`, 2026-09-11 |
 | **C-17** | nuevo 2026-09-11 (C-2) | **`sum_total: z.coerce.number().default(0)` convierte un campo ausente en un importe plausible.** Medido: `sum_total: null` o ausente → `0`, y el filtro lo descarta como si fuera un obsequio. Es **la misma clase de fallo que el `cufe: ""`** — un `.default()` que fabrica un valor creíble para un dato que no llegó — y viola el contrato de tolerancia del proyecto: el esquema tolera campos extra, la lógica no tolera campos ausentes. **Desbloqueante: medir cuántas filas del tenant vienen sin `sum_total`. Si son cero, quitar el `.default(0)` es gratis.** `NaN` y las cadenas no numéricas ya las rechaza el esquema, y como el parse es un `safeParse` sobre la página entera, una sola fila así tira el fetch con `ProvetApiError("parse_failed")` | medición 2026-09-11 |
 | **H-18** | nuevo 2026-09-11 (C-2) | **Las líneas de obsequio no se pueden representar.** Diez consultas (`#18, #23, #24, #28, #30, #32, #33, #34, #35, #36`) traen una fila de `sum_total` exactamente `0`, siempre el mismo ítem. C-2 las sigue descartando **a propósito**: no mueven ningún total y `siigoInvoicePayloadSchema.taxed_price` es `positive()` — medido, `0` → *"Number must be greater than 0"*. Emitirlas exige `items.tax_base` y `items.taxpayer`, que no existen ni en `src/schemas/siigo.ts` ni en `provetToSiigo.ts`. Sin esto, quitar el filtro cambiaría 4 consultas mal facturadas por 10 que dejan de emitir | `API_SIIGO §3.1` + medición 2026-09-11 |
 
@@ -138,6 +138,67 @@ Gates al cerrar: `tsc` exit 0 · **45 files / 664 tests** · build exit 0 `(8/8)
 **Pendiente de verificación manual:** ninguna nueva. C-2 no toca UI. El mensaje
 de `CorruptInvoiceRowError` viaja por la misma capa visual de C-11 que sigue
 sin verse renderizada.
+
+### Por qué C-15 NO netea la cabecera — medido, no opinado
+
+La primera redacción de C-15 decía "netear el abono en el `total` de la fila de
+cola". **Está falsificada.**
+
+Medido en las 8 notas de crédito y en las 8 facturas que abonan: **la cabecera
+de cada documento cuadra siempre con la suma de sus propias filas**, sin una
+sola excepción. Entonces, si se netea:
+
+```
+items = filas de la factura original + filas de la NC
+total = cabecera original + cabecera de la NC
+```
+
+y como cada cabecera **es** la suma de sus filas, `total == Σ items` por
+construcción, siempre. **El guard de C-11 no volvería a dispararse nunca en una
+consulta con nota de crédito.**
+
+C-11 existe porque Provet publica **dos cuentas independientes** del mismo
+importe: la cabecera y las filas. En cuanto hay nota de crédito deja de haber
+dos. Netear no desbloquea: apaga el control justo donde más hace falta, en un
+documento que la DIAN timbra y que solo se deshace con otra nota de crédito.
+
+**Descartado también:** deducir la convención de signo. No existe en estos
+datos — `NC #13/#17/#19/#31` son la fila abonada con la cantidad negada,
+`NC #6` trae `quantity: +2` contra el `quantity: 1` de la fila que abona, y
+`NC #12/#14/#16` no traen `credited_invoicerow`. Y no hay campo que la resuelva:
+`invoice` expone 45 claves y ninguna es tipo de documento; `consultation` expone
+36 y **ninguna lleva importes**, así que Provet no publica un total de consulta.
+
+**Pendiente `P-*` asociado:** verificar contra la **primera nota de crédito real
+del tenant de la clínica** que las líneas que el drawer muestra son las
+correctas. No depende de Jean y no existe hasta que la clínica emita una.
+
+### El tenant medido NO es el de la clínica
+
+Medido el 2026-09-11 al volcar `consultation` e `invoice`:
+
+| Campo | Valor |
+|---|---|
+| `payer_country` / `payer_country_code` | `United States of America` / `US` |
+| `payer_city`, `payer_street_address` | `Colorado Springs`, `551 Nevada Avenue` |
+| `payer_name`, `complaint` | `TEST CLIENT`, `TEST PVC` |
+| Fechas de los documentos | 2021 |
+| `vat_percentage` | **12.4%** — en Colombia solo existen 19%, 5% y 0% |
+
+Es el entorno de demostración de Provet, no datos de la veterinaria.
+**Consecuencias, y son varias:**
+
+1. Las seis consultas bloqueadas por C-1 y C-2 (`#1, #4, #8, #9, #10, #20`) son
+   registros de demo de 2021. **No existen en producción** y el bloqueo no viaja
+   al cutover.
+2. Toda cifra de impacto medida contra este tenant —incluida la "7 de 52" de
+   C-11 y los "1057.75 sobrefacturados" de C-2— describe el dataset de demo.
+   **Los hallazgos siguen siendo válidos; las magnitudes no se citan como si
+   fueran de la clínica.**
+3. Varios registros son incoherentes entre sí y hechos a mano. **No se derivan
+   reglas de negocio de aquí.** Para eso hace falta el tenant real.
+4. Lo que sí sigue valiendo son los **contratos de la API**: qué campos existen,
+   qué tipos tienen y qué joins funcionan. Eso es Provet, no el dataset.
 
 ### Bloqueante crítico — sesión 3 (nota crédito)
 
@@ -213,6 +274,25 @@ original de C-11 — y el que quita la exención de la anulación.
 `environment: "node"` y no hay jsdom ni testing-library instalados, así que
 probarlos exigiría dependencias nuevas. Verificación manual en preview, guion en
 la entrega.
+
+**PENDIENTE DE VERIFICACIÓN MANUAL — mergeado sin ella (2026-09-11).** Jean no
+tuvo acceso a un preview en esta sesión. Lo mergeado está cubierto por los tres
+gates y por 651 tests; lo que queda sin comprobar es **únicamente el render** de
+`ConsultationQueue.tsx` y `QuickEditDrawer.tsx`, que no pueden tener test sin
+añadir jsdom/testing-library. La exención de la anulación **sí** tiene test
+(`does NOT block the annulment path`) y mutante que lo mata. **Verificar en el
+preview de la última sesión, antes del cutover de producción.**
+
+*(Reintegrado a mano el 2026-09-11: el commit `ab1f423` que traía este bloque
+quedó en `sesion2/c11-assert-totales` sin mergear, porque el PR de C-2 tocó este
+mismo archivo y entró antes. El PR de C-11 se cierra sin mergear; el contenido
+es éste.)*
+
+**Efecto en producción al desplegar esto:** las consultas que descuadran pasan a
+tener `Facturar` deshabilitado. Es el comportamiento buscado —hoy se emiten con
+el importe equivocado— pero recepción lo va a notar. Avisar antes. **La cifra
+"7 de 52" que se midió aquí es del tenant de demo y ya no aplica: ver
+`### El tenant medido NO es el de la clínica`.**
 
 **Deuda registrada, no pagada:** `consultationQueue.ts` pasa de 197 a 284 líneas
 (límite `.clinerules` 150). Tercera vez que crece en esta sesión. Decidir si se
