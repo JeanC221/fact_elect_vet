@@ -112,7 +112,7 @@ vi.mock("@/services/siigoApi", async () => {
 import { POST } from "./route";
 import { getSiigoAccessToken, SiigoAuthError } from "@/services/siigoAuth";
 import { SiigoApiError, submitInvoice } from "@/services/siigoApi";
-import { reconcileInvoice, AmbiguousReconciliationError } from "@/services/invoiceReconciliation";
+import { reconcileInvoice, AmbiguousReconciliationError, ReconciliationTruncatedError } from "@/services/invoiceReconciliation";
 
 
 function makeRequest(body: unknown, idempotencyKey?: string): NextRequest {
@@ -489,6 +489,22 @@ describe("POST /api/invoices", () => {
     expect(claims.get(CONSULTATION_ID)).toMatchObject({ status: "unknown" });
   });
 
+  it("C-7: returns 409 (not a silent retry) when the reconciliation search is truncated — absence is unconfirmed, not proven", async () => {
+    vi.mocked(submitInvoice).mockRejectedValue(new SiigoApiError("unhandled_error", "Unhandled error", 500));
+    vi.mocked(reconcileInvoice).mockRejectedValue(new ReconciliationTruncatedError(5));
+
+    const res = await POST(makeRequest(validBody));
+    const json = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(json.error.code).toBe("reconciliation_truncated");
+    // Must NOT read like "the invoice does not exist" — that reading is
+    // exactly what caused the double-emission this guard exists to prevent.
+    expect(json.error.message).not.toContain("no existe");
+    expect(claims.get(CONSULTATION_ID)).toMatchObject({ status: "unknown" });
+    expect(submitInvoice).toHaveBeenCalledTimes(1);
+  });
+
   it("never reconciles on a 4xx — Siigo already proved nothing was created", async () => {
     vi.mocked(submitInvoice).mockRejectedValue(new SiigoApiError("invalid_identification", "NIT invalido", 400));
 
@@ -498,5 +514,49 @@ describe("POST /api/invoices", () => {
     expect(reconcileInvoice).not.toHaveBeenCalled();
     expect(submitInvoice).toHaveBeenCalledTimes(1);
     expect(claims.has(CONSULTATION_ID)).toBe(false);
+  });
+
+  it("C-5: RECONCILES instead of failing immediately on `duplicated_document` — that 400 means the OPPOSITE of 'nothing was created'", async () => {
+    const existing = { id: "INV-DUP", number: 99, cufe: "CUFE-DUP", status: "Accepted" as const, observations: undefined };
+    vi.mocked(submitInvoice).mockRejectedValue(new SiigoApiError("duplicated_document", "El documento ya existe.", 400));
+    vi.mocked(reconcileInvoice).mockResolvedValue(existing);
+
+    const res = await POST(makeRequest(validBody));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual(existing);
+    expect(reconcileInvoice).toHaveBeenCalled();
+    expect(submitInvoice).toHaveBeenCalledTimes(1);
+    expect(claims.get(CONSULTATION_ID)).toMatchObject({ status: "emitted", invoice_id: "INV-DUP" });
+  });
+
+  it("C-5: parks the claim as `unknown`, NOT released, when `duplicated_document` persists and reconciliation can't find the marker — releasing it would let a receptionist retry and genuinely double-stamp", async () => {
+    vi.mocked(submitInvoice).mockRejectedValue(new SiigoApiError("duplicated_document", "El documento ya existe.", 400));
+    vi.mocked(reconcileInvoice).mockResolvedValue(null);
+
+    const res = await POST(makeRequest(validBody));
+
+    expect(res.status).toBe(400);
+    expect(claims.get(CONSULTATION_ID)).toMatchObject({ status: "unknown" });
+    expect(claims.has(CONSULTATION_ID)).toBe(true);
+  });
+
+  it("C-5: same treatment for `already_exists` — also a 4xx that proves creation, not absence", async () => {
+    const existing = { id: "INV-AE", number: 100, cufe: "CUFE-AE", status: "Accepted" as const, observations: undefined };
+    vi.mocked(submitInvoice).mockRejectedValue(new SiigoApiError("already_exists", "Ya existe.", 400));
+    vi.mocked(reconcileInvoice).mockResolvedValue(existing);
+
+    const res = await POST(makeRequest(validBody));
+
+    expect(res.status).toBe(200);
+    expect(claims.get(CONSULTATION_ID)).toMatchObject({ status: "emitted", invoice_id: "INV-AE" });
+  });
+
+  it("C-6: a malformed Idempotency-Key is rejected BEFORE the claim is taken — no consultation is left wedged in `unknown` for a request that never touched Siigo", async () => {
+    const res = await POST(makeRequest(validBody, "clave-con-guiones"));
+
+    expect(res.status).toBe(400);
+    expect(claims.has(CONSULTATION_ID)).toBe(false);
+    expect(submitInvoice).not.toHaveBeenCalled();
   });
 });

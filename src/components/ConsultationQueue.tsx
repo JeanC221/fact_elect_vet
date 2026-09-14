@@ -147,6 +147,18 @@ export function ConsultationQueue({ rows, onInvoiceClick, isRefreshing, isInitia
                         Líneas: {formatCOP(row.totalMismatch.itemsTotal)}
                       </div>
                     )}
+                    {/* C-16: NOT a mismatch — factura y nota crédito se cancelan a
+                        la fecha. Distinto de totalMismatch a propósito: aquí los
+                        dos importes de Provet son correctos, no hay nada que revisar. */}
+                    {row.fullyReversed && (
+                      <div
+                        className="mt-0.5 inline-flex items-center gap-0.5 text-2xs font-medium text-status-draft-text"
+                        title="Esta consulta fue facturada y luego revertida por completo con una nota crédito por el mismo importe. No hay nada que emitir."
+                      >
+                        <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden="true" />
+                        Revertida (nota crédito)
+                      </div>
+                    )}
                   </td>
                   <td className="border-l border-grid-line px-3 py-2 text-slate-text">
                     {row.paymentMethod}
@@ -172,8 +184,14 @@ export function ConsultationQueue({ rows, onInvoiceClick, isRefreshing, isInitia
                         try { onInvoiceClick?.(row.id); }
                         catch (err) { console.error("[ConsultationQueue] Failed to open Quick-Edit drawer for", row.id, err); }
                       }}
-                      disabled={disableActions || row.totalMismatch !== null}
-                      title={row.totalMismatch ? "Los totales de Provet no cuadran para esta consulta. Corríjala en Provet Cloud antes de facturar." : undefined}
+                      disabled={disableActions || row.totalMismatch !== null || row.fullyReversed}
+                      title={
+                        row.totalMismatch
+                          ? "Los totales de Provet no cuadran para esta consulta. Corríjala en Provet Cloud antes de facturar."
+                          : row.fullyReversed
+                          ? "Esta consulta fue facturada y luego revertida por completo (nota crédito por el mismo importe). No hay nada que facturar."
+                          : undefined
+                      }
                       className="inline-flex items-center gap-1 rounded-md bg-clinical-blue px-2 py-1 text-xs font-semibold text-white hover:bg-clinical-blue-hover active:bg-clinical-blue-active disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       <FileText className="h-3 w-3" aria-hidden="true" />

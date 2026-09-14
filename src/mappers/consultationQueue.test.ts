@@ -4,6 +4,7 @@ import {
   buildInvoicePayloadFromQuickEdit,
   buildPaymentOptions,
   buildQuickEditDetail,
+  detectFullReversal,
   detectTotalMismatch,
   formatCOP,
   formatDate,
@@ -13,7 +14,7 @@ import {
 import { siigoInvoicePayloadSchema } from "@/schemas/siigo";
 import { toCents } from "@/schemas/provet";
 import { mockClients, mockConsultations, mockPatients } from "@/mocks/provet";
-import { TotalMismatchError, CorruptInvoiceRowError, type ProvetToSiigoOptions } from "@/mappers/provetToSiigo";
+import { TotalMismatchError, CorruptInvoiceRowError, ReversedConsultationError, type ProvetToSiigoOptions } from "@/mappers/provetToSiigo";
 import type { CatalogMapping } from "@/mappers/catalogMapping";
 import { mockSiigoProducts } from "@/mocks/siigo";
 
@@ -212,6 +213,7 @@ describe("Siigo line shape: whole quantity, line total as unit price", () => {
       paymentMethodOptions: [], total,
       createdAt: new Date("2026-09-04T10:00:00Z"), items,
       totalMismatch: detectTotalMismatch(total, items),
+      fullyReversed: detectFullReversal(total, items),
     };
   };
   const values = {
@@ -291,6 +293,7 @@ describe("C-11 — emission is blocked when Provet's two totals disagree", () =>
     paymentMethodOptions: [], total: 158.28,
     createdAt: new Date("2026-09-04T10:00:00Z"), items,
     totalMismatch: detectTotalMismatch(158.28, items),
+    fullyReversed: detectFullReversal(158.28, items),
   };
   const values = {
     name: "Sara Bobby", identificationType: "CC" as const, identificationNumber: "2111111234",
@@ -332,7 +335,7 @@ describe("C-11 — emission is blocked when Provet's two totals disagree", () =>
       { code: "13", name: "Euthanasia", quantity: 1, lineTotal: 115 },
       { code: "84", name: "Cerenia 24mg box", quantity: 1, lineTotal: Number.POSITIVE_INFINITY },
     ];
-    const corrupt = { ...mismatched, total: 115, items: corruptItems, totalMismatch: detectTotalMismatch(115, corruptItems) };
+    const corrupt = { ...mismatched, total: 115, items: corruptItems, totalMismatch: detectTotalMismatch(115, corruptItems), fullyReversed: detectFullReversal(115, corruptItems) };
     try {
       buildInvoicePayloadFromQuickEdit([], [], [], "C-12", values, options, corrupt);
       expect.unreachable("should have thrown");
@@ -349,7 +352,7 @@ describe("C-11 — emission is blocked when Provet's two totals disagree", () =>
 
   it("C-2 layer 2: a corrupt line does NOT block the annulment path either", () => {
     const corruptItems = [{ code: "84", name: "Cerenia 24mg box", quantity: 1, lineTotal: Number.POSITIVE_INFINITY }];
-    const corrupt = { ...mismatched, items: corruptItems, totalMismatch: detectTotalMismatch(115, corruptItems) };
+    const corrupt = { ...mismatched, items: corruptItems, totalMismatch: detectTotalMismatch(115, corruptItems), fullyReversed: false };
     expect(() =>
       buildInvoicePayloadFromQuickEdit([], [], [], "C-12", values, options, corrupt, { enforceTotalMatch: false }),
     ).not.toThrow();
@@ -364,8 +367,150 @@ describe("C-11 — emission is blocked when Provet's two totals disagree", () =>
   });
 
   it("builds normally when the two totals agree", () => {
-    const agreed = { ...mismatched, total: 187.5, totalMismatch: detectTotalMismatch(187.5, items) };
+    const agreed = { ...mismatched, total: 187.5, totalMismatch: detectTotalMismatch(187.5, items), fullyReversed: detectFullReversal(187.5, items) };
     expect(agreed.totalMismatch).toBeNull();
     expect(buildInvoicePayloadFromQuickEdit([], [], [], "C-12", values, options, agreed)).toBeDefined();
+  });
+});
+
+describe("C-16 — a fully reversed consultation is not a total mismatch", () => {
+  /**
+   * `consulta #10` del tenant: `factura #18` = 24.11, `NC #19` la abona por
+   * -24.11. C-1 enruta la nota crédito a esta consulta y C-2 deja de
+   * descartar la fila negativa, así que `items` sí refleja la reversión
+   * completa: suma 0.00. El header de Provet (`total_with_vat` de la
+   * factura #18) sigue siendo 24.11 — no se recalcula ni se netea.
+   */
+  const reversedItems = [
+    { code: "40", name: "Consulta general", quantity: 1, lineTotal: 24.11 },
+    { code: "40", name: "Consulta general (NC #19)", quantity: 1, lineTotal: -24.11 },
+  ];
+
+  describe("detectFullReversal", () => {
+    it("is true when the lines net to zero but Provet's header is not zero", () => {
+      expect(detectFullReversal(24.11, reversedItems)).toBe(true);
+    });
+
+    it("is independent of sign convention — any items summing to zero cents count", () => {
+      const otherSigns = [
+        { code: "1", name: "a", quantity: 1, lineTotal: -10 },
+        { code: "2", name: "b", quantity: 1, lineTotal: 10 },
+      ];
+      expect(detectFullReversal(10, otherSigns)).toBe(true);
+    });
+
+    it("is false for an ordinary consultation whose lines agree with the header", () => {
+      const normal = [{ code: "1", name: "Consulta", quantity: 1, lineTotal: 100 }];
+      expect(detectFullReversal(100, normal)).toBe(false);
+    });
+
+    it("is false when both the header and the lines are zero — nothing to reverse", () => {
+      expect(detectFullReversal(0, [])).toBe(false);
+    });
+
+    it("is false for a header total with NO rows at all — that's the pre-existing C-11 case, not a reversal", () => {
+      // A reversal needs real, opposite-signed lines netting to zero. An empty
+      // items array (Provet dropped every row) is a different failure and
+      // stays flagged by detectTotalMismatch, exactly as C-11 already covers.
+      expect(detectFullReversal(2380.85, [])).toBe(false);
+    });
+
+    it("is false for a genuine C-11 mismatch (lines do not net to zero)", () => {
+      const mismatchedItems = [
+        { code: "74", name: "Consulta general", quantity: 1, lineTotal: 100.0 },
+        { code: "75", name: "Amoxicillin 250mg", quantity: 1, lineTotal: 87.5 },
+      ];
+      expect(detectFullReversal(158.28, mismatchedItems)).toBe(false);
+    });
+  });
+
+  it("detectTotalMismatch does NOT flag a fully reversed consultation — there is nothing to reconcile", () => {
+    expect(detectTotalMismatch(24.11, reversedItems)).toBeNull();
+  });
+
+  it("buildConsultationQueue marks the row as fullyReversed instead of totalMismatch", () => {
+    const total = 24.11;
+    const row = {
+      id: "CON-010", clientId: "CLI-1", clientName: "x", clientDoc: "x",
+      identificationType: "CC" as const, identificationNumber: "1", email: "", phone: "",
+      items: reversedItems, patientName: "x", total, paymentMethod: "Efectivo",
+      provetStatus: "closed" as const, invoiceStatus: "Draft" as const, createdAt: new Date(),
+      totalMismatch: detectTotalMismatch(total, reversedItems),
+      fullyReversed: detectFullReversal(total, reversedItems),
+    };
+    expect(row.totalMismatch).toBeNull();
+    expect(row.fullyReversed).toBe(true);
+  });
+
+  it("throws ReversedConsultationError, not TotalMismatchError, when emission is attempted", () => {
+    const values = {
+      name: "Cliente", identificationType: "CC" as const, identificationNumber: "1",
+      email: "a@b.com", phone: "3000000000", paymentMethod: "Efectivo", paidAmount: 0,
+    };
+    const options = { mapping: { items: [], payments: [], version: 1, updatedAt: "2026-09-11T00:00:00.000Z", documentTypeId: 1, creditNoteDocumentTypeId: null, sellerId: 1 }, siigoProducts: [], mode: "sandbox" as const, documentTypeId: 1, sellerId: 1 };
+    const detail = {
+      id: "CON-010", clientName: "Cliente", identificationType: "CC" as const, identificationNumber: "1",
+      email: "a@b.com", phone: "3000000000", patientName: "x", paymentMethod: "",
+      paymentMethodOptions: [], total: 24.11, createdAt: new Date(),
+      items: reversedItems,
+      totalMismatch: detectTotalMismatch(24.11, reversedItems),
+      fullyReversed: detectFullReversal(24.11, reversedItems),
+    };
+    try {
+      buildInvoicePayloadFromQuickEdit([], [], [], "CON-010", values, options, detail);
+      expect.unreachable("should have thrown");
+    } catch (e) {
+      expect(e).toBeInstanceOf(ReversedConsultationError);
+      expect(e).not.toBeInstanceOf(TotalMismatchError);
+      const err = e as ReversedConsultationError;
+      // Own message: honest that there is nothing to reconcile, unlike
+      // TotalMismatchError's "uno de los dos importes es incorrecto", which
+      // would be false here — both amounts are correct and sum to zero.
+      expect(err.message).not.toContain("no coincide con la suma");
+      expect(err.message).not.toContain("uno de los dos importes es incorrecto");
+      expect(err.message.toLowerCase()).toContain("revert");
+    }
+  });
+
+  it("a corrupt line still takes priority over the reversal check", () => {
+    const corruptItems = [
+      { code: "40", name: "Consulta general", quantity: 1, lineTotal: 24.11 },
+      { code: "40", name: "NC #19", quantity: 1, lineTotal: Number.POSITIVE_INFINITY },
+    ];
+    const values = {
+      name: "Cliente", identificationType: "CC" as const, identificationNumber: "1",
+      email: "a@b.com", phone: "3000000000", paymentMethod: "Efectivo", paidAmount: 0,
+    };
+    const options = { mapping: { items: [], payments: [], version: 1, updatedAt: "2026-09-11T00:00:00.000Z", documentTypeId: 1, creditNoteDocumentTypeId: null, sellerId: 1 }, siigoProducts: [], mode: "sandbox" as const, documentTypeId: 1, sellerId: 1 };
+    const detail = {
+      id: "CON-010", clientName: "Cliente", identificationType: "CC" as const, identificationNumber: "1",
+      email: "a@b.com", phone: "3000000000", patientName: "x", paymentMethod: "",
+      paymentMethodOptions: [], total: 24.11, createdAt: new Date(),
+      items: corruptItems,
+      totalMismatch: null,
+      fullyReversed: false,
+    };
+    expect(() =>
+      buildInvoicePayloadFromQuickEdit([], [], [], "CON-010", values, options, detail),
+    ).toThrow(CorruptInvoiceRowError);
+  });
+
+  it("does NOT block the annulment path — a stamped invoice must stay voidable even if net zero", () => {
+    const values = {
+      name: "Cliente", identificationType: "CC" as const, identificationNumber: "1",
+      email: "a@b.com", phone: "3000000000", paymentMethod: "Efectivo", paidAmount: 0,
+    };
+    const options = { mapping: { items: [], payments: [{ provetMethod: "Efectivo", siigoPaymentTypeId: 10948 }], version: 1, updatedAt: "2026-09-11T00:00:00.000Z", documentTypeId: 1, creditNoteDocumentTypeId: null, sellerId: 1 }, siigoProducts: [], mode: "sandbox" as const, documentTypeId: 1, sellerId: 1 };
+    const detail = {
+      id: "CON-010", clientName: "Cliente", identificationType: "CC" as const, identificationNumber: "1",
+      email: "a@b.com", phone: "3000000000", patientName: "x", paymentMethod: "",
+      paymentMethodOptions: [], total: 24.11, createdAt: new Date(),
+      items: reversedItems,
+      totalMismatch: detectTotalMismatch(24.11, reversedItems),
+      fullyReversed: detectFullReversal(24.11, reversedItems),
+    };
+    expect(() =>
+      buildInvoicePayloadFromQuickEdit([], [], [], "CON-010", values, options, detail, { enforceTotalMatch: false }),
+    ).not.toThrow();
   });
 });

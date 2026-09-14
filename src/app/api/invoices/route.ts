@@ -3,12 +3,13 @@ import type { NextRequest } from "next/server";
 import { z } from "zod";
 import { siigoInvoicePayloadSchema, type SiigoInvoiceResponse } from "@/schemas/siigo";
 import { getSiigoAccessToken, SiigoAuthError } from "@/services/siigoAuth";
-import { generateIdempotencyKey, SiigoApiError, submitInvoice } from "@/services/siigoApi";
+import { generateIdempotencyKey, idempotencyKeyHeaderSchema, SiigoApiError, submitInvoice } from "@/services/siigoApi";
 import {
   buildEmissionMarker,
   buildObservations,
   reconcileInvoice,
   AmbiguousReconciliationError,
+  ReconciliationTruncatedError,
 } from "@/services/invoiceReconciliation";
 import {
   acquireInvoiceClaim,
@@ -88,14 +89,27 @@ function assertPayloadMatchesProvetTotal(
 }
 
 /**
- * Can we prove Siigo created nothing?
+ * Whether Siigo's response PROVES nothing was created.
  *
  * Only a 4xx tells us that: the request was refused at validation time, before
  * any document was written. A timeout, a dropped socket or a 5xx tells us
  * nothing on its own — which is what reconciliation is for.
+ *
+ * C-5 — `duplicated_document` and `already_exists` are 4xx too, but they mean
+ * the OPPOSITE: Siigo is refusing the request precisely BECAUSE a document
+ * already exists (`API_SIIGO_REFERENCIA_COMPLETA.md`, "duplicated_document
+ * llega con HTTP 400 y significa lo contrario de 'no se creó nada'" — Siigo's
+ * own recommended defense against this is the Idempotency-Key already in use
+ * here). Treating them like any other 4xx made the final catch block RELEASE
+ * the claim — "nothing happened, free to retry" — when a receptionist's next
+ * click would then emit a genuinely duplicate, DIAN-stamped invoice. Excluding
+ * them here routes into the same reconcile-by-marker path already used for
+ * ambiguous 5xx failures, so the existing invoice is found and reported as
+ * success instead.
  */
 function provablyCreatedNothing(err: unknown): boolean {
   if (!(err instanceof SiigoApiError)) return false;
+  if (err.code === "duplicated_document" || err.code === "already_exists") return false;
   return typeof err.status === "number" && err.status >= 400 && err.status < 500;
 }
 
@@ -131,6 +145,24 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // fresh on the retry: Siigo records a key even when the request fails and
     // rejects its reuse with 400 documents_service (verified against the API).
     const emissionKey = req.headers.get("X-Idempotency-Key") ?? generateIdempotencyKey();
+
+    // C-6. Validated HERE, before the claim is acquired and before Siigo is
+    // authenticated: the same shape check `postToSiigo` runs deep inside
+    // `submitInvoice` used to be the ONLY place this failed, which is AFTER
+    // `acquireInvoiceClaim` below. A malformed header (a stray hyphen, over
+    // 30 chars) never reaches Siigo — no fetch is made — but the consultation
+    // was already left holding a claim, and the generic catch below reads
+    // "not a SiigoApiError" as "cannot prove creation" and parks it in
+    // `unknown` for a request that touched nothing. Failing fast here means
+    // the claims table is never involved for a request that never left this
+    // server.
+    const keyCheck = idempotencyKeyHeaderSchema.safeParse(emissionKey);
+    if (!keyCheck.success) {
+      return NextResponse.json(
+        { error: { code: "invalid_idempotency_key", message: keyCheck.error.issues[0]?.message ?? "Idempotency-Key inválido." } },
+        { status: 400 },
+      );
+    }
     const marker = buildEmissionMarker(emissionKey);
     const markedPayload = { ...payload, observations: buildObservations(consultationId, emissionKey) };
 
@@ -208,6 +240,21 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             message:
               "Se encontró más de una factura con la misma marca de emisión para esta consulta. " +
               "Revise en Siigo Nube cuál es la correcta y anule la sobrante con una nota crédito antes de continuar.",
+          },
+        },
+        { status: 409 },
+      );
+    }
+    if (err instanceof ReconciliationTruncatedError) {
+      // C-7. Not the same as "no lo encontré, no existe": the search gave up
+      // after MAX_RECONCILE_PAGES without reaching the end of the listing, so
+      // absence is unconfirmed. Surfaced with its own code/message rather than
+      // folded into the generic 500 so staff know NOT to just retry.
+      return NextResponse.json(
+        {
+          error: {
+            code: "reconciliation_truncated",
+            message: err.message,
           },
         },
         { status: 409 },

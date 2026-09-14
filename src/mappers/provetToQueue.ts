@@ -8,7 +8,7 @@ import type {
   ProvetInvoiceRowRaw,
 } from "@/schemas/provetApi";
 import type { ConsultationQueueRow, InvoiceStatus, ProvetStatus, QuickEditItem } from "@/mappers/consultationQueue";
-import { detectTotalMismatch } from "@/mappers/consultationQueue";
+import { detectFullReversal, detectTotalMismatch } from "@/mappers/consultationQueue";
 import { identificationTypes } from "@/schemas/provet";
 
 export function extractId(rel: string | null | undefined): string | null {
@@ -195,6 +195,7 @@ export function buildQueueFromProvet(
       invoiceStatus: "Draft",
       createdAt: new Date(con.created),
       totalMismatch: detectTotalMismatch(total, items),
+      fullyReversed: detectFullReversal(total, items),
     };
   });
 }
