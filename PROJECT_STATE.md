@@ -79,11 +79,11 @@ agente leyera un `.clinerules` viejo durante varias sesiones.
 | **C-1** | nuevo 2026-09-10 | **Omisión de abonos de Provet en la cola.** `provetToQueue.ts:105-115` construye `consultationByInvoiceId` desde `inv.consultation`, que es `null` en toda nota de crédito, así que el documento entero desaparece. Medido: factura 5 = 1699.04, abono de 125.00 sobre `invoicerow/3` de esa misma factura → la cola factura 1699.04 en vez de 1574.04. **Sobrefacturación de 125.00 con validez fiscal.** El join correcto es `credited_invoicerow` → fila → factura → consulta | `EVIDENCIA §2.8` |
 | **C-2** | N5 | `provetToQueue.ts:117` — `if (lineTotal <= 0) continue` descarta filas en silencio. **CUANTIFICADO el 2026-09-11: 7 de 52 facturas del tenant no cuadran, y en las 7 la causa es esta.** El caso que importa es la **factura 12**: `total_with_vat` 158.28, lo que emitiría el código **187.50** → **+29.22 de sobrefacturación** en un documento positivo que **no** es nota de crédito. Las facturas **10** y **32** traen total negativo **sin** ser notas de crédito, lo que vuelve a confirmar que el signo no identifica un abono. Distinto de C-1 y con fix distinto. La justificación se escribe como "descarta filas negativas reales"; **no** como "descarta descuentos", que sigue sin verificar | `EVIDENCIA §2.8 d/e` + medición 2026-09-11 |
 | **C-3** | N16 **ampliado** | Tres fallos en la misma costura del drawer. (a) El `balanced` de `QuickEditDrawer.tsx:56` compara `detail.total` contra lo tecleado, nunca contra `sumLineTotals`. (b) `values.paidAmount` no llega al payload. (c) **`formatCOP` redondea al mostrar**, medido el 2026-09-11: `consultationQueue.ts:38` usa `maximumFractionDigits: 0`, así que **33.5 se pinta `$34`** (y 32.5 → `$33`). La columna Total de la cola imprime el número crudo y el drawer lo pasa por `formatCOP`: **el mismo importe sale como 33.5 en una pantalla y $34 en la otra**. Muerde en `QuickEditDrawer.tsx:134`, que es el monto que el staff teclea para cuadrar el pago. **El payload a Siigo NO está afectado**: `provetToSiigo.ts` nunca llama a `formatCOP` | medición 2026-09-11 |
-| **C-16** | nuevo 2026-09-11 (C-2) | **Una consulta revertida entera se factura igual.** `consulta #10`: `factura #18` = 24.11, `NC #19` la abona por −24.11, neto **0.00**. Con C-1 y C-2 dentro deja de emitir 24.11 y pasa a bloquearse, pero con el mensaje de `TotalMismatchError` — *"uno de los dos importes es incorrecto"*— que **es falso**: los dos son correctos y suman cero. Estado propio y mensaje propio: no hay factura que emitir, no hay descuadre que revisar. Detección independiente de la convención de signo: `Σ items == 0` con `total != 0`. **Se ejecuta ANTES que C-4.** Único de los seis bloqueados que hoy factura dinero que no existe | medición 2026-09-11 |
-| **C-4** | N17 | `invoiceReconciliation.ts:92-94` — `created_end` sin hora se interpreta `T00:00:00` y excluye la factura del día. Devuelve `null`, la ruta lo lee como "no existe" y **emite una segunda factura timbrada**. Aplica idéntico a `GET /v1/credit-notes` | `API_SIIGO §Listar` |
-| **C-5** | N7 | `duplicated_document` llega como 400 y `provablyCreatedNothing` lo trata como "no se creó nada". Es el único 4xx que significa lo contrario | — |
-| **C-6** | N6 | La `X-Idempotency-Key` se valida después de tomar el claim; una clave malformada deja la consulta en `unknown` sin tocar Siigo | — |
-| **C-7** | N18 | Reconciliación truncada a 500 documentos: "no lo encontré" se convierte en "no existe" | — |
+| **C-16** ✅ **CERRADO 2026-09-14 (sesión 2)** — ver `## Resolved — sesión 2, C-16/C-4/C-7/C-5/C-6` | nuevo 2026-09-11 (C-2) | **Una consulta revertida entera se factura igual.** `consulta #10`: `factura #18` = 24.11, `NC #19` la abona por −24.11, neto **0.00**. Con C-1 y C-2 dentro deja de emitir 24.11 y pasa a bloquearse, pero con el mensaje de `TotalMismatchError` — *"uno de los dos importes es incorrecto"*— que **es falso**: los dos son correctos y suman cero. Estado propio y mensaje propio: no hay factura que emitir, no hay descuadre que revisar. Detección independiente de la convención de signo: `Σ items == 0` con `total != 0`. **Se ejecuta ANTES que C-4.** Único de los seis bloqueados que hoy factura dinero que no existe | medición 2026-09-11 |
+| **C-4** ✅ **CERRADO 2026-09-14 (sesión 2)** — ver `## Resolved — sesión 2, C-16/C-4/C-7/C-5/C-6` | N17 | `invoiceReconciliation.ts:92-94` — `created_end` sin hora se interpreta `T00:00:00` y excluye la factura del día. Devuelve `null`, la ruta lo lee como "no existe" y **emite una segunda factura timbrada**. Aplica idéntico a `GET /v1/credit-notes` | `API_SIIGO §Listar` |
+| **C-5** ✅ **CERRADO 2026-09-14 (sesión 2)** — ver `## Resolved — sesión 2, C-16/C-4/C-7/C-5/C-6` | N7 | `duplicated_document` llega como 400 y `provablyCreatedNothing` lo trata como "no se creó nada". Es el único 4xx que significa lo contrario | — |
+| **C-6** ✅ **CERRADO 2026-09-14 (sesión 2)** — ver `## Resolved — sesión 2, C-16/C-4/C-7/C-5/C-6` | N6 | La `X-Idempotency-Key` se valida después de tomar el claim; una clave malformada deja la consulta en `unknown` sin tocar Siigo | — |
+| **C-7** ✅ **CERRADO 2026-09-14 (sesión 2)** — ver `## Resolved — sesión 2, C-16/C-4/C-7/C-5/C-6` | N18 | Reconciliación truncada a 500 documentos: "no lo encontré" se convierte en "no existe" | — |
 | **C-11** ✅ **CERRADO 2026-09-11 (sesión 2)** — ver `## Resolved — sesión 2` | nuevo 2026-09-11 · enunciado corregido el 2026-09-11 al abrir la sesión 2 | **Assert por consulta entre los dos números que el propio código produce: `sum(items[].lineTotal)` contra `row.total` (que sale de `invoice.total_with_vat`), fail-loud.** Hoy el total mostrado sale de `total_with_vat` y las líneas de `sum_total`, **sin una sola comparación entre ambos en todo el código** — `EVIDENCIA §2.6` lo llama el control de mayor retorno del backlog. **Corrección (a): el assert NO detecta C-1.** La nota de crédito es una factura distinta (id 6), no una fila de la factura 5; la suma de filas de la 5 cuadra con su `total_with_vat` 1699.04 antes y después de C-1. Lo que sí hace es **fallar en la consulta 4 una vez C-1 esté arreglado** (items 1574.04 contra total 1699.04), impidiendo dejar ese fix a medias. **Corrección (b): comparar filas CRUDAS contra `total_with_vat` da verde en la factura 12** — mide la aritmética de Provet, no el pipeline; la comparación válida es contra las filas ya filtradas por el código. Para C-2 sí dispara hoy, en las 7 facturas. **Se construye ANTES de tocar C-1 y C-2.** Tolerancia: `toCents` (`provet.ts:29`), céntimos enteros, **nunca un epsilon de coma flotante**. Mecanismo: **A + D** — flag por fila + `expectedTotal` verificado en `POST /api/invoices`. **El guard de A es evadible por un POST directo a `/api/invoices`: la ruta NO queda protegida por él, solo por D, y D tampoco resiste a un cliente malicioso — su modelo de amenaza son los bugs, no la malicia.** Ver C-12 | `EVIDENCIA §2.6` |
 
 ### Abiertos por la sesión 2 — desbloqueo y contrato de datos
@@ -316,6 +316,109 @@ el importe equivocado— pero recepción lo va a notar. Avisar antes. **La cifra
 (límite `.clinerules` 150). Tercera vez que crece en esta sesión. Decidir si se
 parte cuando se toque C-3.
 
+### Resolved — sesión 2, C-16/C-4/C-7/C-5/C-6 (2026-09-14)
+
+Base: `83ad9ac` (merge del PR #21, nota de alcance). Baseline verificado antes
+de tocar nada: 45 files / 664 tests, `tsc` limpio, build `(8/8)`, 20 rutas, 4
+estáticas, `npm audit` 0/0. Orden obligatorio de `prompt_sesion_3.md` seguido
+al pie: C-16 → C-4 → C-7 → C-5 → C-6, los tres gates entre hallazgo y
+hallazgo, uno a la vez.
+
+**C-16 — estado y mensaje propios para la reversión total.**
+`detectFullReversal(expectedTotal, items)` nuevo en `consultationQueue.ts`:
+`Σ items == 0` en céntimos con `total != 0` en céntimos, **y `items.length >
+0`** — un header con total pero CERO filas (el caso preexistente de C-11) NO
+es una reversión, sigue siendo mismatch; hay test que fija exactamente ese
+límite (`provetToQueue.test.ts`, "flags an invoice that has a header total
+but no rows at all"). `detectTotalMismatch` delega en ella primero y devuelve
+`null` cuando aplica. Nuevo campo `fullyReversed: boolean` en
+`ConsultationQueueRow` y `QuickEditDetail`, propagado en los dos
+constructores de cola y en los tres puntos de `page.tsx` que reconstruyen
+`QuickEditDetail`. Nueva `ReversedConsultationError` (`provetToSiigo.ts`),
+lanzada por `buildInvoicePayloadFromQuickEdit` ANTES del check de mismatch
+genérico (y después del de fila corrupta). **UI también tocada a propósito:**
+sin actualizar `ConsultationQueue.tsx`/`QuickEditDrawer.tsx`, dejar
+`totalMismatch` en `null` para una fila revertida REACTIVABA el botón
+`Facturar` — una regresión peor que el bug original. Badge y mensaje propios
+(paleta `status-draft`, no `status-rejected`: no es un error a corregir en
+Provet). **No se tocó `route.ts` para este hallazgo**: `provetToSiigoInvoice`
+nunca construye un payload para una consulta revertida (el guard la
+intercepta antes), y `siigoInvoicePayloadSchema.taxed_price` es `positive()`,
+así que un payload ya validado no puede tener `items` sumando 0 salvo con
+`items: []` (caso ya cubierto, no es este). **No se tocó
+`GET /v1/credit-notes`**: cero reconciliación implementada hoy sobre ese
+endpoint en todo el repo (`grep` de `created_end`/`created_start` da un solo
+archivo, `invoiceReconciliation.ts`); la nota del backlog es para cuando esa
+reconciliación se construya.
+
+**C-4 — `created_end` extiende a mañana, no a hoy.** Enunciado contrastado
+contra `API_SIIGO_REFERENCIA_COMPLETA.md` (clase A, "Trampa de fechas sin
+hora") antes de tocar código. `colombiaDate(-1)` en vez de `colombiaDate(0)`
+en `invoiceReconciliation.ts`; la función ya soportaba offsets negativos, solo
+hacía falta invocarla así. Único punto del repo que usa `created_end`.
+
+**C-7 — la verificación truncada deja de leerse como "no existe".** Nueva
+`ReconciliationTruncatedError`: se lanza cuando se agotan las
+`MAX_RECONCILE_PAGES` (5) con la última página llena (100) y CERO
+coincidencias — deliberadamente NO se lanza si ya se encontró al menos una
+coincidencia dentro de esas páginas, aunque la última siga llena. Mapeada en
+`route.ts` a 409 `reconciliation_truncated` con mensaje propio (no reutiliza
+el de `ambiguous_reconciliation`), y entrada dedicada en
+`errorTranslator.ts`.
+
+**C-5 — `duplicated_document`/`already_exists` dejan de leerse como "no se
+creó nada".** `provablyCreatedNothing` (`route.ts`) ahora devuelve `false`
+para esos dos códigos aunque sean 4xx. Efecto real: en el intento inicial,
+enruta al mismo camino de reconciliación por marcador que un 5xx ambiguo (en
+vez de fallar de inmediato); en el catch final, si la reconciliación no
+encuentra el marcador, el claim queda `unknown` (revisión manual) en vez de
+liberarse — liberarlo habría dejado la puerta abierta a que el siguiente clic
+de recepción generara un timbrado duplicado real.
+
+**C-6 — la `Idempotency-Key` se valida antes del claim, no dentro de
+`submitInvoice`.** `idempotencyKeyHeaderSchema` exportado desde
+`siigoApi.ts` (antes privado) y reutilizado en `route.ts` con un
+`safeParse` justo después de leer el header, ANTES de `getSiigoAccessToken`
+y de `acquireInvoiceClaim`. Una clave malformada ahora devuelve 400 sin tocar
+la tabla `invoice_claims` en absoluto. **No se tocó `credit-notes/route.ts`**:
+esa ruta no toma ningún claim (no llama `acquireInvoiceClaim`), así que el
+efecto colateral que describe C-6 no existe ahí hoy.
+
+**19 tests nuevos, repartidos:** 11 en `consultationQueue.test.ts` (C-16) + 2
+en `invoiceReconciliation.test.ts` (C-4) + 2 en `invoiceReconciliation.test.ts`
+(C-7) + 3 en `route.test.ts` (C-7 uno, C-5 dos) + 1 en `route.test.ts` (C-6).
+
+**Mutación por hallazgo, todos muertos:** C-16 — 5 mutantes (invertir signo de
+`expectedCents`, quitar guard de `items.length===0`, quitar la delegación en
+`detectTotalMismatch`, quitar el `throw`, colar la frase prohibida en el
+mensaje). C-4 — 2 mutantes (volver a `colombiaDate(0)`, `colombiaDate(-2)`).
+C-7 — 3 mutantes (quitar el `throw`, invertir `lastPageWasFull`, quitar
+`matches.length===0`). C-5 — 2 mutantes (quitar cada código de la exclusión
+por separado). C-6 — 2 mutantes (revertir el orden del check, invertir la
+condición). **Manual, sin Stryker** (no configurado en el repo); cada mutante
+verificado con `diff` vacío tras restaurar antes de continuar al siguiente.
+
+**Gates finales (acumulado de los cinco):** `tsc --noEmit` exit 0 · `vitest
+run` **45 files / 683 tests** (664 → 683) · `env -u NODE_ENV npx next build`
+exit 0, `(8/8)`, 20 rutas, 4 estáticas · `npm audit` 0/0.
+
+**Entregado como ZIP único** (`sesion3_c16_c4_c7_c5_c6.zip`, 14 archivos, SHA-256
+por archivo en el chat) — no cinco ZIPs separados. Dos archivos llevan cambios
+de más de un hallazgo: `invoiceReconciliation.ts` (C-4 + C-7) y `route.ts`
+(C-7 + C-5 + C-6).
+
+**Pendiente de verificación manual — nueva, se suma a la de C-11.** C-16 toca
+`ConsultationQueue.tsx` y `QuickEditDrawer.tsx` (badge y mensaje de
+"revertida"). Ningún test de render existe para estos dos componentes
+(`vitest.config.ts` en `environment: "node"`, sin jsdom/testing-library). Los
+tres gates y los 683 tests cubren la lógica; el render en sí sigue sin
+verse. Va al mismo guion de la última sesión, con preview, junto con C-11 y
+C-2.
+
+**De la sesión 2 original (C-11, C-1, C-2, C-3, C-4, C-5, C-6, C-7) solo queda
+abierto C-3**, deliberadamente, junto con C-15 en la sesión de UI con
+preview.
+
 ### Frontera de autorización — sesión 4
 
 | # | Origen | Qué |
@@ -465,6 +568,40 @@ parte cuando se toque C-3.
 ---
 
 ## Last Update
+- **Date:** 2026-09-14
+- **Agent:** Claude (prompt_sesion_3.md — sigue perteneciendo al alcance de
+  **sesión 2**, ver `### Nombres de sesión vs. alcance`)
+- **Base commit:** `83ad9ac` (merge del PR #21). Baseline verificado antes de
+  tocar nada: 45 files / 664 tests, `tsc` limpio, build `(8/8)`, 20 rutas, 4
+  estáticas, `npm audit` 0/0 — coincidió al dígito con lo esperado.
+- **Completed Task:** Cinco hallazgos de `prompt_sesion_3.md`, en el orden
+  obligatorio: **C-16 → C-4 → C-7 → C-5 → C-6**. Detalle completo en
+  `### Resolved — sesión 2, C-16/C-4/C-7/C-5/C-6` más arriba. Con esto, de los
+  ocho hallazgos originales de la sesión 2 (C-11, C-1, C-2, C-3, C-4, C-5, C-6,
+  C-7) solo queda abierto **C-3**, deliberadamente diferido junto a C-15 a la
+  sesión de UI con preview.
+- **Verification:** `npx tsc --noEmit` ✅ exit 0 | `npx vitest run` ✅ **45
+  files / 683 tests** (664 → 683, +19) | `env -u NODE_ENV npx next build` ✅
+  exit 0, **20 rutas, 4 estáticas, `(8/8)`** | `npm audit` **0/0, sin cambio**.
+  Mutación manual (sin Stryker) por hallazgo, 14 mutantes en total, los 14
+  muertos — detalle en la sección Resolved.
+- **Entregable:** un solo ZIP (`sesion3_c16_c4_c7_c5_c6.zip`), 14 archivos,
+  SHA-256 por archivo dado en el chat. **No aplicado todavía** — Jean lo aplica
+  con `rsync` y confirma los gates de su lado antes de mergear.
+- **Deuda nueva registrada:** verificación manual de render para el badge y
+  mensaje de "revertida" de C-16 (`ConsultationQueue.tsx`,
+  `QuickEditDrawer.tsx`) — se suma a la de C-11 y C-2, mismo guion, misma
+  sesión futura con preview.
+- **Next Pending Task:** propuesto — **nota de crédito** (C-8, C-9, C-10; ver
+  `### Bloqueante crítico — sesión 3 (nota crédito)` más arriba), por ser el
+  único bloqueante marcado como crítico que sigue sin tocarse: **ninguna nota
+  crédito puede emitirse hoy** contra el contrato real de Siigo. Alternativas
+  igual de válidas en el backlog: `### Frontera de autorización — sesión 4` o
+  `### Higiene, desacople, CI — sesión 5`. **Esta es una propuesta de
+  prioridad, no una decisión tomada** — Jean confirma o redirige al abrir el
+  siguiente chat. Ver `prompt_sesion_4.md`.
+
+## Previous Update (sesión 1)
 - **Date:** 2026-09-10
 - **Agent:** Claude (sesión 1 — Next.js 16.3.4 + React 19)
 - **Base commit:** `f53087a` (merge de la sesión 0b). El prompt de sesión asumía
