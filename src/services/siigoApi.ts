@@ -36,7 +36,7 @@ const partnerIdHeaderSchema = z.string().trim().min(3, "Partner-Id requiere 3-10
  * header. Rejecting it locally costs nothing; letting it reach Siigo burns the
  * key, and a Siigo 5xx consumes it permanently.
  */
-const idempotencyKeyHeaderSchema = z.string().trim().min(1, "Idempotency-Key requerido").max(30, "Idempotency-Key max 30 caracteres").regex(/^[A-Za-z0-9]+$/, "Idempotency-Key inválido: solo caracteres alfanuméricos, sin guiones ni espacios.");
+export const idempotencyKeyHeaderSchema = z.string().trim().min(1, "Idempotency-Key requerido").max(30, "Idempotency-Key max 30 caracteres").regex(/^[A-Za-z0-9]+$/, "Idempotency-Key inválido: solo caracteres alfanuméricos, sin guiones ni espacios.");
 
 /** HTTP status → fallback error code when the body is not a standard Siigo error. */
 const STATUS_ERROR_CODES: Record<number, string> = {

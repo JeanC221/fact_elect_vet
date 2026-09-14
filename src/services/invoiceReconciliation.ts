@@ -65,7 +65,35 @@ export class AmbiguousReconciliationError extends Error {
   }
 }
 
-/** YYYY-MM-DD in Colombia time, offset by `daysAgo`. */
+/**
+ * C-7 — thrown when the search exhausts `MAX_RECONCILE_PAGES` and the LAST
+ * page fetched was still full (100 results): Siigo may hold more documents
+ * beyond the window this function looked at, so finding nothing here does
+ * NOT mean the marker is absent — it means the search gave up too early.
+ *
+ * Without this, `findInvoiceByMarker` returns `null` for "I stopped looking"
+ * exactly as it would for "I looked everywhere and it isn't there", and the
+ * caller (which treats `null` as license to retry) emits a SECOND,
+ * DIAN-stamped invoice for a consultation that may already have one sitting
+ * on page 6.
+ *
+ * Deliberately does NOT fire when at least one match was already found: at
+ * that point the marker's existence is already confirmed, and refusing to
+ * report a hit the code actually saw would trade one false negative for a
+ * useless one.
+ */
+export class ReconciliationTruncatedError extends Error {
+  constructor(public readonly pagesSearched: number) {
+    super(
+      `La verificación en Siigo se detuvo tras revisar ${pagesSearched} páginas ` +
+        `(${pagesSearched * 100} documentos) sin llegar al final del listado. No se puede confirmar si la factura ` +
+        `existe o no — reintentar la emisión a ciegas podría duplicarla. Revise manualmente en Siigo Nube antes de reintentar.`,
+    );
+    this.name = "ReconciliationTruncatedError";
+  }
+}
+
+/** YYYY-MM-DD in Colombia time, offset by `daysAgo` (negative moves into the future — used by C-4 to reach tomorrow). */
 function colombiaDate(daysAgo = 0): string {
   const d = new Date(Date.now() - daysAgo * 86_400_000);
   return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Bogota" }).format(d);
@@ -79,6 +107,17 @@ const MAX_RECONCILE_PAGES = 5;
  * The window starts yesterday, not today: an emission at 23:59 COT that is
  * reconciled a few seconds later would otherwise search the wrong day.
  *
+ * C-4 — the window ENDS tomorrow, not today. Siigo documents `created_start`/
+ * `created_end` as RFC3339 `date-time` but accepts a bare `yyyy-MM-dd`, which
+ * it then reads as `T00:00:00`: `created_end=<hoy>` silently excludes
+ * everything created today after midnight (`API_SIIGO_REFERENCIA_COMPLETA.md`,
+ * "Trampa de fechas sin hora" — Siigo's own recommendation is exactly this,
+ * extend `created_end` to tomorrow). Reconciliation runs moments after
+ * emitting, so the invoice being searched for is almost always "created
+ * today" — with `created_end=hoy` this always returns null, which the caller
+ * reads as "Siigo never created it" and emits a SECOND, DIAN-stamped invoice
+ * for the same consultation.
+ *
  * Errors are NOT swallowed. If the lookup itself fails, the caller must treat
  * the outcome as unresolved and block — a failed check is not evidence of
  * absence, and silently returning null here would turn it into one.
@@ -89,10 +128,11 @@ export async function findInvoiceByMarker(
   partnerId: string,
 ): Promise<ReconciledInvoice | null> {
   const matches: ReconciledInvoice[] = [];
+  let lastPageWasFull = false;
   for (let page = 1; page <= MAX_RECONCILE_PAGES; page++) {
     const url =
       `${SIIGO_API_BASE_URL}/v1/invoices?created_start=${colombiaDate(1)}` +
-      `&created_end=${colombiaDate(0)}&page=${page}&page_size=100`;
+      `&created_end=${colombiaDate(-1)}&page=${page}&page_size=100`;
     let res: Response;
     try {
       res = await fetch(url, {
@@ -111,9 +151,17 @@ export async function findInvoiceByMarker(
     for (const inv of parsed.data.results) {
       if ((inv.observations ?? "").includes(marker)) matches.push({ id: inv.id, number: inv.number });
     }
-    if (parsed.data.results.length < 100) break;
+    lastPageWasFull = parsed.data.results.length === 100;
+    if (!lastPageWasFull) break;
   }
   if (matches.length > 1) throw new AmbiguousReconciliationError(matches.length);
+  // C-7. `matches.length === 0` alone is not proof of absence when the last
+  // page examined was still full: there may be more documents past
+  // MAX_RECONCILE_PAGES that were never looked at. A confirmed hit, by
+  // contrast, needs no such caveat — see ReconciliationTruncatedError.
+  if (matches.length === 0 && lastPageWasFull) {
+    throw new ReconciliationTruncatedError(MAX_RECONCILE_PAGES);
+  }
   return matches[0] ?? null;
 }
 

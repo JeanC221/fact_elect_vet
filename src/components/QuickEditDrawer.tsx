@@ -61,9 +61,14 @@ export function QuickEditDrawer({ detail, isSubmitting, errorMessage, errorDetai
   // Ajustes — the source data itself is wrong — so it is styled as a rejection,
   // not as a pending configuration step.
   const totalMismatch = detail?.totalMismatch ?? null;
+  // C-16. NOT a disagreement: an invoice and its credit note cancel each
+  // other to the cent. Both of Provet's numbers are correct here, so this is
+  // deliberately a separate flag from totalMismatch rather than folded into
+  // it — the two need different messages and neither should imply the other.
+  const fullyReversed = detail?.fullyReversed ?? false;
   // gate.canEmit is part of canSubmit so the button is genuinely disabled,
   // not merely refused after the click as the old modeNotReady check was.
-  const canSubmit = parsed.success && balanced && !isSubmitting && detail !== null && values.paymentMethod !== "" && !missingFallback && !missingSiigoSettings && !totalMismatch && gate.canEmit;
+  const canSubmit = parsed.success && balanced && !isSubmitting && detail !== null && values.paymentMethod !== "" && !missingFallback && !missingSiigoSettings && !totalMismatch && !fullyReversed && gate.canEmit;
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
@@ -172,6 +177,19 @@ export function QuickEditDrawer({ detail, isSubmitting, errorMessage, errorDetai
                 Los totales de Provet no cuadran: la factura dice {formatCOP(totalMismatch.expectedTotal)} y sus líneas
                 suman {formatCOP(totalMismatch.itemsTotal)}. No se puede emitir hasta corregirlo en Provet Cloud:
                 uno de los dos importes es incorrecto y no hay forma de saber cuál.
+              </span>
+            </div>
+          )}
+          {/* C-16: own message — no hay descuadre que revisar, ambos importes de
+              Provet son correctos. No reutiliza el texto de totalMismatch, que
+              aquí sería falso. */}
+          {fullyReversed && (
+            <div className="flex items-start gap-2 rounded-md border border-status-draft-border bg-status-draft-bg px-2 py-2 text-xs text-status-draft-text">
+              <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+              <span>
+                Esta consulta fue facturada por {formatCOP(detail.total)} y luego revertida por completo con una nota
+                crédito por el mismo importe. No hay factura que emitir: ambos importes de Provet son correctos y
+                suman cero.
               </span>
             </div>
           )}

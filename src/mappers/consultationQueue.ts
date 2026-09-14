@@ -9,7 +9,7 @@ import {
   type Patient,
 } from "@/schemas/provet";
 import type { SiigoInvoicePayload } from "@/schemas/siigo";
-import { provetToSiigoInvoice, TotalMismatchError, CorruptInvoiceRowError, type ProvetToSiigoOptions } from "@/mappers/provetToSiigo";
+import { provetToSiigoInvoice, TotalMismatchError, ReversedConsultationError, CorruptInvoiceRowError, type ProvetToSiigoOptions } from "@/mappers/provetToSiigo";
 import type { CatalogMapping } from "@/mappers/catalogMapping";
 
 /** DIAN invoice lifecycle status, surfaced per consultation row. */
@@ -57,8 +57,51 @@ export interface ConsultationQueueRow {
   items: QuickEditItem[];
   patientName: string; total: number; paymentMethod: string;
   provetStatus: ProvetStatus; invoiceStatus: InvoiceStatus; createdAt: Date;
-  /** C-11 guard. `null` when header and rows agree to the cent. */
+  /** C-11 guard. `null` when header and rows agree to the cent, OR when `fullyReversed` is true — see below. */
   totalMismatch: QueueTotalMismatch | null;
+  /**
+   * C-16 — an invoice and its credit note cancel each other to the cent
+   * (`detectFullReversal`). Mutually exclusive with `totalMismatch`: a
+   * reversed consultation is not a disagreement between two numbers, it is
+   * two correct numbers that sum to zero. Kept as its own field rather than
+   * folded into `totalMismatch` so the UI can tell "nothing to review" apart
+   * from "something is wrong and we don't know what."
+   */
+  fullyReversed: boolean;
+}
+
+/**
+ * C-16 — Σ items == 0 while the Provet header (`total`) still carries the
+ * original, pre-reversal amount. A consultation billed and then reversed in
+ * full (its invoice and credit note cancel to the cent) computes a correct
+ * net of zero from lines the code deliberately kept (C-1 routes the credit
+ * note here, C-2 stops discarding its negative rows). This is NOT a
+ * disagreement between Provet's two accounts — both are correct — so it must
+ * be detected and named before `detectTotalMismatch` below can misread it as
+ * one.
+ *
+ * Sign-convention independent on purpose: whatever combination of positive
+ * and negative lines nets to zero cents counts, not just "one positive line
+ * plus one canceling negative line."
+ *
+ * `expectedTotal === 0` is excluded: a consultation with a genuinely zero
+ * header and no lines is not a reversal, it is simply empty (and
+ * `EmptyConsultationError` already covers emitting it).
+ *
+ * `items.length === 0` is ALSO excluded, and deliberately not merged with the
+ * check above: an invoice with a header total and NO rows behind it at all
+ * (Provet dropped every line, or the fetch never populated them) is the
+ * pre-existing C-11 case — flagged as a mismatch on purpose, precisely
+ * because it would otherwise sail through with 0 == 0. A genuine C-16
+ * reversal always has real, opposite-signed lines behind the net zero; an
+ * empty array is a different failure with a different guard already
+ * covering it.
+ */
+export function detectFullReversal(expectedTotal: number, items: QuickEditItem[]): boolean {
+  if (items.length === 0) return false;
+  const itemsCents = toCents(items.reduce((acc, i) => acc + i.lineTotal, 0));
+  const expectedCents = toCents(expectedTotal);
+  return itemsCents === 0 && expectedCents !== 0;
 }
 
 /**
@@ -79,8 +122,14 @@ export interface ConsultationQueueRow {
  * passes on its own arithmetic, and an invoice carrying a header total with no
  * rows behind it is flagged, which is what we want — emitting it would hit
  * `EmptyConsultationError` anyway.
+ *
+ * C-16: checked first. A fully reversed consultation (see `detectFullReversal`)
+ * is deliberately reported as `null` here — not a mismatch — so the caller must
+ * use `detectFullReversal` separately to tell "nothing to review" apart from
+ * "these two numbers disagree."
  */
 export function detectTotalMismatch(expectedTotal: number, items: QuickEditItem[]): QueueTotalMismatch | null {
+  if (detectFullReversal(expectedTotal, items)) return null;
   const itemsCents = toCents(items.reduce((acc, i) => acc + i.lineTotal, 0));
   const expectedCents = toCents(expectedTotal);
   if (itemsCents === expectedCents) return null;
@@ -133,6 +182,7 @@ export function buildConsultationQueue(consultations: Consultation[], clients: C
       total: c.total, paymentMethod: c.payment_method,
       provetStatus: c.status, invoiceStatus: "Draft", createdAt: c.created_at,
       totalMismatch: detectTotalMismatch(c.total, items),
+      fullyReversed: detectFullReversal(c.total, items),
     };
   });
 }
@@ -147,8 +197,10 @@ export interface QuickEditDetail {
   email: string; phone: string; patientName: string;
   paymentMethod: string; paymentMethodOptions: PaymentOption[];
   total: number; items: QuickEditItem[]; createdAt: Date;
-  /** C-11 guard, carried through from the queue row. `null` when they agree. */
+  /** C-11 guard, carried through from the queue row. `null` when they agree, OR when `fullyReversed` is true. */
   totalMismatch: QueueTotalMismatch | null;
+  /** C-16 guard, carried through from the queue row. See `ConsultationQueueRow.fullyReversed`. */
+  fullyReversed: boolean;
 }
 
 /** Zod schema for the Quick-Edit form (reuses identificationSchema for NIT/Cédula rules). */
@@ -196,6 +248,7 @@ export function buildQuickEditDetail(consultations: Consultation[], clients: Cli
     total: consultation.total, createdAt: consultation.created_at,
     items,
     totalMismatch: detectTotalMismatch(consultation.total, items),
+    fullyReversed: detectFullReversal(consultation.total, items),
   };
 }
 
@@ -269,8 +322,20 @@ export function buildInvoicePayloadFromQuickEdit(
       .find((i) => !Number.isFinite(i.lineTotal));
     if (corrupt) throw new CorruptInvoiceRowError(corrupt.name, corrupt.lineTotal);
 
+    const expectedTotal = consultation ? consultation.total : fallbackDetail?.total;
+    const emissionItems = consultation
+      ? consultation.items.map((i) => ({ code: i.code, name: i.name, quantity: i.quantity, lineTotal: i.unit_price * i.quantity * (1 + i.tax_rate) - i.discount }))
+      : fallbackDetail?.items ?? [];
+
+    // C-16. Checked before the generic mismatch below and named separately:
+    // Σ items == 0 against a non-zero header is a consultation billed and
+    // then reversed in full, not a disagreement — see ReversedConsultationError.
+    if (expectedTotal !== undefined && detectFullReversal(expectedTotal, emissionItems)) {
+      throw new ReversedConsultationError(expectedTotal);
+    }
+
     const mismatch = consultation
-      ? detectTotalMismatch(consultation.total, consultation.items.map((i) => ({ code: i.code, name: i.name, quantity: i.quantity, lineTotal: i.unit_price * i.quantity * (1 + i.tax_rate) - i.discount })))
+      ? detectTotalMismatch(consultation.total, emissionItems)
       : fallbackDetail?.totalMismatch ?? null;
     if (mismatch) throw new TotalMismatchError(mismatch);
   }

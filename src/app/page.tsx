@@ -153,6 +153,7 @@ export default function HomePage() {
       items: row.items,
       createdAt: row.createdAt,
       totalMismatch: row.totalMismatch,
+      fullyReversed: row.fullyReversed,
     };
     return fallback;
   }, [selectedId, rows, options.mapping]);
@@ -247,6 +248,7 @@ export default function HomePage() {
             items: row.items,
             createdAt: row.createdAt,
             totalMismatch: row.totalMismatch,
+            fullyReversed: row.fullyReversed,
           }
         : annulTarget.formSnapshot
         ? {
@@ -263,6 +265,7 @@ export default function HomePage() {
             items: [],
             createdAt: annulTarget.emittedAt,
             totalMismatch: null,
+            fullyReversed: false,
           }
         : undefined;
       if (!fallbackDetail) throw new Error("missing_source_data");

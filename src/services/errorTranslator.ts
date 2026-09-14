@@ -141,6 +141,19 @@ const ERROR_TRANSLATIONS: Record<string, TranslationEntry> = {
     quickAction: "none",
     retryable: false,
   },
+  reconciliation_truncated: {
+    // C-7. NOT the same message as ambiguous_reconciliation: here nothing was
+    // found, but the search gave up before reaching the end of the listing —
+    // absence is unconfirmed, not contradicted. retryable: false on purpose,
+    // same reasoning as ambiguous_reconciliation: a blind retry could stamp a
+    // genuine duplicate at the DIAN.
+    message:
+      "No se pudo confirmar si la factura ya existe en Siigo: la verificación se detuvo antes de revisar todo el listado. " +
+      "Revise manualmente en Siigo Nube antes de reintentar.",
+    severity: "error",
+    quickAction: "none",
+    retryable: false,
+  },
   requests_limit: {
     message: "Servidor de facturación ocupado. Reintento automático en curso...",
     severity: "warning",

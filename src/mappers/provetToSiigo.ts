@@ -135,6 +135,33 @@ export class TotalMismatchError extends Error {
   }
 }
 
+/**
+ * C-16 — thrown for a consultation that was billed and then reversed in
+ * full: an invoice and a credit note that cancel each other to the cent.
+ * `detectFullReversal` (in `consultationQueue.ts`) is what tells this apart
+ * from `TotalMismatchError` — Σ items == 0 while Provet's header keeps the
+ * original, pre-reversal amount. Both numbers are correct here; there is
+ * simply nothing left to invoice, which is a different situation from "one
+ * of the two is wrong and we cannot tell which."
+ *
+ * `TotalMismatchError`'s message ("uno de los dos importes es incorrecto")
+ * would be false in this case, so this gets its own name and its own
+ * message rather than reusing that guard's output — see `PROJECT_STATE.md`,
+ * hallazgo C-16.
+ */
+export class ReversedConsultationError extends Error {
+  readonly expectedTotal: number;
+  constructor(expectedTotal: number) {
+    super(
+      `Esta consulta fue facturada por ${expectedTotal.toFixed(2)} y luego revertida por completo con una nota ` +
+        `crédito por el mismo importe: las líneas que quedan suman $0.00. No hay factura que emitir ni descuadre que ` +
+        `revisar — ambos importes de Provet son correctos.`,
+    );
+    this.name = "ReversedConsultationError";
+    this.expectedTotal = expectedTotal;
+  }
+}
+
 /** Empty-catalog default — emission REQUIRES an explicit dynamic payment mapping. */
 const DEFAULT_OPTIONS: ProvetToSiigoOptions = {
   mapping: { items: [], payments: [], version: 0, updatedAt: "1970-01-01T00:00:00.000Z", documentTypeId: null, creditNoteDocumentTypeId: null, sellerId: null },
