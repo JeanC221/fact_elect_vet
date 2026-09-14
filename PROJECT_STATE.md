@@ -54,6 +54,24 @@ origen; la referencia válida a partir de hoy es la columna `#`.
 "funcionalmente terminado"; el de código decía que la anulación no puede funcionar.
 **Gana el de código.** "Terminado" es falso mientras la anulación legal no exista.
 
+### Nombres de sesión vs. alcance — leer antes de renumerar nada
+
+**Los `prompt_sesion_N.md` son etiquetas de chat, no fases del proyecto.** La
+sesión 2 se abrió con ocho hallazgos (C-11, C-1, C-2, C-3, C-4, C-5, C-6, C-7)
+y cerró tres. Los cinco restantes viven en `prompt_sesion_3.md` **sin dejar de
+pertenecer al alcance de la sesión 2**: el archivo se llamó así al empaquetar el
+cierre y el nombre se quedó.
+
+**La referencia válida de alcance es la columna `#` de este backlog.** Si un
+prompt y esta tabla se contradicen sobre a qué sesión pertenece un hallazgo,
+gana esta tabla. Un hallazgo **nunca** se renumera para que cuadre con el
+nombre de un archivo: los prefijos antiguos ya se retiraron una vez por eso
+mismo.
+
+Y esta nota vive **solo aquí**. No se copia al conocimiento del Project de
+Claude: duplicar gobernanza sin mecanismo de sincronización ya provocó que un
+agente leyera un `.clinerules` viejo durante varias sesiones.
+
 ### Bloqueantes de corrección — sesión 2 (ruta crítica de la factura)
 
 | # | Origen | Qué | Evidencia |

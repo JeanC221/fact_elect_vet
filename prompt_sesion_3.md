@@ -5,6 +5,23 @@
 > **45 files / 664 tests** · `next build` exit 0 `(8/8)`, 20 rutas, 4 estáticas ·
 > `npm audit` 0/0.
 
+## Sobre el nombre de este archivo
+
+**"Sesión 3" es el nombre de este prompt, no una sesión nueva del plan.** Los
+hallazgos de abajo —C-16, C-4, C-7, C-5, C-6— pertenecen al alcance de la
+sesión 2, que se abrió con ocho y cerró tres (C-11, C-1, C-2). El resto sigue
+aquí.
+
+La numeración de sesiones se desalineó porque C-1 y C-2 destaparon trabajo que
+no estaba previsto: dos enunciados falsos, una convención de signo inexistente
+y que el tenant de pruebas no es el de la clínica.
+
+**Convención a partir de ahora:** `prompt_sesion_N.md` es una etiqueta de chat,
+no una fase del proyecto. **La referencia válida de alcance es siempre la
+columna `#` del backlog consolidado de `PROJECT_STATE.md`.** Si un prompt y el
+backlog se contradicen sobre a qué sesión pertenece un hallazgo, gana el
+backlog. No renumerar hallazgos para que cuadren con el nombre de un archivo.
+
 ## Lee esto antes que nada
 
 **Dos de los ocho enunciados de la sesión 2 resultaron FALSOS al medirlos.**
