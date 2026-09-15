@@ -476,22 +476,23 @@ intercaló entre A-2 y C-12 tras confirmar el TTL con Jean.
 
 | # | Origen | Qué |
 |---|---|---|
-| **H-1** | N10 **reclasificado** | **Rediseño del fetch de Provet, no ajuste de paginación.** `invoice__in` funciona (8 filas vs 223 sin filtro), así que `/invoicerow/` deja de traerse entera. `/consultationitem/` se queda como está: para esa colección no hay filtro por padre y la causa raíz escrita era correcta. Medir el tamaño de lote de `invoice__in`. **Prerrequisito de infraestructura** |
-| **H-2** | nuevo 2026-09-10 | **`provetApi.ts:71` pide `/invoice` sin barra final → 301.** Cada página son dos viajes de red. Seis literales |
-| **H-3** | N1 | `Partner-Id` acepta guiones que Siigo rechaza |
-| **H-4** | N2 **BAJO→MODERADO** | Decimales invertidos. Ya no es latente: `Amoxicillin 250mg` tiene `quantity 0.028` en el tenant y Siigo admite 2 decimales |
-| **H-5** | N3 | `observations` limitado a 500 donde Siigo permite 4.000 — y ese campo lleva el marcador de reconciliación |
-| **H-6** | N4 | `payments.due_date` no modelado; un medio de pago de cartera rompe toda emisión |
-| **H-7** | N12 | `fetchInvoiceFile` y `getSiigoAccessToken` sin timeout |
-| **H-8** | N23 | 12 `fetch` crudos en 5 archivos. No existe `src/services/apiClient.ts` |
-| **H-9** | L2/L4 | Tres implementaciones de `America/Bogota`, dos utilidades de redondeo |
+| **H-1** | N10 **reclasificado** | **Rediseño del fetch de Provet, no ajuste de paginación.** `invoice__in` funciona (8 filas vs 223 sin filtro), así que `/invoicerow/` deja de traerse entera. `/consultationitem/` se queda como está: para esa colección no hay filtro por padre y la causa raíz escrita era correcta. Medir el tamaño de lote de `invoice__in`. **Prerrequisito de infraestructura — bloqueado en sesión 7 por falta de credenciales Provet en el entorno** |
+| **H-2** ✅ **CERRADO 2026-09-15 (sesión 7)** — ver `### Resolved — sesión 7, Higiene` | nuevo 2026-09-10 | **`provetApi.ts` pedía 7 colecciones sin barra final → 301.** Cada página, dos viajes de red. Recontado en sesión 7: son 7 literales, no 6 (`/consultation`, `/client`, `/patient`, `/invoice` ×2, `/phonenumber`, `/consultationitem`, `/invoicerow`) |
+| **H-3** ✅ **CERRADO 2026-09-15 (sesión 7)** — ver `### Resolved — sesión 7, Higiene` | N1 | `Partner-Id` acepta guiones que Siigo rechaza |
+| **H-4** ✅ **CERRADO 2026-09-15 (sesión 7)** — ver `### Resolved — sesión 7, Higiene` | N2 **BAJO→MODERADO** | Decimales invertidos. Ya no es latente: `Amoxicillin 250mg` tiene `quantity 0.028` en el tenant y Siigo admite 2 decimales |
+| **H-5** ✅ **CERRADO 2026-09-15 (sesión 7)** — ver `### Resolved — sesión 7, Higiene` | N3 | `observations` limitado a 500 donde Siigo permite 4.000 — y ese campo lleva el marcador de reconciliación |
+| **H-6** ✅ **CERRADO 2026-09-15 (sesión 7)** — ver `### Resolved — sesión 7, Higiene` | N4 | `payments.due_date` no modelado; un medio de pago de cartera rompe toda emisión |
+| **H-7** ✅ **CERRADO 2026-09-15 (sesión 7)** — ver `### Resolved — sesión 7, Higiene` | N12 | `fetchInvoiceFile` y `getSiigoAccessToken` sin timeout |
+| **H-8** ✅ **CERRADO 2026-09-15 (sesión 7)** — ver `### Resolved — sesión 7, H-19/H-8` | N23 | 18 `fetch` crudos en 7 archivos (recontado en sesión 7 — el "12 en 5" original no sumaba). No existía `src/services/apiClient.ts` |
+| **H-9** ✅ **CERRADO 2026-09-15 (sesión 7)** — ver `### Resolved — sesión 7, Higiene` | L2/L4 | **Cuatro** implementaciones de `America/Bogota` (no tres). Redondeo (`round2`/`toCents`) quedó **sin tocar** — ver riesgo nuevo N24 abajo |
 | **H-10** ✅ **CERRADO 2026-09-15 (sesión 6)** — ver `### Resolved — sesión 6, H-10` | D-c | **CI en GitHub Actions.** ~15 min. El mayor retorno por esfuerzo del backlog |
-| **H-11** | D-d | **Smoke test de emisión autenticado.** Habría atrapado 3 de los 4 fallos que escaparon a los tres gates |
-| **H-12** | D-j | Sanear texto también en `creditNote.ts:44` |
-| **H-13** | D-k | `customer_settings` en la tabla de traducción de errores |
-| **H-14** | P-1 rama A | **Detector de anulaciones en Provet.** Especificado y sin incógnitas: `/invoice/?credit_note__is=true&modified__gte=` → id del path de `credit_note_original_invoice` → factura → consulta. **Solo detector, nunca emisor automático.** Nota: C-1 hay que arreglarlo aunque este detector no se construya |
-| **H-19** | nuevo 2026-09-14 (sesión 3) | **`invoice_claims.ts` no tiene archivo de test propio en todo el proyecto.** Detectado por mutación manual al cerrar C-10: el `WHERE status = 'emitted'` de `acquireAnnulmentClaim` (y su análogo preexistente en `acquireInvoiceClaim`) puede borrarse sin que ningún test lo note — toda la suite de `invoice_claims` mockea `getPool().query` con respuestas canned, agnósticas del SQL real enviado. Un test que capture la query exacta (no solo el resultado que el mock decide devolver) cerraría el hueco para ambas funciones a la vez |
-| **H-19** | nuevo 2026-09-14 (sesión 3) | **`invoice_claims` no tiene archivo de test propio en todo el proyecto.** Los guards `WHERE status = 'emitted'`/`'annulling'` de `acquireInvoiceClaim`/`acquireAnnulmentClaim` solo se ejercitan indirectamente vía tests de ruta que mockean `getPool().query` con respuestas canned — un mutante que borra esa cláusula WHERE no lo detecta ningún test existente (confirmado por mutación manual en la sesión 3). Un test dedicado contra SQL real (o al menos contra una cláusula WHERE explícita en el mock) cerraría el hueco |
+| **H-11** | D-d | **Smoke test de emisión autenticado.** Habría atrapado 3 de los 4 fallos que escaparon a los tres gates. **Bloqueado en sesión 7: requiere credenciales sandbox reales, no disponibles en el entorno** |
+| **H-12** ✅ **CERRADO 2026-09-15 (sesión 7)** — ver `### Resolved — sesión 7, Higiene` | D-j | Sanear texto también en `creditNote.ts` (fallback `?? reason` de `annulmentReasonLabel`) |
+| **H-13** ✅ **CERRADO 2026-09-15 (sesión 7), ya estaba resuelto** — ver `### Resolved — sesión 7, Higiene` | D-k | `customer_settings` en la tabla de traducción de errores. **Hallazgo obsoleto: la entrada ya existía en `ERROR_TRANSLATIONS`** de una sesión anterior sin marcar en el backlog; solo le faltaba test dedicado |
+| **H-14** | P-1 rama A | **Detector de anulaciones en Provet.** Especificado y sin incógnitas: `/invoice/?credit_note__is=true&modified__gte=` → id del path de `credit_note_original_invoice` → factura → consulta. **Solo detector, nunca emisor automático.** Nota: C-1 hay que arreglarlo aunque este detector no se construya. **No tomado en sesión 7 a propósito: es feature nueva, no higiene — requiere decidir qué hace la app con lo detectado (panel admin? solo log?) antes de escribir código, y esa decisión de diseño no está tomada** |
+| **N24** | nuevo, sesión 7 | **Riesgo de redondeo real, no solo estilo — descubierto al mirar H-9.** `toCents(n) = Math.round(n*100)` puede redondear mal en el límite exacto `x.xx5` (ej. `1.005` → 100 en vez de 101) por el error de punto flotante de la multiplicación directa. `round2` en `provetToSiigo.ts` usa el truco de notación exponencial (`` `${n}e2` ``) que sí lo evita. `toCents` se usa en los guards de coincidencia de totales de C-11/C-12 (ruta crítica legal) — un valor exactamente en el borde podría dar un falso mismatch/match. **No tocado sin confirmación explícita de Jean: cambiar la aritmética de un guard fiscal ya probado necesita diseño propuesto primero, no un fix silencioso de higiene** |
+| **N25** | nuevo, sesión 7 | `creditNote.ts` tiene el mismo cap de `observations` a 500 que tenía la factura (H-5), pero el doc oficial de Siigo no fija un número explícito para notas crédito (solo "Comentarios adicionales"). **No tocado sin evidencia** — si Jean puede confirmar el límite real (Postman/soporte Siigo), se sube a H-5 o se abre aparte |
+| **H-19** ✅ **CERRADO 2026-09-15 (sesión 7)** — ver `### Resolved — sesión 7, H-19/H-8` | nuevo 2026-09-14 (sesión 3) | **`invoice_claims` no tenía archivo de test propio en todo el proyecto.** Los guards `WHERE status = 'emitted'`/`'annulling'` de `acquireInvoiceClaim`/`acquireAnnulmentClaim` solo se ejercitaban indirectamente vía tests de ruta que mockeaban `getPool().query` con respuestas canned — un mutante que borraba esa cláusula WHERE no lo detectaba ningún test existente (confirmado por mutación manual en la sesión 3, y de nuevo — ya muerto — en la sesión 7) |
 
 ### Resolved — sesión 6, H-10 (2026-09-15)
 
@@ -533,6 +534,195 @@ coincidió al dígito con `prompt_sesion_6.md`.
   de Jean —Node 24.15.0— ni el CI —Node 24 fijado en `setup-node`— lo verán).
   El YAML se validó por separado con un parser antes de entregarlo (no es
   posible disparar un run real de GitHub Actions desde este entorno).
+
+### Resolved — sesión 7, Higiene (2026-09-15)
+
+Base: `71235bb4abdc307d2c781996d2efb1013d06f2ba` (HEAD real de `main` al
+clonar, confirmado — commit directo, sin PR pendiente). Baseline verificado
+antes de tocar nada: 47 files / 733 tests, `tsc` limpio, build `(8/8)`, 20
+rutas, 4 estáticas, `npm audit` 0/0 — coincidió al dígito con
+`prompt_sesion_7.md`. Confirmado además en GitHub Actions: el run de CI sobre
+ese mismo commit terminó en **Success** (job `Gates`, 1m 4s). Orden ejecutado:
+H-19 → H-8, con los tres gates completos entre cada uno.
+
+- **H-19 — `src/services/invoiceClaims.test.ts` (nuevo, 49 tests).** Cierra
+  el hueco de dos formas complementarias por cada query con guard: (1)
+  aserción literal sobre el SQL enviado a `queryMock` (falla si se borra o
+  reescribe la cláusula), y (2) un fake de `pg` que lee el SQL real vía regex
+  (`SET status = 'x'`, `AND status = 'y'`, `status <> 'y'`) en vez de decidir
+  el resultado por qué función se está probando — si el guard desaparece del
+  SQL fuente, el regex del fake deja de matchear y reproduce lo que haría
+  Postgres real sin esa cláusula (write incondicional), así que las
+  aserciones de comportamiento fallan también, independientemente de (1).
+  También cubre, sin test dedicado previo: `getInvoiceClaim` (incluida la
+  rama defensiva de `claimed_at` como string), `listOpenClaims`,
+  `releaseClaimAsAdmin` (los tres outcomes), `markClaimEmitted`/
+  `markClaimUnknown` (truncación a 500 chars), y todas las ramas de
+  `claimConflictMessage`/`annulmentConflictMessage`, incluida la rama
+  `default` ante un status corrupto.
+  - **Mutación manual (sin Stryker), 3 mutantes verificados, los 3 muertos:**
+    borrar `WHERE invoice_claims.status = 'annulled'` de `acquireInvoiceClaim`
+    (6 tests fallan), borrar `AND status = 'emitted'` de
+    `acquireAnnulmentClaim` — **el hallazgo original de H-19, sobrevivió sin
+    detectar en la sesión 3** (5 tests fallan), y borrar
+    `AND status = 'annulling'` de `markClaimAnnulled` (2 tests fallan).
+    `invoiceClaims.ts` verificado idéntico al HEAD tras restaurar cada
+    mutante (`diff` limpio).
+- **H-8 — `src/services/apiClient.ts` (nuevo) + refactor de 7 archivos.**
+  Inventario propio antes de diseñar (el "12 fetch en 5 archivos" de
+  `docs/audits/AUDITORIA_FACT_ELECT_VET_2026-09-09.md` no sumaba ni
+  internamente y está fechado antes de que existieran los hooks actuales):
+  **18 `fetch` crudos en 7 archivos** (`page.tsx` 5, `settings/mapping/page.tsx`
+  4, `settings/credentials/page.tsx` 3, `InvoiceClaimsPanel.tsx` 2,
+  `HealthCheckStatus.tsx` 1, `emissionOptionsStorage.ts` 2,
+  `useConsultationQueue.ts` 1). Diseño confirmado con Jean antes de tocar
+  código: `apiRequest(path, options)` centraliza **solo** construcción de
+  headers (`Content-Type`, `X-Idempotency-Key`) y `res.json().catch(() =>
+  null)` — **nunca** reintenta, **nunca** valida con Zod, **nunca** lanza por
+  status no-2xx. Cada call site conserva su propia lógica de 503/409/403,
+  `retryWithBackoff`, parseo Zod y fire-and-forget, porque estas 18 llamadas
+  genuinamente no comparten esa forma (inventariado antes de escribir una
+  línea). El download de blob (`handleDownload` en `page.tsx`) queda **fuera**
+  de `apiClient` — no es JSON.
+  - **Cambio de comportamiento documentado:** en las dos rutas legalmente
+    críticas (`POST /api/invoices`, `POST /api/credit-notes`), un 2xx con
+    body no-JSON antes lanzaba un `SyntaxError` crudo (`res.json()` sin
+    catch); ahora `apiRequest` devuelve `data: null` y cada call site lo
+    convierte explícitamente en fallo ruidoso — `credit-notes` con un
+    `throw new Error(...)` explícito ante `data === null`, `invoices` dejando
+    que `siigoInvoiceResponseSchema.parse(null)` lance el `ZodError`. Mismo
+    resultado observable (falla ruidosa, ninguna emisión fantasma), mecanismo
+    distinto — sin test hermano de `page.tsx` que lo cubra (Vitest usa
+    `environment: "node"`, sin DOM — brecha estructural preexistente, no de
+    esta sesión). **Pedirle a Jean que lo confirme en un preview antes de
+    mergear.**
+  - `src/services/apiClient.test.ts` (nuevo, 14 tests): construcción de la
+    request (headers, serialización string-vs-objeto, idempotencia, merge de
+    headers del caller) y manejo de la respuesta (200/429/503/409, body no-JSON
+    → `null` sin lanzar, fallo de red → promesa rechazada).
+- **Verification (H-19/H-8 solos):** `npx tsc --noEmit` ✅ exit 0 |
+  `npx vitest run` ✅ **49 files / 796 tests** (733 → 796) | `next build` ✅
+  exit 0, sin cambio de forma | `npm audit` **0/0, sin cambio**.
+
+**El chat continuó en la misma sesión** después de entregar el ZIP de
+H-19/H-8 (nunca aplicado por Jean): "termina los que puedas usar con Sonnet
+en este chat, si no rompe nada, menos los de Opus". Se tomaron 7 hallazgos
+de Higiene más, en orden, con los tres gates completos + mutación manual
+entre cada uno. El ZIP final de esta sesión (más abajo) reemplaza al
+`sesion7_higiene_apiclient.zip` parcial — **no aplicar ese ZIP intermedio**.
+
+- **H-3 — `Partner-Id` ya no acepta guiones.** `partnerIdHeaderSchema` en
+  `siigoApi.ts` pasa de `/^[A-Za-z0-9-]+$/` a `/^[A-Za-z0-9]+$/`, igual que
+  `idempotencyKeyHeaderSchema` en el mismo archivo y que `credentialsSchema`
+  en `mappers/credentials.ts` (que ya estaba bien — el hueco era solo en la
+  defensa server-side). 1 test nuevo en `siigoApi.test.ts`.
+- **H-2 — 7 literales de Provet con barra final**, no 6 como decía la
+  auditoría vieja (recontado): `/consultation/`, `/client/`, `/patient/`,
+  `/invoice/` (×2, incluida la variante filtrada de C-12), `/phonenumber/`,
+  `/consultationitem/`, `/invoicerow/`, todos en `provetApi.ts`. Test
+  table-driven existente extendido con un assert de barra final por colección
+  en vez de un describe nuevo (evita duplicar la tabla).
+- **H-7 — timeout con `AbortController` en `fetchInvoiceFile` (descarga
+  PDF/XML) y `getSiigoAccessToken` (`/auth`)**, las dos únicas llamadas a
+  Siigo sin él (`postToSiigo` ya lo tenía). Mismo `SIIGO_POST_TIMEOUT_MS`
+  (120s), ahora exportado desde `siigoApi.ts` y reusado en `siigoAuth.ts`
+  para no duplicar el número. 2 tests nuevos con `vi.useFakeTimers()` +
+  `vi.advanceTimersByTimeAsync(120_000)` — sin este fix, cada test colgaba
+  literalmente 5s hasta el timeout de Vitest, lo cual por sí solo demuestra
+  el hallazgo.
+- **H-4 — decimales invertidos, corregido.** `siigoInvoiceItemSchema` en
+  `schemas/siigo.ts`: `quantity` gana `hasMaxDecimals(n, 2)` (antes sin
+  validar — una cantidad de dosificación de Provet como `0.028` pasaba Zod y
+  Siigo la rechazaba, quemando el Idempotency-Key); `price`/`taxed_price`
+  suben de `hasMaxDecimals(n, 2)` a `hasMaxDecimals(n, 6)`, el límite real
+  documentado (`API_SIIGO_REFERENCIA_COMPLETA.md`, dos secciones distintas lo
+  confirman, incluida la nota nº17: *"quantity admite 2 decimales; price,
+  6"*). 3 tests de `siigo.test.ts` que fijaban el límite viejo corregidos al
+  contrato real (no son casos nuevos: son los mismos casos con la aserción
+  invertida — el patrón "tests que blindan el contrato equivocado" ya visto
+  en `creditNote.test.ts` antes de la sesión 3), más 3 tests nuevos.
+- **H-5 — `observations` de facturas: 500 → 4.000 caracteres**
+  (`siigoInvoicePayloadSchema` en `schemas/siigo.ts`), el límite real
+  documentado. 2 tests de límite corregidos, 1 nuevo. **`creditNote.ts` NO
+  se tocó** — mismo cap de 500, pero sin evidencia documentada de un número
+  distinto para notas crédito (ver N25 en el backlog).
+- **H-6 — bloqueo de emisión si el medio de pago mapeado requiere
+  `due_date`.** Nueva `PaymentTypeRequiresDueDateError` en `provetToSiigo.ts`
+  (mismo patrón que `MissingEmissionSettingError`/`EmptyConsultationError`):
+  Siigo exige `payments[].due_date` para medios de cartera y esta integración
+  no tiene de dónde sacar esa fecha (Provet no la modela), así que se
+  bloquea en vez de inventar una fecha o dejar que Siigo rechace el
+  documento con `parameter_required` quemando la Idempotency-Key. Hilado
+  completo, no solo el guard: `ProvetToSiigoOptions.siigoPaymentTypes?`
+  (opcional, default `[]`, retrocompatible con todo call site existente) →
+  `readPaymentTypes()` nuevo en `emissionOptionsStorage.ts` (mismo patrón que
+  `readProducts`, pero cae a `[]`, no a un mock, si no hay nada cacheado —
+  nunca más permisivo que el comportamiento previo a H-6) → conectado en
+  `useEmissionOptions.ts` (estado + listener de `storage` + valor de
+  retorno). 3 tests nuevos en `provetToSiigo.test.ts`.
+- **H-9 — cuatro implementaciones de `America/Bogota` (no tres), unificadas
+  en una sola: `formatColombiaDate(d: Date)` nueva en `schemas/provet.ts`**,
+  junto a `toCents`/`hasMaxDecimals` (mismo precedente de primitivas
+  compartidas). Las cuatro quedan como wrappers de una línea sobre la
+  primitiva: `todayInColombia()` en `provetToSiigo.ts`, `formatDate()` en
+  `consultationQueue.ts`, y el `colombiaDate(daysAgo)` local — antes
+  duplicado byte a byte — en `invoiceReconciliation.ts` y
+  `creditNoteReconciliation.ts`. Comportamiento idéntico, cero tests
+  rotos. 3 tests nuevos dedicados a `formatColombiaDate` en
+  `provet.test.ts` (no tenía ninguno propio, solo cobertura indirecta vía
+  cada consumidor). **El redondeo (`round2`/`toCents`) se dejó sin tocar a
+  propósito — ver N24, riesgo real descubierto de paso, no un problema de
+  estilo.**
+- **H-12 — sanear texto también en `creditNote.ts` (fallback sin sanear).**
+  `annulmentReasonLabel` devolvía `ANNULMENT_REASONS.find(...)?.label ??
+  reason` — las etiquetas fijas siempre son seguras, pero el fallback
+  `?? reason` (una rama defensiva para un valor fuera del enum
+  `AnnulmentReason`, nunca alcanzable hoy a través de la UI tipada, pero no
+  garantizado en runtime) reenviaba el string crudo sin pasar por
+  `sanitizeText`. Ahora todo el valor de retorno se sanea. 1 test nuevo que
+  fuerza la rama con un `as AnnulmentReason` corrupto.
+- **H-13 — ya estaba resuelto.** `customer_settings` ya vivía en
+  `ERROR_TRANSLATIONS` (`errorTranslator.ts`) con mensaje, severidad,
+  `quickAction` y `retryable` completos — de una sesión anterior que nunca
+  actualizó el backlog. Solo le faltaba test dedicado (como a varias otras
+  entradas de la tabla, que no es un hallazgo nuevo: es una brecha de
+  cobertura general de la tabla, no específica de `customer_settings`). 1
+  test nuevo.
+- **H-11 y H-1, no tomados — bloqueados por falta de acceso, no por
+  complejidad.** H-11 (smoke test autenticado) necesita credenciales sandbox
+  reales de Siigo; H-1 (rediseño del fetch con `invoice__in`) necesita medir
+  el tamaño de lote real contra Provet. Ninguna de las dos existe en este
+  entorno (`.env.example` vacío, nada en `env`) — mismo bloqueo que P-2.
+- **H-14, no tomado a propósito — es feature nueva, no higiene.** El
+  detector de anulaciones en Provet cambia qué hace la app con datos
+  detectados (¿panel admin? ¿solo log?), una decisión de diseño no tomada.
+  Tratarlo como hygiene y decidir la UI unilateralmente violaría "ningún
+  cambio de modelo/flujo grande sin proponer el diseño primero".
+- **Dos hallazgos nuevos, deliberadamente NO arreglados sin confirmación de
+  Jean — registrados como N24 y N25 en el backlog** (ver tabla): el riesgo
+  de redondeo en `toCents` cerca del borde `x.xx5` (afecta guards fiscales
+  C-11/C-12), y el cap de `observations` en `creditNote.ts` sin evidencia de
+  cuál es el límite real para notas crédito.
+- **Verification (conjunto completo de la sesión):** `npx tsc --noEmit` ✅
+  exit 0 (corrido tras cada uno de los 9 hallazgos) | `npx vitest run` ✅
+  **49 files / 812 tests** (733 → 812: +79 en total — 49 H-19, 14 H-8, 1 H-3,
+  0 neto H-2 [assert extendido, no test nuevo], 2 H-7, 6 H-4, 3 H-5, 3 H-6, 3
+  H-9, 1 H-12, 1 H-13) | `env -u NODE_ENV npx next build` ✅ exit 0, **20
+  rutas, 4 estáticas, `(8/8)`, sin cambio de forma** | `npm audit` **0/0, sin
+  cambio**.
+- **Mutación manual (sin Stryker), un mutante por hallazgo con fix de
+  lógica, todos verificados muertos y restaurados:** H-3 (guion en
+  Partner-Id), H-2 (una colección sin barra), H-7 ×2 (signal ausente en cada
+  función), H-4 ×2 (quantity sin validar, price a 2 decimales), H-5 (cap a
+  500), H-6 (guard removido), H-9 (timezone a UTC), H-12 (sanitizeText
+  removido). H-13 no aplica — no había lógica nueva que mutar.
+- **Entregable:** un solo ZIP (`sesion7_higiene_completa.zip`), SHA-256 por
+  archivo dado en el chat — **reemplaza** al `sesion7_higiene_apiclient.zip`
+  entregado a mitad de la sesión (no aplicar ese). **No aplicado todavía** —
+  Jean lo aplica con `rsync` y confirma los gates de su lado antes de
+  mergear.
+
+
 - **Confirmado en producción, commit `efc52b8` (2026-09-15):** Jean aplicó,
   corrió los 3 gates de su lado (idénticos, sin cambio de forma) y pusheó a
   `main`. El primer run real de GitHub Actions pasó en verde — **47/47
@@ -679,6 +869,49 @@ coincidió al dígito con `prompt_sesion_6.md`.
 ---
 
 ## Last Update
+- **Date:** 2026-09-15
+- **Agent:** Claude (`prompt_sesion_7.md` — **sesión 7**, Higiene — 9
+  hallazgos cerrados: H-19, H-8, H-3, H-2, H-7, H-4, H-5, H-6, H-9, H-12,
+  H-13)
+- **Base commit:** `71235bb4abdc307d2c781996d2efb1013d06f2ba` (HEAD real de
+  `main` al clonar, commit directo, sin PR pendiente de merge). Baseline
+  verificado antes de tocar nada: 47 files / 733 tests, `tsc` limpio, build
+  `(8/8)`, 20 rutas, 4 estáticas, `npm audit` 0/0 — coincidió al dígito con
+  `prompt_sesion_7.md`. Confirmado además en GitHub Actions: run de CI sobre
+  ese commit en **Success**.
+- **Completed Task:** 11 hallazgos cerrados (H-19, H-8, H-3, H-2, H-7, H-4,
+  H-5, H-6, H-9, H-12, H-13 — el último ya estaba resuelto, solo le faltaba
+  test). Detalle completo de cada uno en `### Resolved — sesión 7, Higiene`
+  más arriba. **No tomados a propósito:** H-1 y H-11 (bloqueados por falta
+  de credenciales Provet/Siigo en el entorno), H-14 (es feature nueva, no
+  higiene — requiere decisión de diseño no tomada). **Dos hallazgos nuevos
+  registrados sin arreglar, por impacto fiscal/falta de evidencia:** N24
+  (riesgo real de redondeo en `toCents` cerca de `x.xx5`, afecta guards
+  C-11/C-12) y N25 (cap de `observations` en `creditNote.ts` sin evidencia
+  del límite real para notas crédito).
+- **Verification:** `npx tsc --noEmit` ✅ exit 0 | `npx vitest run` ✅ **49
+  files / 812 tests** (733 → 812, +79) | `env -u NODE_ENV npx next build` ✅
+  exit 0, **20 rutas, 4 estáticas, `(8/8)`, sin cambio de forma** | `npm
+  audit` **0/0, sin cambio**. Mutación manual: un mutante por cada fix con
+  lógica nueva, todos verificados muertos y el archivo restaurado idéntico
+  al HEAD (`diff` limpio) antes de seguir con el siguiente hallazgo.
+- **Entregable:** `sesion7_higiene_completa.zip`, SHA-256 por archivo dado
+  en el chat — **reemplaza** al `sesion7_higiene_apiclient.zip` entregado a
+  mitad de la sesión (no aplicar ese, solo el final). **No aplicado
+  todavía** — Jean lo aplica con `rsync` y confirma los gates de su lado
+  antes de mergear.
+- **Next Pending Task:** ningún bloqueante crítico. Queda H-1 y H-11
+  (bloqueados por credenciales), H-14 (necesita diseño de qué hacer con lo
+  detectado), N24 y N25 (necesitan confirmación de Jean, no son "termínalos
+  si no rompés nada" — tienen impacto fiscal o faltan evidencia), A-4
+  (`middleware.ts` → `proxy.ts`, su propia sesión), el diseño completo de
+  A-3 (su propia sesión con Opus High — decisión explícita de Jean, no
+  re-litigar), y `### Con credenciales de producción — sesión 6` si para el
+  próximo chat ya hay credenciales. **Propuesta de prioridad, no decisión
+  tomada** — Jean confirma o redirige
+  al abrir el siguiente chat.
+
+## Previous Update (sesión 6, cierre vía prompt_sesion_6.md)
 - **Date:** 2026-09-15
 - **Agent:** Claude (`prompt_sesion_6.md` — **sesión 6**, Higiene/CI, bloque
   H-10)

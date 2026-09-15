@@ -14,6 +14,7 @@ import {
   type CredentialsConfig,
   type EnvironmentMode,
 } from "@/mappers/credentials";
+import { apiRequest } from "@/services/apiClient";
 
 const STORAGE_KEY = "fact_vet.credentialsConfig";
 const FIELD_KEYS: (keyof Credentials)[] = [
@@ -37,13 +38,13 @@ export default function CredentialsPage() {
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch("/api/emission-mode");
-        if (res.status === 503) {
+        const { ok, status, data } = await apiRequest("/api/emission-mode");
+        if (status === 503) {
           // Storage read genuinely failed — do NOT treat this as "confirmed
           // sandbox". Fall through to the local cache below and warn.
           setReadWarning(true);
-        } else if (res.ok) {
-          const parsed = parseCredentialsConfig(JSON.stringify(await res.json()));
+        } else if (ok) {
+          const parsed = parseCredentialsConfig(JSON.stringify(data));
           setMode(parsed.mode);
           setConfigured(parsed.configured);
           window.localStorage.setItem(STORAGE_KEY, serializeCredentialsConfig(parsed));
@@ -80,8 +81,8 @@ export default function CredentialsPage() {
       };
       
       window.localStorage.setItem(STORAGE_KEY, serializeCredentialsConfig(config));
-      fetch("/api/emission-mode", {
-        method: "PUT", headers: { "Content-Type": "application/json" },
+      apiRequest("/api/emission-mode", {
+        method: "PUT",
         body: serializeCredentialsConfig(config),
       }).catch(() => { /* offline/network error — local state already updated */ });
       setMode(nextMode);
@@ -95,13 +96,11 @@ export default function CredentialsPage() {
   // Live credential validation: POSTs values to /api/credentials/health (never persisted).
   const handleTestConnection = useCallback(async (values: Credentials): Promise<boolean> => {
     try {
-      const res = await fetch("/api/credentials/health", {
+      const { ok, data } = await apiRequest<{ ok?: boolean }>("/api/credentials/health", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(values),
+        body: values,
       });
-      const data = (await res.json()) as { ok?: boolean };
-      return res.ok && data.ok === true;
+      return ok && data?.ok === true;
     } catch {
       return false;
     }

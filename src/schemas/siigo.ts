@@ -132,7 +132,7 @@ export const siigoInvoiceItemSchema = z
   .object({
     code: z.string().trim().min(1).max(50),
     description: sanitizedText({ max: 200 }),
-    quantity: z.number().positive().max(1e6),
+    quantity: z.number().positive().max(1e6).refine((n) => hasMaxDecimals(n, 2), "Quantity max 2 decimals"),
     /**
      * Tax ids from the mapped Siigo product. Sent so the DIAN document breaks
      * the IVA out: combined with `taxed_price`, Siigo derives the taxable base
@@ -140,9 +140,16 @@ export const siigoInvoiceItemSchema = z
      * 119 + IVA 19% -> price 100, tax 19, total 119).
      */
     taxes: z.array(z.object({ id: z.number().int().positive() })).optional(),
-    price: z.number().positive().max(1e9).refine((n) => hasMaxDecimals(n, 2), "Price max 2 decimals").optional(),
+    // H-4: official doc caps price/taxed_price at 6 decimals, not 2 — the
+    // decimals cited elsewhere (`payments.value`, `advance_payment`,
+    // `tax_base`) genuinely are 2, but `items.price` is not one of them
+    // (API_SIIGO_REFERENCIA_COMPLETA.md, confirmed at two separate doc
+    // sections). Was latent while `toSiigoLine` forced `quantity: 1`; a
+    // higher-precision unit price built any other way silently rejected a
+    // valid payload.
+    price: z.number().positive().max(1e9).refine((n) => hasMaxDecimals(n, 6), "Price max 6 decimals").optional(),
     /** VAT-inclusive unit price. Siigo derives the base and the tax itself. */
-    taxed_price: z.number().positive().max(1e9).refine((n) => hasMaxDecimals(n, 2), "Taxed price max 2 decimals").optional(),
+    taxed_price: z.number().positive().max(1e9).refine((n) => hasMaxDecimals(n, 6), "Taxed price max 6 decimals").optional(),
   })
   .refine((i) => (i.price === undefined) !== (i.taxed_price === undefined), {
     message: "Each item must carry exactly one of price or taxed_price, never both and never neither",
@@ -170,7 +177,7 @@ export const siigoInvoicePayloadSchema = z.object({
    * "does a document already exist for this consultation?". Also gives the
    * clinic traceability back to Provet inside their own Siigo Nube.
    */
-  observations: z.string().max(500).optional(),
+  observations: z.string().max(4000).optional(),
   stamp: z.object({ send: z.boolean().default(false) }),
   mail: z.object({ send: z.boolean().default(false) }),
 });

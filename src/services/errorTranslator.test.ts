@@ -27,6 +27,12 @@ describe("translateSiigoError", () => {
     expect(r).toMatchObject({ severity: "error", quickAction: "edit_email", retryable: false });
   });
 
+  it("H-13 — maps customer_settings to error/edit_email/non-retryable (already in the table; was missing its own test)", () => {
+    const r = translateSiigoError(new SiigoApiError("customer_settings", "x"));
+    expect(r).toMatchObject({ code: "customer_settings", severity: "error", quickAction: "edit_email", retryable: false });
+    expect(r.message).toContain("Siigo Nube");
+  });
+
   it("maps requests_limit to warning/auto_retry/retryable", () => {
     const r = translateSiigoError(new SiigoApiError("requests_limit", "x"));
     expect(r).toMatchObject({ severity: "warning", quickAction: "auto_retry", retryable: true });

@@ -10,6 +10,7 @@ import {
   interpretReleaseResponse,
   type InvoiceClaimWire,
 } from "@/mappers/invoiceClaimsAdmin";
+import { apiRequest } from "@/services/apiClient";
 
 /**
  * Admin-only safety net for consultations wedged by a claim.
@@ -52,17 +53,17 @@ export function InvoiceClaimsPanel() {
     setIsLoading(true);
     setLoadError(null);
     try {
-      const res = await fetch("/api/invoice-claims", { cache: "no-store" });
-      if (!res.ok) {
+      const { ok, status, data } = await apiRequest("/api/invoice-claims", { cache: "no-store" });
+      if (!ok) {
         setClaims(null);
         setLoadError(
-          res.status === 403
+          status === 403
             ? "Se requiere rol de administrador para ver las emisiones bloqueadas."
             : "No se pudo consultar las emisiones bloqueadas. La lista mostrada puede no estar completa.",
         );
         return;
       }
-      const parsed = parseClaimsResponse(await res.json());
+      const parsed = parseClaimsResponse(data);
       if (parsed === null) {
         setClaims(null);
         setLoadError("El servidor devolvió una respuesta inesperada. No se muestra la lista para no dar una falsa tranquilidad.");
@@ -87,11 +88,10 @@ export function InvoiceClaimsPanel() {
       setReleasingId(consultationId);
       setBanner(null);
       try {
-        const res = await fetch(`/api/invoice-claims?consultationId=${encodeURIComponent(consultationId)}`, {
+        const { status, data } = await apiRequest(`/api/invoice-claims?consultationId=${encodeURIComponent(consultationId)}`, {
           method: "DELETE",
         });
-        const body = await res.json().catch(() => null);
-        const outcome = interpretReleaseResponse(res.status, body, consultationId);
+        const outcome = interpretReleaseResponse(status, data, consultationId);
         setBanner({
           tone: outcome.kind === "released" ? "ok" : outcome.kind === "blocked" ? "warn" : "bad",
           text: outcome.message,

@@ -5,6 +5,7 @@ import {
   toCents,
   hasMaxDecimals,
   sanitizeText,
+  formatColombiaDate,
 } from "./provet";
 
 /**
@@ -162,6 +163,22 @@ describe("hasMaxDecimals", () => {
   it("rejects non-finite values instead of letting them through", () => {
     expect(hasMaxDecimals(Number.NaN, 2)).toBe(false);
     expect(hasMaxDecimals(Number.POSITIVE_INFINITY, 2)).toBe(false);
+  });
+});
+
+describe("formatColombiaDate — H-9, the single implementation replacing four identical copies", () => {
+  it("formats as YYYY-MM-DD", () => {
+    expect(formatColombiaDate(new Date("2026-06-15T12:00:00.000Z"))).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it("shifts a late-UTC timestamp back to the correct Colombia calendar day (the exact bug this exists to prevent)", () => {
+    // 2026-06-16T02:00:00Z is 2026-06-15 21:00 in Colombia (UTC-5, no DST).
+    expect(formatColombiaDate(new Date("2026-06-16T02:00:00.000Z"))).toBe("2026-06-15");
+  });
+
+  it("keeps an early-UTC timestamp on the same Colombia day", () => {
+    // 2026-06-15T10:00:00Z is 2026-06-15 05:00 in Colombia — same day either way.
+    expect(formatColombiaDate(new Date("2026-06-15T10:00:00.000Z"))).toBe("2026-06-15");
   });
 });
 

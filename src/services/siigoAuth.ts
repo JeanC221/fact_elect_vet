@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { siigoErrorSchema } from "@/schemas/siigo";
-import { SiigoApiError } from "./siigoApi";
+import { SiigoApiError, SIIGO_POST_TIMEOUT_MS } from "./siigoApi";
 
 /** Custom error class for Siigo OAuth failures. */
 export class SiigoAuthError extends SiigoApiError {
@@ -113,17 +113,28 @@ export async function getSiigoAccessToken(
   }
 
   let res: Response;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SIIGO_POST_TIMEOUT_MS);
   try {
     res = await fetch(`${baseUrl}/auth`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ username, access_key: accessKey }),
+      signal: controller.signal,
     });
-  } catch {
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new SiigoAuthError(
+        "request_timeout",
+        `Siigo no respondió en ${SIIGO_POST_TIMEOUT_MS / 1000}s al autenticar.`,
+      );
+    }
     throw new SiigoAuthError(
       "service_unavailable",
       "No se pudo contactar el servicio de autenticacion de Siigo.",
     );
+  } finally {
+    clearTimeout(timer);
   }
 
   if (!res.ok) {

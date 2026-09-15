@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { sanitizedText, hasMaxDecimals, toCents } from "@/schemas/provet";
+import { sanitizedText, sanitizeText, hasMaxDecimals, toCents } from "@/schemas/provet";
 import {
   siigoDocumentTypeSchema,
   type SiigoInvoicePayload,
@@ -39,7 +39,11 @@ export const ANNULMENT_REASONS: { value: AnnulmentReason; label: string }[] = [
 
 /** Spanish label for an internal annulment reason — used to build `observations`. */
 function annulmentReasonLabel(reason: AnnulmentReason): string {
-  return ANNULMENT_REASONS.find((r) => r.value === reason)?.label ?? reason;
+  // H-12: the fixed labels in ANNULMENT_REASONS are always safe, but the
+  // `?? reason` fallback (for a value with no matching label — never happens
+  // through the typed UI, but not guaranteed at runtime) was forwarding the
+  // raw string straight into `observations` with no sanitization.
+  return sanitizeText(ANNULMENT_REASONS.find((r) => r.value === reason)?.label ?? reason);
 }
 
 /**

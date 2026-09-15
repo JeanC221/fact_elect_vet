@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { SIIGO_API_BASE_URL, SiigoApiError } from "@/services/siigoApi";
 import { siigoCreditNoteResponseSchema, type SiigoCreditNoteResponse } from "@/mappers/creditNote";
+import { formatColombiaDate } from "@/schemas/provet";
 import {
   AmbiguousReconciliationError,
   ReconciliationTruncatedError,
@@ -36,7 +37,7 @@ const MAX_RECONCILE_PAGES = 5;
 /** YYYY-MM-DD in Colombia time, offset by `daysAgo` (negative moves into the future). */
 function colombiaDate(daysAgo = 0): string {
   const d = new Date(Date.now() - daysAgo * 86_400_000);
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Bogota" }).format(d);
+  return formatColombiaDate(d);
 }
 
 /**

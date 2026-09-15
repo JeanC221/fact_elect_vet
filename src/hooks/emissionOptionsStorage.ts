@@ -3,6 +3,8 @@ import { environmentModeSchema, type EnvironmentMode } from "@/mappers/credentia
 import { parseCachedMode, type CachedModeRead } from "@/mappers/emissionModeState";
 import { mockSiigoProducts } from "@/mocks/siigo";
 import type { SiigoProduct } from "@/schemas/siigo";
+import type { SiigoPaymentType } from "@/schemas/siigo";
+import { apiRequest } from "@/services/apiClient";
 
 /**
  * Browser-storage and network access for `useEmissionOptions`.
@@ -54,6 +56,23 @@ export function readProducts(): SiigoProduct[] {
 }
 
 /**
+ * H-6 — the Siigo payment-type catalog (carries the `due_date` flag used to
+ * block emission for a payment type this integration can't supply a due date
+ * for). Unlike `readProducts`, an empty/missing cache falls back to `[]`, not
+ * a mock fixture: the guard simply can't fire without it, which is exactly
+ * today's pre-H-6 behavior — never MORE permissive than before, only as
+ * permissive as before until the catalog has been synced at least once.
+ */
+export function readPaymentTypes(): SiigoPaymentType[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(SIIGO_PAYMENT_TYPES_KEY);
+    if (raw) return JSON.parse(raw) as SiigoPaymentType[];
+  } catch { /* missing/corrupt -> [] */ }
+  return [];
+}
+
+/**
  * Discriminated read of the locally cached emission mode.
  *
  * Replaces the old `readMode(): EnvironmentMode`, which answered `"sandbox"`
@@ -83,9 +102,9 @@ export function readLocalMapping(): CatalogMapping {
 /** Server is the source of truth for the mapping — shared across every device. Falls back to the local cache on failure. */
 export async function fetchServerMapping(): Promise<CatalogMapping | null> {
   try {
-    const res = await fetch("/api/catalog-mapping");
-    if (!res.ok) return null;
-    return catalogMappingSchema.parse(await res.json());
+    const { ok, data } = await apiRequest("/api/catalog-mapping");
+    if (!ok) return null;
+    return catalogMappingSchema.parse(data);
   } catch {
     return null;
   }
@@ -97,10 +116,9 @@ export async function fetchServerMapping(): Promise<CatalogMapping | null> {
  */
 export async function fetchServerMode(): Promise<EnvironmentMode | null> {
   try {
-    const res = await fetch("/api/emission-mode");
-    if (!res.ok) return null;
-    const raw = await res.json();
-    return environmentModeSchema.parse(raw.mode);
+    const { ok, data } = await apiRequest<{ mode?: unknown }>("/api/emission-mode");
+    if (!ok) return null;
+    return environmentModeSchema.parse(data?.mode);
   } catch {
     return null;
   }

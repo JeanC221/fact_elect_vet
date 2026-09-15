@@ -43,7 +43,7 @@ describe("fetchConsultations", () => {
     expect(rows[0].id).toBe("C-1");
     const url = fetchMock.mock.calls[0][0] as string;
     const init = fetchMock.mock.calls[0][1] as RequestInit;
-    expect(url).toContain("/consultation?");
+    expect(url).toContain("/consultation/?");
     expect(url).not.toContain("access_token=");
     expect(url).toContain("ordering=-modified");
     expect(init.headers).toMatchObject({ Authorization: "Bearer tok" });
@@ -171,6 +171,10 @@ describe("the modified__gte window applies ONLY to consultations", () => {
       await fn("tok");
       expect(url()).not.toContain("modified__gte");
       expect(url()).toContain("page_size=1000");
+      // H-2 — a bare collection path without a trailing slash gets a 301 from
+      // Provet, doubling every request. `/${label}?` (no slash) would mean
+      // the fix regressed.
+      expect(url()).toContain(`/${label}/?`);
     });
   }
 
@@ -187,7 +191,7 @@ describe("fetchInvoicesForConsultation — C-12", () => {
     fetchMock.mockResolvedValue(fakeRes(page([])));
     await fetchInvoicesForConsultation("38", "tok");
     const url = fetchMock.mock.calls[0][0] as string;
-    expect(url).toContain("/invoice?");
+    expect(url).toContain("/invoice/?");
     expect(url).toContain("consultation__is=38");
     expect(url).not.toContain("modified__gte");
   });

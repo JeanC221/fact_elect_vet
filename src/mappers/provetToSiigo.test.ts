@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   provetToSiigoInvoice,
   MissingEmissionSettingError,
+  PaymentTypeRequiresDueDateError,
   type ProvetToSiigoOptions,
 } from "./provetToSiigo";
 import { UnmappedPaymentMethodError, type CatalogMapping } from "@/mappers/catalogMapping";
@@ -157,6 +158,27 @@ describe("provetToSiigoInvoice", () => {
     expect(result.document).toEqual({ id: 3001 });
     expect(result.seller).toBe(99);
     expect(() => siigoInvoicePayloadSchema.parse(result)).not.toThrow();
+  });
+
+  it("H-6 — throws PaymentTypeRequiresDueDateError when the mapped Siigo payment type manages a due date, instead of emitting a payload Siigo will reject with parameter_required", () => {
+    // mockConsultations[0].payment_method is "Tarjeta Crédito" -> siigoPaymentTypeId 5636 in baseMapping.
+    const withDueDateFlag = {
+      ...opts(),
+      siigoPaymentTypes: [{ id: 5636, name: "Crédito 30 días", type: "Credit", active: true, due_date: true }],
+    };
+    expect(() => map(0, withDueDateFlag)).toThrow(PaymentTypeRequiresDueDateError);
+  });
+
+  it("H-6 — does NOT throw for a payment type that does not manage a due date", () => {
+    const withoutDueDateFlag = {
+      ...opts(),
+      siigoPaymentTypes: [{ id: 5636, name: "Tarjeta Crédito", type: "Card", active: true, due_date: false }],
+    };
+    expect(() => map(0, withoutDueDateFlag)).not.toThrow();
+  });
+
+  it("H-6 — does NOT throw when the payment-type catalog isn't supplied at all (backward-compatible default)", () => {
+    expect(() => map(0, opts())).not.toThrow();
   });
 
   it("gates stamp.send via the environment mode and keeps mail.send true", () => {

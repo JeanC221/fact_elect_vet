@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { SIIGO_API_BASE_URL, SiigoApiError } from "@/services/siigoApi";
 import { siigoInvoiceResponseSchema, type SiigoInvoiceResponse } from "@/schemas/siigo";
+import { formatColombiaDate } from "@/schemas/provet";
 
 /**
  * Reconciliation — how the app answers "did Siigo actually create that
@@ -96,7 +97,7 @@ export class ReconciliationTruncatedError extends Error {
 /** YYYY-MM-DD in Colombia time, offset by `daysAgo` (negative moves into the future — used by C-4 to reach tomorrow). */
 function colombiaDate(daysAgo = 0): string {
   const d = new Date(Date.now() - daysAgo * 86_400_000);
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Bogota" }).format(d);
+  return formatColombiaDate(d);
 }
 
 const MAX_RECONCILE_PAGES = 5;
