@@ -13,7 +13,7 @@ const round2 = (n: number): number => Number(Math.round(Number(`${n}e2`)) + "e-2
  * in Colombia for roughly 7pm–midnight COT — DIAN invoice dates would then
  * silently record the wrong day for any consultation billed that evening.
  */
-function todayInColombia(): string {
+export function todayInColombia(): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Bogota" }).format(new Date());
 }
 

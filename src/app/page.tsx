@@ -283,7 +283,7 @@ export default function HomePage() {
       // total disagreement would leave the wrong document legally alive.
       const original = buildInvoicePayloadFromQuickEdit(mockConsultations, mockClients, mockPatients, annulTarget.consultationId, formValues, options, fallbackDetail, { enforceTotalMatch: false });
       if (!original) throw new Error("missing_source_data");
-      const cn = toCreditNotePayload(original, { id: annulTarget.invoiceId, cufe: annulTarget.cufe }, reason, { documentTypeId: await readCreditNoteDocumentTypeId() });
+      const cn = toCreditNotePayload(original, { id: annulTarget.invoiceId }, reason, { documentTypeId: await readCreditNoteDocumentTypeId() });
       siigoCreditNoteSchema.parse(cn);
       const idemKey = generateIdempotencyKey();
       const response = await retryWithBackoff(async () => {

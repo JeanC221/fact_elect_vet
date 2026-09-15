@@ -24,21 +24,29 @@ import { getPool } from "@/services/db";
  */
 
 /**
- * `pending`  — claim taken, the Siigo call is in flight (or the process died
- *              mid-flight and nobody ever resolved it).
- * `emitted`  — Siigo returned a document for this consultation.
- * `unknown`  — the Siigo call failed in a way that does NOT prove the document
- *              was not created (timeout, network drop, 5xx, unparseable
- *              response). Deliberately blocks re-emission: a timeout is not
- *              evidence of failure, and retrying it is exactly how duplicates
- *              get stamped.
- * `annulled` — the invoice was voided by a credit note. The consultation
- *              becomes billable again: voiding an erroneous invoice so a
- *              corrected one can be issued is the entire purpose of a credit
- *              note, and blocking re-emission would make annulment useless
- *              for the clinic's main case (wrong amount → annul → rebill).
+ * `pending`   — claim taken, the Siigo call is in flight (or the process died
+ *               mid-flight and nobody ever resolved it).
+ * `emitted`   — Siigo returned a document for this consultation.
+ * `unknown`   — the Siigo call failed in a way that does NOT prove the document
+ *               was not created (timeout, network drop, 5xx, unparseable
+ *               response). Deliberately blocks re-emission: a timeout is not
+ *               evidence of failure, and retrying it is exactly how duplicates
+ *               get stamped. Also used for an ambiguous CREDIT NOTE failure
+ *               (see `annulling` below) — the underlying invoice_id is left
+ *               untouched, so an admin can still see which invoice it was.
+ * `annulling` — a credit note is being submitted against this consultation's
+ *               invoice (C-10). Mirrors `pending`, but for the opposite
+ *               transition (emitted → annulled instead of nothing → emitted):
+ *               blocks a second, concurrent annulment attempt from another
+ *               device, and stays wedged if the process dies mid-flight
+ *               exactly like `pending` does for emission.
+ * `annulled`  — the invoice was voided by a credit note. The consultation
+ *               becomes billable again: voiding an erroneous invoice so a
+ *               corrected one can be issued is the entire purpose of a credit
+ *               note, and blocking re-emission would make annulment useless
+ *               for the clinic's main case (wrong amount → annul → rebill).
  */
-export type InvoiceClaimStatus = "pending" | "emitted" | "unknown" | "annulled";
+export type InvoiceClaimStatus = "pending" | "emitted" | "unknown" | "annulling" | "annulled";
 
 export interface InvoiceClaim {
   consultationId: string;
@@ -93,6 +101,8 @@ export function claimConflictMessage(claim: InvoiceClaim | null): string {
       // Unreachable in practice: an annulled claim is taken over by the
       // conditional upsert in acquireInvoiceClaim rather than conflicting.
       return "Esta consulta fue anulada y puede facturarse nuevamente. Recargue e intente otra vez.";
+    case "annulling":
+      return "Esta consulta tiene una anulación (nota crédito) en curso desde otro dispositivo. Espere a que termine.";
     case "pending":
     default:
       return (
@@ -143,6 +153,72 @@ export async function acquireInvoiceClaim(consultationId: string, idempotencyKey
   throw new ConsultationAlreadyClaimedError(existing, consultationId);
 }
 
+/** Thrown when a consultation cannot start an annulment right now (C-10). */
+export class AnnulmentNotAllowedError extends Error {
+  constructor(public readonly claim: InvoiceClaim | null, public readonly consultationId: string) {
+    super("annulment_not_allowed");
+    this.name = "AnnulmentNotAllowedError";
+  }
+}
+
+/** Staff-facing Spanish explanation of why an annulment could not start. */
+export function annulmentConflictMessage(claim: InvoiceClaim | null): string {
+  if (!claim) {
+    return "Esta consulta no tiene una factura emitida para anular.";
+  }
+  switch (claim.status) {
+    case "annulling":
+      return "Ya hay una anulación en curso para esta consulta desde otro dispositivo.";
+    case "annulled":
+      return "Esta consulta ya fue anulada con una nota crédito.";
+    case "pending":
+      return "Esta consulta tiene una emisión en curso; espere a que termine antes de anular.";
+    case "unknown":
+      return "El resultado de la última emisión de esta consulta es incierto; revise el panel de Emisiones Bloqueadas antes de anular.";
+    case "emitted":
+    default:
+      return "No se pudo iniciar la anulación para esta consulta.";
+  }
+}
+
+/**
+ * Atomically move a consultation's claim from `emitted` to `annulling`,
+ * taking an exclusive lock on the annulment attempt (C-10). MUST be called
+ * before the Siigo credit-note request, never after — same ordering
+ * requirement as `acquireInvoiceClaim` for emission.
+ *
+ * Only transitions FROM `emitted`: a claim in any other state (already
+ * `annulling`, already `annulled`, still `pending`/`unknown`) is refused —
+ * see `annulmentConflictMessage` for the staff-facing reason.
+ */
+export async function acquireAnnulmentClaim(consultationId: string): Promise<void> {
+  const result = await getPool().query<{ consultation_id: string }>(
+    `UPDATE invoice_claims
+     SET status = 'annulling', resolved_at = NULL, last_error = NULL
+     WHERE consultation_id = $1 AND status = 'emitted'
+     RETURNING consultation_id`,
+    [consultationId],
+  );
+  if (result.rowCount) return;
+  const existing = await getInvoiceClaim(consultationId).catch(() => null);
+  throw new AnnulmentNotAllowedError(existing, consultationId);
+}
+
+/**
+ * Revert an `annulling` claim back to `emitted` — used only when Siigo
+ * PROVABLY created no credit note (a 4xx rejection before any document was
+ * written). The invoice this consultation already has is still valid and
+ * still billed; nothing about it changed.
+ */
+export async function releaseAnnulmentClaim(consultationId: string): Promise<void> {
+  await getPool().query(
+    `UPDATE invoice_claims
+     SET status = 'emitted', resolved_at = now(), last_error = NULL
+     WHERE consultation_id = $1 AND status = 'annulling'`,
+    [consultationId],
+  );
+}
+
 /** Siigo returned a document — pin the claim permanently to that invoice. */
 export async function markClaimEmitted(consultationId: string, invoiceId: string): Promise<void> {
   await getPool().query(
@@ -187,7 +263,7 @@ export async function markClaimAnnulled(consultationId: string, creditNoteId: st
     `UPDATE invoice_claims
      SET status = 'annulled', resolved_at = now(), last_error = NULL,
          invoice_id = $2
-     WHERE consultation_id = $1`,
+     WHERE consultation_id = $1 AND status = 'annulling'`,
     [consultationId, creditNoteId],
   );
 }

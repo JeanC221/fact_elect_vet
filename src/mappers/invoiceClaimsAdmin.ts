@@ -21,7 +21,7 @@ import { z } from "zod";
 /** Wire shape of GET /api/invoice-claims (claimedAt arrives as an ISO string). */
 export const invoiceClaimWireSchema = z.object({
   consultationId: z.string().min(1),
-  status: z.enum(["pending", "emitted", "unknown", "annulled"]),
+  status: z.enum(["pending", "emitted", "unknown", "annulling", "annulled"]),
   invoiceId: z.string().nullable(),
   claimedAt: z.string().min(1),
   lastError: z.string().nullable(),
@@ -55,7 +55,13 @@ const STATUS_PRESENTATION: Record<InvoiceClaimStatusWire, ClaimStatusPresentatio
     label: "Resultado desconocido",
     tone: "danger",
     releasable: true,
-    hint: "Siigo falló de forma ambigua (timeout o 5xx). No hay prueba de que la factura NO se haya creado.",
+    hint: "Siigo falló de forma ambigua (timeout o 5xx). No hay prueba de que el documento NO se haya creado.",
+  },
+  annulling: {
+    label: "Anulación en curso",
+    tone: "warning",
+    releasable: true,
+    hint: "Se está emitiendo una nota crédito para esta consulta. Si ningún dispositivo la está anulando, el proceso murió a mitad de camino — verifique en Siigo Nube antes de liberar.",
   },
   emitted: {
     label: "Ya facturada",

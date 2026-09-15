@@ -218,15 +218,38 @@ Es el entorno de demostración de Provet, no datos de la veterinaria.
 4. Lo que sí sigue valiendo son los **contratos de la API**: qué campos existen,
    qué tipos tienen y qué joins funcionan. Eso es Provet, no el dataset.
 
-### Bloqueante crítico — sesión 3 (nota crédito)
+### Bloqueante crítico — sesión 3 (nota crédito) — CERRADO sesión 3 (rev.), ver `### Resolved — sesión 3, C-8/C-9/C-10`
 
 | # | Origen | Qué |
 |---|---|---|
-| **C-8** | N8 | El mapper de nota crédito está construido contra un contrato inventado: falta `invoice` (GUID) y `date`, `reason` es string donde la API espera entero 1-6, importes negados donde la API los quiere positivos, `total` en raíz donde no es campo de request, y la respuesta 201 se lee en raíz cuando `cufe`/`cude`/`status` van **bajo `stamp`**. **Ninguna nota crédito puede emitirse hoy** |
-| **C-9** | N14 | `creditNote.test.ts` — 23 tests que blindan el contrato equivocado. **Borrarlos ANTES de tocar el mapper**, o un agente futuro revierte el fix |
-| **C-10** | N13 | La ruta de notas crédito no tiene claim, marcador ni reconciliación. **Corrección al informe:** `GET /v1/credit-notes` SÍ existe con los mismos filtros que facturas, y su respuesta trae `invoice: {id, name}` — **una NC se localiza por el GUID de su factura padre, sin marcador en `observations`**. Ancla más fuerte que la de facturas y menos trabajo del estimado |
+| **C-8** | N8 | ~~El mapper de nota crédito está construido contra un contrato inventado~~ — **resuelto**, ver Resolved abajo |
+| **C-9** | N14 | ~~`creditNote.test.ts` — 23 tests que blindan el contrato equivocado~~ — **borrado y reescrito (29 tests nuevos)** |
+| **C-10** | N13 | ~~La ruta de notas crédito no tiene claim, marcador ni reconciliación~~ — **resuelto**, ver Resolved abajo |
 
-### Resolved — sesión 2, C-11 (2026-09-11)
+### Resolved — sesión 3, C-8/C-9/C-10 (2026-09-14)
+
+- **C-9 primero, como manda el protocolo:** `src/mappers/creditNote.test.ts` (23 tests contra el contrato inventado) borrado ANTES de tocar el mapper.
+- **C-8 — `src/mappers/creditNote.ts` reescrito contra `API_SIIGO_REFERENCIA_COMPLETA.md` §4.1 y `EVIDENCIA_APIS.md` §1.8, campo a campo:**
+  - `invoice` (GUID string) reemplaza a `base_document: {id, cufe}` — este proyecto SIEMPRE anula una factura que ya existe en Siigo Nube (nunca el path `invoice_data`), así que `customer`/`seller` **dejan de enviarse** (solo son obligatorios en el path de factura externa).
+  - `date` (YYYY-MM-DD, hora Colombia) — antes ausente.
+  - `reason` es ahora `z.number().int().min(1).max(6)` en el schema; el mapper **siempre envía `2`** ("Anulación de factura electrónica") vía la constante `ANNULMENT_DIAN_REASON`, independientemente del motivo elegido en el dropdown de la UI (`AnnulmentReason`, 5 valores) — este proyecto solo anula facturas completas, nunca hace devolución parcial (códigos 1/3/4/6/7). El motivo de UI se preserva en `observations` vía `buildAnnulmentObservations()`, no en el `reason` de la petición.
+  - `items.price`/`payments.value` ahora **positivos** (antes negados) — Siigo trata la NC como documento de reversión por naturaleza. Precisión de `items.price`/`taxed_price` a **6 decimales** (el doc de NC lo especifica así, distinto de las 2 decimales de factura — no es el mismo campo aunque comparta nombre).
+  - `total` eliminado del payload — no es campo de request, solo de respuesta.
+  - Refine de totales ahora compara `items` vs `payments` directamente (cent-integer, `toCents`), ya que no hay `total` que comparar.
+  - **Respuesta (`siigoCreditNoteResponseSchema`):** decisión de diseño corregida a mitad de sesión — se propuso inicialmente "fail-loud" (lanzar si `stamp.cufe` falta), pero se verificó contra el precedente YA establecido para facturas (`siigoInvoiceRawResponseSchema`, con su propio razonamiento documentado: nadie ha visto nunca un `stamp` real poblado, ni para facturas ni para NC — `EVIDENCIA_APIS.md` §1.8, "Sigue NO VERIFICADO"). Se adoptó el mismo patrón: `stamp` `.nullish()`, default `cufe: ""` / `status: "Draft"` — consistente con el `InvoiceStatus` que la app ya modela (`"Draft"` es un estado visible, no oculto). Response ahora también modela `invoice: {id, name}`, el ancla de C-10.
+- **C-10 — reconciliación y candado de anulación, mirando el patrón ya probado de `invoices/route.ts`:**
+  - Nuevo estado `annulling` en `invoice_claims.status` (antes: `pending | emitted | unknown | annulled`). Transición atómica `emitted → annulling` vía `acquireInvoiceClaim`'s hermano nuevo, `acquireAnnulmentClaim` (`src/services/invoiceClaims.ts`) — MUST llamarse antes de tocar Siigo, igual que `acquireInvoiceClaim` para emisión. Bloquea dos anulaciones concurrentes de la misma consulta.
+  - `markClaimAnnulled` ahora exige `WHERE status = 'annulling'` (antes sin condición) — defensa en profundidad.
+  - Nuevo `src/services/creditNoteReconciliation.ts`: localiza una NC por el GUID de su factura padre (`invoice.id` en `GET /v1/credit-notes`) — **sin marcador en `observations`**, como corrigió el informe. Reutiliza `AmbiguousReconciliationError`/`ReconciliationTruncatedError` de `invoiceReconciliation.ts`.
+  - `src/app/api/credit-notes/route.ts` reescrita: claim antes de Siigo → si Siigo falla con 4xx probatorio (no `duplicated_document`/`already_exists`) → libera el claim a `emitted`. Si falla de forma ambigua (timeout/5xx) → reconcilia por GUID; si encuentra la NC, reporta éxito; si confirma ausencia genuina, libera el claim y reporta el error original; **si la propia reconciliación falla, el claim queda `annulling`** (visible/liberable desde el panel admin), nunca se revierte adivinando.
+  - `src/mappers/invoiceClaimsAdmin.ts`: `annulling` añadido al enum de wire y a `STATUS_PRESENTATION` (liberable, mismo razonamiento que `pending`: proceso que puede haber muerto a mitad de camino).
+  - `releaseClaimAsAdmin` (`invoice_claims/route.ts`) no necesitó cambios — su guarda ya es genérica (`status <> 'emitted'`), cubre `annulling` sin tocar código.
+- **Descubierto durante mutación manual — hallazgo nuevo (H-19, no arreglado esta sesión):** el `WHERE status = 'emitted'` de `acquireAnnulmentClaim` (y su análogo preexistente en `acquireInvoiceClaim`) **no tiene ningún test que lo ejercite contra SQL real** — toda la suite de `invoice_claims` mockea `getPool().query` con respuestas canned, así que un mutante que borra esa cláusula WHERE no lo detecta ningún test existente. `invoiceClaims.ts` no tiene archivo de test propio en todo el proyecto. Riesgo real: un futuro refactor de esa cláusula podría romper la exclusión mutua sin que ningún gate lo note.
+- **Corrección de una premisa del prompt de la sesión:** `prompt_sesion_4.md` decía que `credit-notes/route.ts` "no toma ningún claim hoy". Falso contra el código real de esa base: ya llamaba `markClaimAnnulled` tras un 200 síncrono. Lo que de verdad faltaba era el candado de exclusión mutua y la reconciliación ante fallo ambiguo — eso es lo que se construyó.
+- **Verification:** `npx tsc --noEmit` ✅ exit 0 | `npx vitest run` ✅ **46 files / 711 tests** (683 → 711, +28: 29 en `creditNote.test.ts` recreado − 23 borrados + 14 nuevos en `route.test.ts` − 9 anteriores + 14 nuevos en `creditNoteReconciliation.test.ts` + ajustes en `siigoApi.test.ts`/`invoiceClaimsAdmin.test.ts`) | `env -u NODE_ENV npx next build` ✅ exit 0, **20 rutas, 4 estáticas, `(8/8)`** | `npm audit` **0/0, sin cambio**. Mutación manual (sin Stryker), 5 mutantes: 4 muertos por tests existentes, 1 sobrevivió (H-19, arriba) — no se agregó test ad-hoc para matarlo porque ninguna otra parte de `invoice_claims` tiene ese nivel de cobertura; se registra como deuda consciente en vez de tratarlo como parte de C-10.
+- **Entregable:** un solo ZIP (`sesion4_notacredito.zip`), 13 archivos, SHA-256 por archivo dado en el chat. **No aplicado todavía** — Jean lo aplica con `rsync` y confirma los gates de su lado antes de mergear.
+
+
 
 Base: `412619b` (`Session updated`, commit de documentación con un solo padre,
 no merge). Delta contra el merge de la sesión 1 (`0684cfb`): solo
@@ -447,6 +470,8 @@ preview.
 | **H-12** | D-j | Sanear texto también en `creditNote.ts:44` |
 | **H-13** | D-k | `customer_settings` en la tabla de traducción de errores |
 | **H-14** | P-1 rama A | **Detector de anulaciones en Provet.** Especificado y sin incógnitas: `/invoice/?credit_note__is=true&modified__gte=` → id del path de `credit_note_original_invoice` → factura → consulta. **Solo detector, nunca emisor automático.** Nota: C-1 hay que arreglarlo aunque este detector no se construya |
+| **H-19** | nuevo 2026-09-14 (sesión 3) | **`invoice_claims.ts` no tiene archivo de test propio en todo el proyecto.** Detectado por mutación manual al cerrar C-10: el `WHERE status = 'emitted'` de `acquireAnnulmentClaim` (y su análogo preexistente en `acquireInvoiceClaim`) puede borrarse sin que ningún test lo note — toda la suite de `invoice_claims` mockea `getPool().query` con respuestas canned, agnósticas del SQL real enviado. Un test que capture la query exacta (no solo el resultado que el mock decide devolver) cerraría el hueco para ambas funciones a la vez |
+| **H-19** | nuevo 2026-09-14 (sesión 3) | **`invoice_claims` no tiene archivo de test propio en todo el proyecto.** Los guards `WHERE status = 'emitted'`/`'annulling'` de `acquireInvoiceClaim`/`acquireAnnulmentClaim` solo se ejercitan indirectamente vía tests de ruta que mockean `getPool().query` con respuestas canned — un mutante que borra esa cláusula WHERE no lo detecta ningún test existente (confirmado por mutación manual en la sesión 3). Un test dedicado contra SQL real (o al menos contra una cláusula WHERE explícita en el mock) cerraría el hueco |
 
 ### Con credenciales de producción — sesión 6
 
@@ -568,6 +593,46 @@ preview.
 ---
 
 ## Last Update
+- **Date:** 2026-09-14
+- **Agent:** Claude (`prompt_sesion_4.md` — pertenece al alcance de **sesión 3**,
+  ver `### Nombres de sesión vs. alcance`)
+- **Base commit:** `93880d1` (merge del PR #23, sobre el PR #22). Baseline
+  verificado antes de tocar nada: 45 files / 683 tests, `tsc` limpio, build
+  `(8/8)`, 20 rutas, 4 estáticas, `npm audit` 0/0 — coincidió al dígito con lo
+  esperado.
+- **Completed Task:** C-8, C-9, C-10 (nota crédito) — el único bloqueante
+  crítico. Detalle completo en `### Resolved — sesión 3, C-8/C-9/C-10` más
+  arriba. Con esto no queda ningún bloqueante **crítico** abierto en el
+  backlog; solo quedan C-3/C-15 (diferidos a sesión con preview UI), C-17,
+  H-18, y los bloques de sesión 4/5/6.
+- **Verification:** `npx tsc --noEmit` ✅ exit 0 | `npx vitest run` ✅ **46
+  files / 711 tests** (683 → 711, +28) | `env -u NODE_ENV npx next build` ✅
+  exit 0, **20 rutas, 4 estáticas, `(8/8)`** | `npm audit` **0/0, sin cambio**.
+  Mutación manual (sin Stryker), 5 mutantes, 4 muertos, 1 sobrevivió →
+  registrado como **H-19** (deuda consciente, no arreglado esta sesión).
+- **Entregable:** un solo ZIP (`sesion4_notacredito.zip`), 13 archivos,
+  SHA-256 por archivo dado en el chat. **No aplicado todavía** — Jean lo
+  aplica con `rsync` y confirma los gates de su lado antes de mergear.
+- **Corrección de una premisa del prompt de entrada:** `prompt_sesion_4.md`
+  afirmaba que `credit-notes/route.ts` "no toma ningún claim hoy". Falso
+  contra el código real de la base clonada — ya llamaba `markClaimAnnulled`
+  tras éxito síncrono. El trabajo real de C-10 fue el candado de exclusión
+  mutua (`annulling`) y la reconciliación ante fallo ambiguo, no partir de
+  cero.
+- **Decisión de diseño corregida en vivo, durante la sesión:** propuse
+  inicialmente parsear la respuesta de NC "fail-loud" (lanzar si falta
+  `stamp.cufe`); al escribir los tests la contrasté contra el precedente ya
+  establecido para facturas (mismo problema, mismo proyecto,
+  `EVIDENCIA_APIS.md` §1.8) y adopté en su lugar el patrón `.nullish()` +
+  `"Draft"` ya usado ahí, por consistencia.
+- **Next Pending Task:** ningún bloqueante crítico obliga una sesión
+  concreta. Candidatos en el backlog, todos igual de válidos: `### Frontera
+  de autorización — sesión 4`, `### Higiene, desacople, CI — sesión 5`
+  (incluye el nuevo H-19), o `P-2` si para entonces ya hay credenciales de
+  producción. **Propuesta de prioridad, no decisión tomada** — Jean confirma
+  o redirige al abrir el siguiente chat. Ver `prompt_sesion_5.md`.
+
+## Previous Update (sesión 2, cierre vía prompt_sesion_3.md)
 - **Date:** 2026-09-14
 - **Agent:** Claude (prompt_sesion_3.md — sigue perteneciendo al alcance de
   **sesión 2**, ver `### Nombres de sesión vs. alcance`)

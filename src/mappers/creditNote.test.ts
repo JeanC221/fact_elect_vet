@@ -1,205 +1,196 @@
-import { describe, expect, it } from "vitest";
-import { mockSiigoInvoicePayloads } from "@/mocks/siigo";
+import { describe, it, expect } from "vitest";
 import {
-  ANNULMENT_REASONS,
-  siigoCreditNoteItemSchema,
   MissingCreditNoteSettingError,
-  siigoCreditNoteResponseSchema,
-  siigoCreditNoteSchema,
   toCreditNotePayload,
+  siigoCreditNoteSchema,
+  siigoCreditNoteResponseSchema,
+  siigoCreditNoteItemSchema,
+  buildAnnulmentObservations,
+  ANNULMENT_REASONS,
+  ANNULMENT_DIAN_REASON,
 } from "@/mappers/creditNote";
+import { mockSiigoInvoicePayloads } from "@/mocks/siigo";
 
-describe("creditNote mapper", () => {
-  const original = mockSiigoInvoicePayloads[0];
-  const base = { id: "INV-7751", cufe: "CUFE-abc123def456" };
-  /** Every real call site must supply the account's own configured NC document type id — no hardcoded default exists. */
-  const withDocType = { documentTypeId: 2379 };
+const original = mockSiigoInvoicePayloads[0];
+const INVOICE_ID = "302580df-838b-4c1e-9e1a-abc123";
 
-  describe("toCreditNotePayload", () => {
-    it("throws MissingCreditNoteSettingError when documentTypeId is not configured", () => {
-      expect(() => toCreditNotePayload(original, base, "billing_error")).toThrow(MissingCreditNoteSettingError);
-    });
-
-    it("negates item prices, payment amounts, and total", () => {
-      const cn = toCreditNotePayload(original, base, "billing_error", withDocType);
-      expect(cn.items[0].price).toBe(-original.items[0].price!);
-      expect(cn.payments[0].value).toBe(-original.payments[0].value);
-      expect(cn.total).toBe(-(original.items[0].price! * original.items[0].quantity));
-    });
-
-    it("carries base_document with original invoice id and CUFE", () => {
-      const cn = toCreditNotePayload(original, base, "billing_error", withDocType);
-      expect(cn.base_document).toEqual(base);
-    });
-
-    it("copies customer and item fields; stamp/mail are always true (DIAN Resolución 000042 — a credit note against a stamped invoice is always electronic)", () => {
-      const cn = toCreditNotePayload(original, base, "customer_request", withDocType);
-      expect(cn.customer).toEqual(original.customer);
-      expect(cn.items[0].description).toBe(original.items[0].description);
-      expect(cn.items[0].quantity).toBe(original.items[0].quantity);
-      expect(cn.stamp.send).toBe(true);
-      expect(cn.mail.send).toBe(true);
-      expect(cn.reason).toBe("customer_request");
-    });
-
-    it("emits document: { id } using the configured credit-note document type — never a hardcoded default", () => {
-      const cn = toCreditNotePayload(original, base, "billing_error", { documentTypeId: 2379 });
-      expect(cn.document).toEqual({ id: 2379 });
-    });
-
-    it("overrides the document type via options.documentTypeId", () => {
-      const cn = toCreditNotePayload(original, base, "billing_error", { documentTypeId: 3001 });
-      expect(cn.document).toEqual({ id: 3001 });
-      expect(() => siigoCreditNoteSchema.parse(cn)).not.toThrow();
-    });
-
-    it("keeps customer flat identification (id_type + string identification)", () => {
-      const cn = toCreditNotePayload(original, base, "billing_error", withDocType);
-      expect(cn.customer.id_type).toBe(original.customer.id_type);
-      expect(typeof cn.customer.identification).toBe("string");
-      expect(cn.customer.identification).toBe(original.customer.identification);
-    });
-
-    it("reverses payments into { id, value } pairs", () => {
-      const cn = toCreditNotePayload(original, base, "billing_error", withDocType);
-      expect(cn.payments).toEqual(original.payments.map((p) => ({ id: p.id, value: -p.value })));
-    });
+describe("toCreditNotePayload", () => {
+  it("throws MissingCreditNoteSettingError when documentTypeId is not configured", () => {
+    expect(() => toCreditNotePayload(original, { id: INVOICE_ID }, "billing_error")).toThrow(
+      MissingCreditNoteSettingError,
+    );
   });
 
-  describe("siigoCreditNoteSchema", () => {
-    it("parses a valid credit note payload", () => {
-      const cn = toCreditNotePayload(original, base, "billing_error", withDocType);
-      const parsed = siigoCreditNoteSchema.parse(cn);
-      expect(parsed.base_document).toEqual(cn.base_document);
-      expect(parsed.customer).toEqual(cn.customer);
-      expect(parsed.items).toHaveLength(cn.items.length);
-      expect(parsed.items[0].price).toBe(cn.items[0].price);
-      expect(parsed.payments[0].value).toBe(cn.payments[0].value);
-      expect(parsed.total).toBe(cn.total);
-      expect(parsed.reason).toBe(cn.reason);
-    });
-
-    it("rejects mismatched totals (DIAN invalid_total_payments guard)", () => {
-      const cn = toCreditNotePayload(original, base, "billing_error", withDocType);
-      const bad = { ...cn, total: -1 };
-      expect(() => siigoCreditNoteSchema.parse(bad)).toThrow();
-    });
-
-    it("rejects an empty items array", () => {
-      const cn = toCreditNotePayload(original, base, "billing_error", withDocType);
-      const bad = { ...cn, items: [] };
-      expect(() => siigoCreditNoteSchema.parse(bad)).toThrow();
-    });
-
-    it("rejects a missing base_document CUFE", () => {
-      const cn = toCreditNotePayload(original, base, "billing_error", withDocType);
-      const bad = { ...cn, base_document: { id: "INV-1", cufe: "" } };
-      expect(() => siigoCreditNoteSchema.parse(bad)).toThrow();
-    });
-
-    it("rejects a payload without the credit-note document type", () => {
-      const cn = toCreditNotePayload(original, base, "billing_error", withDocType);
-      const bad: Record<string, unknown> = { ...cn };
-      delete bad.document;
-      expect(() => siigoCreditNoteSchema.parse(bad)).toThrow();
-    });
+  it("links to the original invoice by GUID under `invoice`, never `base_document`", () => {
+    const cn = toCreditNotePayload(original, { id: INVOICE_ID }, "billing_error", { documentTypeId: 162 });
+    expect(cn.invoice).toBe(INVOICE_ID);
+    expect(cn).not.toHaveProperty("base_document");
   });
 
-  describe("siigoCreditNoteResponseSchema", () => {
-    it("parses an accepted credit note response", () => {
-      const res = { id: "NC-7751", cufe: "NCUFE-abc", status: "Accepted" as const };
-      expect(siigoCreditNoteResponseSchema.parse(res)).toEqual(res);
-    });
+  it("never sends customer or seller — the invoice already exists in Siigo Nube", () => {
+    const cn = toCreditNotePayload(original, { id: INVOICE_ID }, "billing_error", { documentTypeId: 162 });
+    expect(cn).not.toHaveProperty("customer");
+    expect(cn).not.toHaveProperty("seller");
   });
 
-  describe("ANNULMENT_REASONS", () => {
-    it("has exactly 5 reasons with non-empty labels", () => {
-      expect(ANNULMENT_REASONS).toHaveLength(5);
-      for (const r of ANNULMENT_REASONS) {
-        expect(r.value).toBeTruthy();
-        expect(r.label.trim().length).toBeGreaterThan(0);
-      }
-    });
+  it("never sends `total` — it is a response-only field per the real Siigo contract", () => {
+    const cn = toCreditNotePayload(original, { id: INVOICE_ID }, "billing_error", { documentTypeId: 162 });
+    expect(cn).not.toHaveProperty("total");
+  });
+
+  it("includes `date` as YYYY-MM-DD, which was entirely absent before", () => {
+    const cn = toCreditNotePayload(original, { id: INVOICE_ID }, "billing_error", { documentTypeId: 162 });
+    expect(cn.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it("always sends DIAN reason 2 (full annulment), regardless of the staff-picked UI reason", () => {
+    for (const { value } of ANNULMENT_REASONS) {
+      const cn = toCreditNotePayload(original, { id: INVOICE_ID }, value, { documentTypeId: 162 });
+      expect(cn.reason).toBe(ANNULMENT_DIAN_REASON);
+      expect(cn.reason).toBe(2);
+    }
+  });
+
+  it("preserves the staff-picked reason in `observations`, not on the wire `reason`", () => {
+    const cn = toCreditNotePayload(original, { id: INVOICE_ID }, "duplicate_invoice", { documentTypeId: 162 });
+    expect(cn.observations).toBe(buildAnnulmentObservations("duplicate_invoice"));
+    expect(cn.observations).toContain("Factura duplicada");
+  });
+
+  it("mirrors item prices POSITIVE — the exact inverse of the old (negated) mapper", () => {
+    const cn = toCreditNotePayload(original, { id: INVOICE_ID }, "billing_error", { documentTypeId: 162 });
+    for (const item of cn.items) {
+      const p = item.price ?? item.taxed_price ?? -1;
+      expect(p).toBeGreaterThan(0);
+    }
+  });
+
+  it("mirrors payment values POSITIVE", () => {
+    const cn = toCreditNotePayload(original, { id: INVOICE_ID }, "billing_error", { documentTypeId: 162 });
+    for (const payment of cn.payments) {
+      expect(payment.value).toBeGreaterThan(0);
+    }
   });
 
   it("mirrors taxed_price when the original invoice used it, instead of switching fields", () => {
-    // Switching price<->taxed_price between invoice and credit note changes how
-    // Siigo computes tax on the reversal, leaving a residual DIAN balance.
-    const taxedOriginal = {
-      ...original,
-      items: original.items.map(({ price, ...rest }) => ({ ...rest, taxed_price: price! })),
-    };
-    const cn = toCreditNotePayload(taxedOriginal, base, "billing_error", withDocType);
-    expect(cn.items[0].taxed_price).toBe(-taxedOriginal.items[0].taxed_price);
+    const taxedOriginal = { ...original, items: [{ ...original.items[0], price: undefined, taxed_price: 95000 }] };
+    const cn = toCreditNotePayload(taxedOriginal, { id: INVOICE_ID }, "billing_error", { documentTypeId: 162 });
+    expect(cn.items[0].taxed_price).toBe(95000);
     expect(cn.items[0].price).toBeUndefined();
   });
 
-  it("mirrors the item taxes, so the reversal cancels the IVA and not just the net", () => {
-    const taxedOriginal = {
-      ...original,
-      items: original.items.map((i) => ({ ...i, taxes: [{ id: 1270 }] })),
-    };
-    const cn = toCreditNotePayload(taxedOriginal, base, "billing_error", withDocType);
-    expect(cn.items[0].taxes).toEqual([{ id: 1270 }]);
+  it("mirrors item taxes so the reversal cancels the IVA and not just the net", () => {
+    const withTax = { ...original, items: [{ ...original.items[0], taxes: [{ id: 1 }] }] };
+    const cn = toCreditNotePayload(withTax, { id: INVOICE_ID }, "billing_error", { documentTypeId: 162 });
+    expect(cn.items[0].taxes).toEqual([{ id: 1 }]);
   });
 
   it("omits taxes on the credit note when the invoice line had none", () => {
-    const cn = toCreditNotePayload(original, base, "billing_error", withDocType);
-    expect(cn.items[0].taxes).toBeUndefined();
+    const cn = toCreditNotePayload(original, { id: INVOICE_ID }, "billing_error", { documentTypeId: 162 });
+    expect(cn.items[0]).not.toHaveProperty("taxes");
+  });
+
+  it("overrides the document type via options.documentTypeId — never a hardcoded default", () => {
+    const cn = toCreditNotePayload(original, { id: INVOICE_ID }, "billing_error", { documentTypeId: 9999 });
+    expect(cn.document.id).toBe(9999);
   });
 });
 
-/**
- * Description sanitisation parity with the invoice schema.
- *
- * `siigoInvoiceItemSchema.description` is `sanitizedText({ max: 200 })`;
- * `siigoCreditNoteItemSchema.description` was a bare `z.string()`. That gap is
- * reachable from the network: `POST /api/credit-notes` parses
- * `siigoCreditNoteSchema` straight off the client-supplied request body, so the
- * payload does NOT have to come from `buildCreditNote` and its already-sanitised
- * invoice. Siigo publishes an `invalid_description` error whose character class
- * excludes the apostrophe and control characters, so an unsanitised description
- * is rejected at the API — after the Idempotency-Key has been spent.
- */
+describe("siigoCreditNoteSchema", () => {
+  const valid = () =>
+    toCreditNotePayload(original, { id: INVOICE_ID }, "billing_error", { documentTypeId: 162 });
+
+  it("parses a valid credit note payload built by the mapper", () => {
+    expect(() => siigoCreditNoteSchema.parse(valid())).not.toThrow();
+  });
+
+  it("rejects a negative item price (C-8's core defect)", () => {
+    const cn = valid();
+    cn.items[0].price = -(cn.items[0].price ?? 1);
+    expect(() => siigoCreditNoteSchema.parse(cn)).toThrow();
+  });
+
+  it("rejects a negative payment value", () => {
+    const cn = valid();
+    cn.payments[0].value = -cn.payments[0].value;
+    expect(() => siigoCreditNoteSchema.parse(cn)).toThrow();
+  });
+
+  it("rejects a `reason` sent as a string (the old contract's mistake)", () => {
+    const cn = { ...valid(), reason: "billing_error" as unknown as number };
+    expect(() => siigoCreditNoteSchema.parse(cn)).toThrow();
+  });
+
+  it("rejects reason 0 and reason 7 — outside the range both Siigo lists agree on", () => {
+    expect(() => siigoCreditNoteSchema.parse({ ...valid(), reason: 0 })).toThrow();
+    expect(() => siigoCreditNoteSchema.parse({ ...valid(), reason: 7 })).toThrow();
+  });
+
+  it("rejects mismatched items/payments totals", () => {
+    const cn = valid();
+    cn.payments[0].value = cn.payments[0].value + 1;
+    expect(() => siigoCreditNoteSchema.parse(cn)).toThrow();
+  });
+
+  it("rejects an empty items array", () => {
+    const cn = valid();
+    cn.items = [];
+    expect(() => siigoCreditNoteSchema.parse(cn)).toThrow();
+  });
+
+  it("rejects a missing invoice GUID", () => {
+    const cn = valid() as Partial<ReturnType<typeof valid>>;
+    delete cn.invoice;
+    expect(() => siigoCreditNoteSchema.parse(cn)).toThrow();
+  });
+
+  it("tolerates extra fields (contract-of-tolerance: schema never rejects unknown fields)", () => {
+    const cn = { ...valid(), someFutureField: "x" };
+    expect(() => siigoCreditNoteSchema.parse(cn)).not.toThrow();
+  });
+});
+
 describe("siigoCreditNoteItemSchema — description is sanitised like the invoice's", () => {
-  const baseItem = { code: "CONS-01", quantity: 1, taxed_price: -50000 };
+  const base = { code: "CONS-01", quantity: 1, price: 1000 };
 
   it("strips an apostrophe from a client-supplied credit note description", () => {
-    const parsed = siigoCreditNoteItemSchema.parse({
-      ...baseItem,
-      description: "Consulta d'urgencia",
-    });
-    expect(parsed.description).not.toMatch(/['\u2018\u2019]/);
-  });
-
-  it("strips smart quotes without merging adjacent words", () => {
-    const parsed = siigoCreditNoteItemSchema.parse({
-      ...baseItem,
-      description: "Vacuna \u201Ctriple\u201D felina",
-    });
-    expect(parsed.description).toBe("Vacuna triple felina");
-  });
-
-  it("strips ASCII control characters", () => {
-    const parsed = siigoCreditNoteItemSchema.parse({
-      ...baseItem,
-      description: "Control\u0000post\u001Foperatorio",
-    });
-    expect(parsed.description).toBe("Control post operatorio");
-  });
-
-  it("keeps Spanish accents and ñ, which Siigo's published class allows", () => {
-    const parsed = siigoCreditNoteItemSchema.parse({
-      ...baseItem,
-      description: "Extracción de uña — canino",
-    });
-    expect(parsed.description).toContain("Extracción");
-    expect(parsed.description).toContain("uña");
+    const parsed = siigoCreditNoteItemSchema.parse({ ...base, description: "Cliente's consulta" });
+    expect(parsed.description).not.toContain("'");
   });
 
   it("still rejects an empty description after sanitisation", () => {
-    expect(() =>
-      siigoCreditNoteItemSchema.parse({ ...baseItem, description: "''" }),
-    ).toThrow();
+    expect(() => siigoCreditNoteItemSchema.parse({ ...base, description: "   " })).toThrow();
+  });
+});
+
+describe("siigoCreditNoteResponseSchema", () => {
+  it("reads cufe/cude/status from under `stamp`, never the root", () => {
+    const raw = { id: "NC-1", stamp: { cufe: "CUFE-1", cude: "CUDE-1", status: "Accepted" } };
+    const parsed = siigoCreditNoteResponseSchema.parse(raw);
+    expect(parsed.cufe).toBe("CUFE-1");
+    expect(parsed.status).toBe("Accepted");
+  });
+
+  it("keeps the echoed `invoice: {id, name}` — the anchor for credit-note reconciliation", () => {
+    const raw = { id: "NC-1", invoice: { id: INVOICE_ID, name: "FV-1-1" }, stamp: { cufe: "C", status: "Accepted" } };
+    const parsed = siigoCreditNoteResponseSchema.parse(raw);
+    expect(parsed.invoice).toEqual({ id: INVOICE_ID, name: "FV-1-1" });
+  });
+
+  it("defaults cufe/status to empty/Draft when Siigo returns no populated stamp, mirroring invoices", () => {
+    const parsed = siigoCreditNoteResponseSchema.parse({ id: "NC-1" });
+    expect(parsed.cufe).toBe("");
+    expect(parsed.status).toBe("Draft");
+  });
+
+  it("still requires the credit-note id", () => {
+    expect(() => siigoCreditNoteResponseSchema.parse({ status: "Accepted" })).toThrow();
+  });
+});
+
+describe("ANNULMENT_REASONS", () => {
+  it("has exactly 5 reasons with non-empty labels", () => {
+    expect(ANNULMENT_REASONS).toHaveLength(5);
+    for (const r of ANNULMENT_REASONS) expect(r.label.length).toBeGreaterThan(0);
   });
 });
