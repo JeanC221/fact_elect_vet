@@ -6,8 +6,8 @@
  *     Path=/ + MaxAge=8h. Carries the JWT; never readable by client JS.
  *   - Role cookie (`vet_role`): NON-HttpOnly (client-readable) for UI display
  *     only. Value "admin" | "user". The authoritative `admin` flag lives inside
- *     the HttpOnly JWT and is enforced by the middleware; tampering this cookie
- *     only shows/hides nav links that the middleware would still block.
+ *     the HttpOnly JWT and is enforced by `proxy.ts`; tampering this cookie
+ *     only shows/hides nav links that the proxy would still block.
  *
  * A-3 (2026-09-14, mitigation only): TTL cut from 24h to 8h. There is no
  * in-app password-change flow — credentials rotate as env vars in Vercel,
@@ -18,8 +18,16 @@
  * exposure window to at most one shift instead of a full day; it does not
  * close it. The actual fix (a session epoch stored in `credentials_config`,
  * checked at verify time) is deliberately out of scope here — it is a data
- * model change and a runtime decision (whether Edge middleware can afford a
- * DB read on every request), reserved for its own session.
+ * model change and a runtime decision (whether the authorization boundary can
+ * afford a DB read on every request), reserved for its own session.
+ *
+ * A-4 (2026-09-15) changed one half of that question and should NOT be read as
+ * answering the other. `proxy.ts` runs on Node, so the `pg` driver is now
+ * *reachable* from the boundary — it was not from the Edge runtime, which
+ * could not load `pg` at all. That removes a hard blocker, not the cost
+ * question: a Postgres round trip on every matched request (the matcher covers
+ * every non-login, non-static route) is still an open design decision for the
+ * A-3 session, and A-4 did not measure it.
  */
 export const SESSION_COOKIE_NAME = "vet_session";
 export const ROLE_COOKIE_NAME = "vet_role";

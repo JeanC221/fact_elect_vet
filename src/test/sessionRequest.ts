@@ -12,7 +12,7 @@ import { SESSION_COOKIE_NAME } from "@/services/sessionCookies";
  * because D0 adds a session guard to 13 route handlers, and duplicating the
  * signing harness across 11 test files would violate .clinerules ZERO
  * DUPLICATION. The harness itself is the one already proven in
- * `middleware.test.ts` — a signed JWT in a `cookie` header, nothing mocked.
+ * `proxy.test.ts` — a signed JWT in a `cookie` header, nothing mocked.
  *
  * Known `ts-prune` false positive: consumed only by `*.test.ts` files, so a
  * production-only reachability scan reports it as dead code. It is not.
@@ -30,7 +30,7 @@ export const EMPLOYEE_SESSION = { email: "recepcion@clinica.co", admin: false };
 /** Clinic owner role: valid session, `admin: true`. */
 export const ADMIN_SESSION = { email: "admin@clinica.co", admin: true };
 
-/** Origin used for every fabricated request; mirrors `middleware.test.ts`. */
+/** Origin used for every fabricated request; mirrors `proxy.test.ts`. */
 const TEST_ORIGIN = "https://app.local";
 
 interface RequestInitOptions {

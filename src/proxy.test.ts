@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import { NextRequest } from "next/server";
-import { middleware } from "./middleware";
+import { proxy } from "./proxy";
 import { signSessionToken } from "./services/jwt";
 import { SESSION_COOKIE_NAME } from "./services/sessionCookies";
 
@@ -25,7 +25,7 @@ const EMPLOYEE = { email: "recepcion@clinica.co", admin: false };
 const ADMIN = { email: "admin@clinica.co", admin: true };
 
 beforeAll(() => {
-  process.env.JWT_SECRET = "middleware-test-secret-not-a-real-key";
+  process.env.JWT_SECRET = "proxy-test-secret-not-a-real-key";
 });
 
 async function request(
@@ -38,10 +38,10 @@ async function request(
     const token = await signSessionToken(session);
     headers.set("cookie", `${SESSION_COOKIE_NAME}=${token}`);
   }
-  return middleware(new NextRequest(new URL(`https://app.local${path}`), { method, headers }));
+  return proxy(new NextRequest(new URL(`https://app.local${path}`), { method, headers }));
 }
 
-describe("middleware — GET /api/emission-mode is readable by any authenticated employee", () => {
+describe("proxy — GET /api/emission-mode is readable by any authenticated employee", () => {
   it("lets an employee GET the emission mode, so the client can confirm it instead of defaulting to sandbox", async () => {
     const res = await request("/api/emission-mode", "GET", EMPLOYEE);
     expect(res.status).toBe(200);
@@ -72,7 +72,7 @@ describe("middleware — GET /api/emission-mode is readable by any authenticated
   });
 });
 
-describe("middleware — the method exception does not leak to the other admin-only routes", () => {
+describe("proxy — the method exception does not leak to the other admin-only routes", () => {
   it("keeps /api/invoice-claims admin-only on every method, GET included", async () => {
     for (const method of ["GET", "DELETE"]) {
       const res = await request("/api/invoice-claims", method, EMPLOYEE);
@@ -90,7 +90,7 @@ describe("middleware — the method exception does not leak to the other admin-o
   });
 });
 
-describe("middleware — A-1: catalog-mapping PUT and credentials/health are admin-only", () => {
+describe("proxy — A-1: catalog-mapping PUT and credentials/health are admin-only", () => {
   it("lets an employee GET the catalog mapping, but refuses PUT — an employee must not change the DIAN document type or seller by API", async () => {
     expect((await request("/api/catalog-mapping", "GET", EMPLOYEE)).status).toBe(200);
     const res = await request("/api/catalog-mapping", "PUT", EMPLOYEE);
@@ -113,7 +113,35 @@ describe("middleware — A-1: catalog-mapping PUT and credentials/health are adm
   });
 });
 
-describe("middleware — unchanged baseline behaviour", () => {
+describe("proxy — A-4 file-convention contract", () => {
+  /**
+   * Next 16 resolves the boundary as `(isProxy ? mod.proxy : mod.middleware)
+   * || mod.default` (build/templates/middleware.js). A rename that left the
+   * export named `middleware` would therefore throw at BUILD time, not here —
+   * but a rename that silently reintroduced a `default` export would take
+   * precedence in a way no other test covers, so pin the named export.
+   */
+  it("exports the boundary under the name `proxy`, which is what Next 16 loads", async () => {
+    const mod = await import("./proxy");
+    expect(typeof mod.proxy).toBe("function");
+    expect("middleware" in mod).toBe(false);
+  });
+
+  /**
+   * The matcher is the blast radius of the whole guard: widen it and static
+   * assets start paying a Node function invocation; narrow it and a protected
+   * route silently stops being guarded. A-4 must not change it, and the three
+   * gates cannot tell — a wrong-but-valid matcher compiles and passes.
+   */
+  it("keeps the matcher byte-identical across the middleware→proxy migration", async () => {
+    const { config } = await import("./proxy");
+    expect(config.matcher).toEqual([
+      "/((?!login|_next/static|_next/image|favicon.ico).*)",
+    ]);
+  });
+});
+
+describe("proxy — unchanged baseline behaviour", () => {
   it("lets an employee reach the dashboard and the non-admin API routes", async () => {
     expect((await request("/", "GET", EMPLOYEE)).status).toBe(200);
     expect((await request("/api/invoices", "POST", EMPLOYEE)).status).toBe(200);

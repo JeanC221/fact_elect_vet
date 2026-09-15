@@ -1,12 +1,12 @@
 import type { Consultation, Client, Patient } from "@/schemas/provet";
-import { formatColombiaDate } from "@/schemas/provet";
+import { formatColombiaDate, roundTo } from "@/schemas/provet";
 import type { SiigoInvoicePayload, SiigoProduct, SiigoPaymentType } from "@/schemas/siigo";
 import { resolvePaymentTypeId, type CatalogMapping } from "@/mappers/catalogMapping";
 import { stampSendFor, type EnvironmentMode } from "@/mappers/credentials";
 import { buildSiigoCustomer } from "@/mappers/customerNormalizer";
 
-/** Round strictly to 2 decimals (DIAN cent precision) — defeats float drift (e.g. 7763.980000000001). */
-const round2 = (n: number): number => Number(Math.round(Number(`${n}e2`)) + "e-2");
+/** Round strictly to 2 decimals (DIAN cent precision). N24 — wrapper over the shared primitive in `schemas/provet.ts` (was its own local trick, now also behind `toCents`). */
+const round2 = (n: number): number => roundTo(n, 2);
 
 /**
  * Today's date as YYYY-MM-DD in Colombia time (UTC-5, no DST year-round).

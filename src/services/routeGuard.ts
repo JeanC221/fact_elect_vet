@@ -10,23 +10,23 @@ import {
 } from "@/mappers/routeAuthz";
 
 /**
- * Per-handler session guard — defense in depth behind `middleware.ts`.
+ * Per-handler session guard — defense in depth behind `proxy.ts`.
  *
- * Why this exists: until D0, `middleware.ts` was the ONLY layer verifying a
- * session. Next.js CVE-2025-29927 showed that a middleware check can be
+ * Why this exists: until D0, the route guard file was the ONLY layer verifying
+ * a session. Next.js CVE-2025-29927 showed that such a check can be
  * skipped with a single HTTP header, and Vercel's own mitigation guidance is
  * to enforce authorization in the underlying route as well. In this system the
  * underlying route is `POST /api/invoices`, which stamps a legally binding DIAN
  * document — so a bypass is not a data leak, it is a fraudulent invoice.
  *
- * Policy is NOT re-derived here. `ADMIN_ONLY_RULES` in `middleware.ts` remains
+ * Policy is NOT re-derived here. `ADMIN_ONLY_RULES` in `proxy.ts` remains
  * the routing policy (including the method-aware exception for
  * `GET /api/emission-mode`); each handler simply names the requirement it
  * already had, and both layers share one decision function so they cannot
  * drift apart.
  *
  * The cookie is read via `req.cookies.get(...)`, the same accessor
- * `middleware.ts` uses, rather than parsing the `Cookie` header by hand:
+ * `proxy.ts` uses, rather than parsing the `Cookie` header by hand:
  * quoting and multi-cookie headers are already solved there.
  */
 

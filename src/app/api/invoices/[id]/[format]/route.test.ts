@@ -24,7 +24,7 @@ import {
  * D0 added a session guard to every route handler, so these tests now send a
  * genuinely signed cookie. An admin session is used because it satisfies both
  * `requireSession` and `requireAdmin`; the role boundary itself is covered by
- * `middleware.test.ts` and, for the emission-mode asymmetry, by the dedicated
+ * `proxy.test.ts` and, for the emission-mode asymmetry, by the dedicated
  * employee cases in `src/app/api/emission-mode/route.test.ts`.
  */
 let sessionCookie: string;

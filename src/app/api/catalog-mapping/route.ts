@@ -83,7 +83,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 export async function PUT(req: NextRequest): Promise<NextResponse> {
   // A-1: admin-only. This is what actually changes documentTypeId/sellerId/
   // catalog mapping; GET above stays session-only (read-only, no fiscal
-  // consequence). Policy mirrors middleware.ts's ADMIN_ONLY_RULES entry for
+  // consequence). Policy mirrors proxy.ts's ADMIN_ONLY_RULES entry for
   // this prefix — see the note there.
   const guard = await requireAdmin(req);
   if (!guard.ok) return guard.response;

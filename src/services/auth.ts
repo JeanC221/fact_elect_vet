@@ -1,7 +1,7 @@
 import { authErrorToSpanish } from "@/mappers/auth";
 import { base64url, signSessionToken } from "@/services/jwt";
 
-// Re-export the token layer so "@/services/auth" consumers (middleware,
+// Re-export the token layer so "@/services/auth" consumers (proxy,
 // settings pages) keep importing from here without changing import paths.
 export { signSessionToken, verifySessionToken } from "@/services/jwt";
 export type { SessionPayload } from "@/services/jwt";
@@ -34,7 +34,7 @@ export type { SessionPayload } from "@/services/jwt";
  *   - Credentials sourced exclusively from environment variables.
  *   - Constant-time hash comparison to resist timing attacks.
  *   - The authoritative admin flag is embedded in the JWT (enforced by
- *     middleware) and returned here for the client-readable role cookie.
+ *     proxy.ts) and returned here for the client-readable role cookie.
  */
 
 /** Custom error class wrapping auth failures with a stable code. */

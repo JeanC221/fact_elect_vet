@@ -3,7 +3,8 @@
  *
  * Single source of truth for "may this session reach this route", consumed by
  * two callers that must never disagree:
- *   - `middleware.ts` — the first line, running on the Edge runtime.
+ *   - `proxy.ts` — the first line. Runs on the Node.js runtime since A-4
+ *     (was `middleware.ts` on Edge; `proxy` cannot be configured for Edge).
  *   - `services/routeGuard.ts` — defense in depth inside every route handler,
  *     because a middleware bypass otherwise reaches `POST /api/invoices`
  *     unauthenticated (see 01_PROJECT_REQUIREMENTS §2).

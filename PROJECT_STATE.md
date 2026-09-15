@@ -449,7 +449,7 @@ preview.
 | **A-1** ✅ **CERRADO 2026-09-14 (sesión 4)** — ver `### Resolved — sesión 4, A-1/A-2/A-3/C-12` | N15 | `PUT /api/catalog-mapping` y `POST /api/credentials/health` solo piden `requireSession`. Un `employee` puede cambiar por API el tipo de comprobante DIAN y todo el mapeo. Misma clase que D0; sobrevivió al chat 6a |
 | **A-2** ✅ **CERRADO 2026-09-14 (sesión 4)** — ver `### Resolved — sesión 4, A-1/A-2/A-3/C-12` | N19 | El comentario de `auth.ts:14-19` afirma que el hash es irreversible. `sha256` sin sal ni coste no lo es. **La afirmación es falsa y hoy sirve de argumento para aplazar D1** |
 | **A-3** ⚠️ **MITIGADO 2026-09-14 (sesión 4), no cerrado** — ver `### Resolved — sesión 4, A-1/A-2/A-3/C-12` | N20 | Sin revocación de sesión: cambiar la contraseña no invalida JWT vivos. TTL bajado de 24h a 8h (mitigación, acota la ventana a un turno). **El diseño completo (epoch de sesión en `credentials_config`, `ALTER TABLE`, UI de "cerrar todas las sesiones") queda para su propia sesión, con Opus High — decisión explícita de Jean, no re-litigar** |
-| **A-4** | nuevo | **`middleware.ts` → `proxy.ts` y decisión de runtime.** Diferido desde la sesión 1 a propósito (ver Decisiones de plataforma). Aquí viven los 29 tests de `middleware`/`routeGuard`/`routeAuthz`. **Excluido explícitamente de la sesión 4 por Jean** — queda para su propia sesión |
+| **A-4** ✅ **CERRADO 2026-09-15 (sesión 8)** — ver `### Resolved — sesión 8, A-4` | nuevo | **`middleware.ts` → `proxy.ts` y decisión de runtime.** Diferido desde la sesión 1 a propósito (ver Decisiones de plataforma). Aquí viven los tests de `proxy`/`routeGuard`/`routeAuthz`. **Confirmado en vivo contra 16.3.4: `proxy` corre SIEMPRE en Node y su runtime no es configurable.** La frontera de autorización quedó en Node; el matcher no cambió |
 | **C-12** ✅ **CERRADO 2026-09-14 (sesión 4)** — ver `### Resolved — sesión 4, A-1/A-2/A-3/C-12` | nuevo 2026-09-11 (sesión 2) | **Assert de total server-side re-fetcheando Provet dentro de `POST /api/invoices`.** Es la **única** variante del control de C-11 que no se puede evadir. La de la sesión 2 no lo es: **A** vive en el mapper y en la UI, y **D** (`expectedTotal` en el body) lo manda el propio cliente, así que **un POST directo a `/api/invoices` con un `expectedTotal` coherente con un `items` equivocado pasa los dos**. A+D atrapan bugs, no malicia — que es exactamente su modelo de amenaza declarado. Coste de C-12: un round-trip a Provet por emisión. **No se implementó en la sesión 2 por desproporcionada, no por innecesaria** |
 
 ### Resolved — sesión 4, A-1/A-2/A-3/C-12 (2026-09-14)
@@ -490,8 +490,8 @@ intercaló entre A-2 y C-12 tras confirmar el TTL con Jean.
 | **H-12** ✅ **CERRADO 2026-09-15 (sesión 7)** — ver `### Resolved — sesión 7, Higiene` | D-j | Sanear texto también en `creditNote.ts` (fallback `?? reason` de `annulmentReasonLabel`) |
 | **H-13** ✅ **CERRADO 2026-09-15 (sesión 7), ya estaba resuelto** — ver `### Resolved — sesión 7, Higiene` | D-k | `customer_settings` en la tabla de traducción de errores. **Hallazgo obsoleto: la entrada ya existía en `ERROR_TRANSLATIONS`** de una sesión anterior sin marcar en el backlog; solo le faltaba test dedicado |
 | **H-14** | P-1 rama A | **Detector de anulaciones en Provet.** Especificado y sin incógnitas: `/invoice/?credit_note__is=true&modified__gte=` → id del path de `credit_note_original_invoice` → factura → consulta. **Solo detector, nunca emisor automático.** Nota: C-1 hay que arreglarlo aunque este detector no se construya. **No tomado en sesión 7 a propósito: es feature nueva, no higiene — requiere decidir qué hace la app con lo detectado (panel admin? solo log?) antes de escribir código, y esa decisión de diseño no está tomada** |
-| **N24** | nuevo, sesión 7 | **Riesgo de redondeo real, no solo estilo — descubierto al mirar H-9.** `toCents(n) = Math.round(n*100)` puede redondear mal en el límite exacto `x.xx5` (ej. `1.005` → 100 en vez de 101) por el error de punto flotante de la multiplicación directa. `round2` en `provetToSiigo.ts` usa el truco de notación exponencial (`` `${n}e2` ``) que sí lo evita. `toCents` se usa en los guards de coincidencia de totales de C-11/C-12 (ruta crítica legal) — un valor exactamente en el borde podría dar un falso mismatch/match. **No tocado sin confirmación explícita de Jean: cambiar la aritmética de un guard fiscal ya probado necesita diseño propuesto primero, no un fix silencioso de higiene** |
-| **N25** | nuevo, sesión 7 | `creditNote.ts` tiene el mismo cap de `observations` a 500 que tenía la factura (H-5), pero el doc oficial de Siigo no fija un número explícito para notas crédito (solo "Comentarios adicionales"). **No tocado sin evidencia** — si Jean puede confirmar el límite real (Postman/soporte Siigo), se sube a H-5 o se abre aparte |
+| **N24** ✅ **CERRADO 2026-09-15 (sesión 8)** — ver `### Resolved — sesión 8, N24` | nuevo, sesión 7 | **Riesgo de redondeo real, no solo estilo — descubierto al mirar H-9.** `toCents(n) = Math.round(n*100)` puede redondear mal en el límite exacto `x.xx5` (ej. `1.005` → 100 en vez de 101) por el error de punto flotante de la multiplicación directa. `round2` en `provetToSiigo.ts` usa el truco de notación exponencial (`` `${n}e2` ``) que sí lo evita. `toCents` se usa en los guards de coincidencia de totales de C-11/C-12 (ruta crítica legal) — un valor exactamente en el borde podría dar un falso mismatch/match. **Confirmado con Jean: unificar hacia el truco de `round2`, y consolidar ambas en una sola primitiva compartida (`shiftRound`/`roundTo` en `schemas/provet.ts`)** |
+| **N25** ✅ **CERRADO 2026-09-15 (sesión 8) — documental, sin cambio de código** — ver `EVIDENCIA_APIS.md §1.12` | nuevo, sesión 7 | `creditNote.ts` tiene el mismo cap de `observations` a 500 que tenía la factura (H-5). **Confirmado vía el portal de ayuda al cliente de Siigo** (fuente distinta de la doc de API citada en H-5): 5 páginas del manual coinciden en 500 caracteres para nota crédito. El cap actual es correcto, no se tocó nada. **Más débil que un 400 real en sandbox — queda pendiente de confirmación empírica si algún día hay POST real de nota crédito (P-2)** |
 | **H-19** ✅ **CERRADO 2026-09-15 (sesión 7)** — ver `### Resolved — sesión 7, H-19/H-8` | nuevo 2026-09-14 (sesión 3) | **`invoice_claims` no tenía archivo de test propio en todo el proyecto.** Los guards `WHERE status = 'emitted'`/`'annulling'` de `acquireInvoiceClaim`/`acquireAnnulmentClaim` solo se ejercitaban indirectamente vía tests de ruta que mockeaban `getPool().query` con respuestas canned — un mutante que borraba esa cláusula WHERE no lo detectaba ningún test existente (confirmado por mutación manual en la sesión 3, y de nuevo — ya muerto — en la sesión 7) |
 
 ### Resolved — sesión 6, H-10 (2026-09-15)
@@ -866,50 +866,202 @@ entre cada uno. El ZIP final de esta sesión (más abajo) reemplaza al
    configurable, así que el paso a `proxy.ts` mueve toda la frontera de
    autorización a Node. Es una decisión de arquitectura, no un `mv`.
 
+### Resolved — sesión 8, N25 (2026-09-15)
+
+Base: `369e2351f8d35a2750b40bdd0e34ca75d7ad527a` (HEAD real de `main` al
+clonar, confirmado — merge de sesión 7, sin PR pendiente). Baseline
+verificado antes de tocar nada: 49 files / 812 tests, `tsc` limpio, build
+`(8/8)`, 20 rutas, 4 estáticas, `npm audit` 0/0 — coincidió al dígito con
+`prompt_sesion_8.md`.
+
+- **N25 — cerrado documentalmente, sin cambio de código.** El cap de 500
+  caracteres en `creditNote.ts` (`siigoCreditNoteSchema.observations`) se
+  confirmó correcto contra el portal de ayuda al cliente de Siigo (fuente
+  distinta de la doc de API para desarrolladores citada en H-5) — ver
+  `EVIDENCIA_APIS.md §1.12` para el detalle completo y la salvedad de que es
+  más débil que OBSERVADO. TDD no aplica: es una tarea de investigación
+  documental, no un fix de código.
+- **Verification:** ningún cambio de código — no aplica correr los tres
+  gates. Solo se editaron `EVIDENCIA_APIS.md` y este archivo
+  (`PROJECT_STATE.md`).
+
+### Resolved — sesión 8, N24 (2026-09-15)
+
+Base: la misma del baseline de esta sesión (`369e2351...`, 49 files / 812
+tests, `tsc` limpio, build `(8/8)`, 20 rutas, 4 estáticas, `npm audit` 0/0).
+
+- **Análisis de impacto antes de tocar código** (pedido explícito del
+  prompt): releídos `toCents`/`formatColombiaDate` (`schemas/provet.ts`),
+  `round2` (`provetToSiigo.ts`), y los 4 call sites de `toCents`
+  (`schemas/provet.ts:129`, `invoices/route.ts:91`,
+  `consultationQueue.ts:103/134`, `creditNote.ts:135`). El riesgo real se
+  concentra en `consultationQueue.ts` (`detectFullReversal`/
+  `detectTotalMismatch`, C-11/C-16): `lineTotal` es una cadena de
+  multiplicación cruda (`unit_price * quantity * (1+tax_rate) - discount`)
+  que nunca pasa por `round2` antes de llegar a `toCents`. Los otros tres
+  sitios operan sobre valores ya limpiados a 2 decimales (por `round2` o por
+  `hasMaxDecimals` de Zod), riesgo mucho menor pero no cero.
+  - **Impacto verificado empíricamente, no solo en teoría:** se parcheó
+    `toCents` al truco de `round2` de forma temporal y se corrió la suite
+    completa antes de escribir nada — **49 files / 812 tests, cero roto** —
+    y se revirtió. Confirma que unificar la aritmética no cambia ningún
+    total ya probado en la suite existente, tal como pedía el prompt.
+  - **Caso negativo revisado aparte** (relevante por las filas de descuento
+    negativas de C-16): el drift de `n * 100` en un borde `x.xx5` negativo
+    (ej. `-1.005 → -100.49999999999999`) coincide con el resultado del truco
+    corregido (`-100.5` exacto) porque la regla de empate de `Math.round` en
+    JS siempre redondea hacia `+Infinity` — no hay caso negativo donde el fix
+    cambie algo.
+- **Fix — `src/schemas/provet.ts`:** nueva primitiva compartida
+  `shiftRound(n, decimals)` (usa `Number(`${n}e${decimals}`)`, el mismo
+  truco de notación exponencial que ya tenía `round2`, en vez de
+  `n * 10**decimals`) y `roundTo(n, decimals)` sobre ella. `toCents` pasa a
+  ser `shiftRound(n, 2)` — antes `Math.round(n * 100)`.
+- **Consolidación — `src/mappers/provetToSiigo.ts`:** `round2` deja de tener
+  su propia implementación local y pasa a ser un wrapper de una línea sobre
+  `roundTo(n, 2)` importado de `schemas/provet.ts` — mismo patrón de
+  primitiva-compartida-con-wrappers ya establecido en H-9 para
+  `formatColombiaDate`. Bit-a-bit idéntico al `round2` viejo (verificado con
+  los mismos valores del código real: `7763.980000000001`, `33.335`,
+  `-50.005`, etc. — todos coinciden).
+- **TDD:** red confirmado antes del fix (`toCents(1.005)` esperaba `101` y
+  el código viejo devolvía `100`; ídem `1.015`/`1.025`/`1.035`). 3 tests
+  nuevos en `provet.test.ts` cubren el borde `x.xx5` de `toCents`, más 2
+  tests nuevos de `roundTo` (incluido el caso negativo). Mutación manual: se
+  revirtió `shiftRound` a `Math.round(n * Math.pow(10, decimals))` (el bug
+  original) — 2 tests mueren, confirmando que no son decorativos — y se
+  restauró el archivo idéntico al fix (`diff` limpio).
+- **Verification:** `npx tsc --noEmit` ✅ exit 0 | `npx vitest run` ✅ **49
+  files / 815 tests** (812 → 815, +3) | `env -u NODE_ENV npx next build` ✅
+  exit 0, **20 rutas, 4 estáticas, `(8/8)`, sin cambio de forma** | `npm
+  audit` **0/0, sin cambio**.
+- **Archivos tocados (3):** `src/schemas/provet.ts`,
+  `src/schemas/provet.test.ts`, `src/mappers/provetToSiigo.ts`. Contenido
+  completo de cada uno dado en el chat, ruta exacta confirmada.
+
+### Resolved — sesión 8, A-4 (2026-09-15)
+
+`src/middleware.ts` → `src/proxy.ts`. Se trató como decisión de arquitectura,
+no como `mv`, según la decisión de plataforma nº 6.
+
+- **Verificación de la premisa contra 16.3.4, antes de tocar nada.** La
+  afirmación "`proxy` no soporta `edge` y su runtime `nodejs` no es
+  configurable" sigue siendo cierta, y ahora está verificada en tres fuentes
+  independientes en vez de asumida: (1) el propio paquete instalado —
+  `next/dist/build/analysis/get-page-static-info.js` lanza `E1031` con el
+  mensaje *"Route segment config is not allowed in Proxy file… Proxy always
+  runs on Node.js runtime"* si un archivo proxy declara `runtime`; (2)
+  `next/dist/build/templates/middleware.js` resuelve la frontera como
+  `(isProxy ? mod.proxy : mod.middleware) || mod.default`, con
+  `isProxy = page === '/proxy' || page === '/src/proxy'`; (3) la doc oficial
+  de Next y la de Vercel, que además confirman que `middleware.ts` sigue
+  disponible solo para casos de Edge y será eliminado en una versión futura.
+  **Nada cambió desde la sesión 1.**
+- **El cambio de runtime es real y está medido, no inferido.** Diff de los
+  artefactos de build entre las dos versiones, con el resto del repo idéntico:
+
+  | Artefacto | Con `middleware.ts` | Con `proxy.ts` |
+  |---|---|---|
+  | `middleware-manifest.json` | `middleware: { "/": … }`, entrypoint `server/edge/chunks/…edge-wrapper…`, `sortedMiddleware: ["/"]` | `middleware: {}`, `sortedMiddleware: []` — **vacío** |
+  | `functions-config-manifest.json` | `functions: {}` | `"/_middleware": { "runtime": "nodejs", matchers: […] }` |
+  | Aviso de build | `⚠ The "middleware" file convention is deprecated` | **sin aviso** |
+
+  El `regexp` y el `originalSource` del matcher son **byte-idénticos** entre
+  ambos builds. La frontera pasó de Edge a una función Node; no se ensanchó ni
+  se angostó su alcance.
+- **Por qué el port no requirió tocar la criptografía:** `jwt.ts` ya era Web
+  Crypto puro (`crypto.subtle`, `TextEncoder`, `btoa`/`atob`), todos globales
+  en Node 18+ — verificado ejecutándolo en Node pelado. Además Vitest corre
+  con `environment: "node"`, así que los 13 tests del guard llevaban desde
+  siempre ejercitando esta ruta **en Node**, que es exactamente el runtime al
+  que se mudó. Ese es el mayor factor de desriesgo de esta sesión y es
+  preexistente, no mérito del cambio.
+- **2 tests nuevos de contrato (`src/proxy.test.ts`, 13 → 15).** Los tres
+  gates no ven ninguna de las dos cosas: un matcher distinto pero válido
+  compila y pasa, y un `export default` reintroducido ganaría precedencia en
+  silencio. Mismo razonamiento que `vercelSecurityHeaders.test.ts`. Mutación
+  manual, 2 mutantes, los 2 muertos: alterar el matcher (1 test muere) y
+  reintroducir `export const middleware = proxy` (1 test muere); archivo
+  restaurado idéntico (`diff` limpio) tras cada uno.
+- **Comentarios obsoletos corregidos en 12 archivos.** El repo ya se quemó una
+  vez con un comentario que afirmaba algo falso (el "hash irreversible" de
+  A-2, usado como argumento para no priorizar D1), así que las referencias a
+  "Edge runtime" y a `middleware.ts` se actualizaron en vez de dejarse
+  pudrir: `proxy.ts`, `jwt.ts`, `routeAuthz.ts`, `routeGuard.ts`,
+  `routeGuard.test.ts`, `auth.ts`, `sessionCookies.ts`, `settings/page.tsx`,
+  `NavBar.tsx`, `InvoiceClaimsPanel.tsx`, `invoice-claims/route.ts`,
+  `credentials/health/route.ts`, `catalog-mapping/route.ts`, y las 11
+  referencias a `middleware.test.ts` en tests de rutas.
+- **A-4 cambia la mitad de una pregunta abierta de A-3, y conviene no
+  malinterpretarlo.** La nota de `sessionCookies.ts` decía que el epoch de
+  sesión dependía de "si el middleware de Edge puede pagar una lectura a
+  Postgres por request". Con la frontera en Node, `pg` es ahora **alcanzable**
+  desde ahí — no lo era desde Edge. Eso elimina un bloqueante duro, **no** la
+  pregunta de costo: un round trip a Postgres en cada request que matchee
+  sigue siendo una decisión de diseño abierta para la sesión de A-3, y esta
+  sesión **no la midió**. Comentario actualizado en ese sentido.
+- **Consecuencia operativa que Jean debe decidir por separado (no es un
+  bloqueante de este cambio, pero es real):** en Vercel, el middleware de Edge
+  corría en el CDN con arranque en frío casi nulo; una función Node arranca en
+  la región de `vercel.json` (`iad1`) y tiene arranque en frío
+  sustancialmente peor. Como el matcher cubre todo salvo `login` y estáticos,
+  **cada request de la clínica paga ahora una invocación de función Node**.
+  Esto mueve consumo de la cuota de Edge Middleware a la de Functions, lo cual
+  interactúa con el pendiente de Hobby → Pro. **Medirlo requiere un deploy
+  real: los tres gates no pueden verlo, y esta sesión no lo midió.**
+- **Verification:** `npx tsc --noEmit` ✅ exit 0 | `npx vitest run` ✅ **49
+  files / 817 tests** (815 → 817, +2) | `env -u NODE_ENV npx next build` ✅
+  exit 0, **20 rutas, 4 estáticas, `(8/8)`, sin cambio de forma, y ya sin el
+  aviso de deprecación** | `npm audit` **0/0, sin cambio**.
+
 ---
 
 ## Last Update
 - **Date:** 2026-09-15
-- **Agent:** Claude (`prompt_sesion_7.md` — **sesión 7**, Higiene — 9
-  hallazgos cerrados: H-19, H-8, H-3, H-2, H-7, H-4, H-5, H-6, H-9, H-12,
-  H-13)
-- **Base commit:** `71235bb4abdc307d2c781996d2efb1013d06f2ba` (HEAD real de
-  `main` al clonar, commit directo, sin PR pendiente de merge). Baseline
-  verificado antes de tocar nada: 47 files / 733 tests, `tsc` limpio, build
-  `(8/8)`, 20 rutas, 4 estáticas, `npm audit` 0/0 — coincidió al dígito con
-  `prompt_sesion_7.md`. Confirmado además en GitHub Actions: run de CI sobre
-  ese commit en **Success**.
-- **Completed Task:** 11 hallazgos cerrados (H-19, H-8, H-3, H-2, H-7, H-4,
-  H-5, H-6, H-9, H-12, H-13 — el último ya estaba resuelto, solo le faltaba
-  test). Detalle completo de cada uno en `### Resolved — sesión 7, Higiene`
-  más arriba. **No tomados a propósito:** H-1 y H-11 (bloqueados por falta
-  de credenciales Provet/Siigo en el entorno), H-14 (es feature nueva, no
-  higiene — requiere decisión de diseño no tomada). **Dos hallazgos nuevos
-  registrados sin arreglar, por impacto fiscal/falta de evidencia:** N24
-  (riesgo real de redondeo en `toCents` cerca de `x.xx5`, afecta guards
-  C-11/C-12) y N25 (cap de `observations` en `creditNote.ts` sin evidencia
-  del límite real para notas crédito).
+- **Agent:** Claude (`prompt_sesion_8.md` — **sesión 8**: N25, N24 y A-4)
+- **Base commit:** `369e2351f8d35a2750b40bdd0e34ca75d7ad527a` (HEAD real de
+  `main` al clonar — merge de la sesión 7, confirmado, sin PR pendiente).
+  Baseline verificado antes de tocar nada: 49 files / 812 tests, `tsc`
+  limpio, build `(8/8)`, 20 rutas, 4 estáticas, `npm audit` 0/0 — coincidió
+  al dígito con `prompt_sesion_8.md`.
+- **Completed Task:** los 3 hallazgos que quedaban sin bloqueo externo.
+  **N25** cerrado documentalmente, sin cambio de código: el cap de 500 en
+  `creditNote.ts` es correcto según el portal de ayuda al cliente de Siigo
+  (fuente distinta de la doc de API citada en H-5) — ver
+  `EVIDENCIA_APIS.md §1.12`; queda pendiente de confirmación empírica en P-2.
+  **N24** cerrado con fix: `toCents` redondeaba mal en el borde `x.xx5`;
+  ahora `toCents` y el `round2` de `provetToSiigo.ts` comparten una sola
+  primitiva (`shiftRound`/`roundTo` en `schemas/provet.ts`).
+  **A-4** cerrado: `src/middleware.ts` → `src/proxy.ts`, con el cambio de
+  runtime Edge → Node medido en los artefactos de build, no inferido.
+  Detalle de cada uno en su sección `### Resolved — sesión 8` más arriba.
 - **Verification:** `npx tsc --noEmit` ✅ exit 0 | `npx vitest run` ✅ **49
-  files / 812 tests** (733 → 812, +79) | `env -u NODE_ENV npx next build` ✅
-  exit 0, **20 rutas, 4 estáticas, `(8/8)`, sin cambio de forma** | `npm
-  audit` **0/0, sin cambio**. Mutación manual: un mutante por cada fix con
-  lógica nueva, todos verificados muertos y el archivo restaurado idéntico
-  al HEAD (`diff` limpio) antes de seguir con el siguiente hallazgo.
-- **Entregable:** `sesion7_higiene_completa.zip`, SHA-256 por archivo dado
-  en el chat — **reemplaza** al `sesion7_higiene_apiclient.zip` entregado a
-  mitad de la sesión (no aplicar ese, solo el final). **No aplicado
-  todavía** — Jean lo aplica con `rsync` y confirma los gates de su lado
-  antes de mergear.
-- **Next Pending Task:** ningún bloqueante crítico. Queda H-1 y H-11
-  (bloqueados por credenciales), H-14 (necesita diseño de qué hacer con lo
-  detectado), N24 y N25 (necesitan confirmación de Jean, no son "termínalos
-  si no rompés nada" — tienen impacto fiscal o faltan evidencia), A-4
-  (`middleware.ts` → `proxy.ts`, su propia sesión), el diseño completo de
-  A-3 (su propia sesión con Opus High — decisión explícita de Jean, no
-  re-litigar), y `### Con credenciales de producción — sesión 6` si para el
-  próximo chat ya hay credenciales. **Propuesta de prioridad, no decisión
-  tomada** — Jean confirma o redirige
-  al abrir el siguiente chat.
+  files / 817 tests** (812 → 817: +3 N24, +2 A-4) | `env -u NODE_ENV npx next
+  build` ✅ exit 0, **20 rutas, 4 estáticas, `(8/8)`, sin cambio de forma** |
+  `npm audit` **0/0, sin cambio**. Mutación manual en los dos hallazgos con
+  lógica nueva (1 mutante en N24, 2 en A-4), todos muertos y el archivo
+  restaurado idéntico (`diff` limpio) antes de seguir.
+- **Entregable:** `sesion8_n25_n24_a4.zip`, SHA-256 por archivo dado en el
+  chat. **No aplicado todavía** — Jean lo aplica con `rsync` y confirma los
+  gates de su lado antes de mergear. **Ojo al aplicar:** este entregable
+  RENOMBRA `src/middleware.ts` a `src/proxy.ts`. `rsync` copia el nuevo pero
+  **no borra el viejo**, y si los dos coexisten Next 16 carga `proxy.ts` y
+  deja `middleware.ts` como código muerto que parece vivo. Hay que borrar
+  `src/middleware.ts` y `src/middleware.test.ts` a mano tras el `rsync`.
+- **Next Pending Task:** ningún bloqueante crítico, y el backlog sin bloqueo
+  externo quedó vacío. Lo que queda: **H-1** y **H-11** (bloqueados por
+  credenciales Provet/Siigo), **H-14** (feature nueva — falta decidir qué
+  hace la app con lo detectado), el **diseño completo de A-3** (su propia
+  sesión con Opus High, decisión explícita de Jean, no re-litigar — nota:
+  A-4 volvió `pg` alcanzable desde la frontera, lo cual quita un bloqueante
+  duro pero no responde la pregunta de costo), **CSP fase 2** (flip a
+  enforcing tras una ventana limpia de report-only en preview), el **upgrade
+  a Vercel Pro**, y `### Con credenciales de producción — sesión 6` si para
+  el próximo chat ya hay credenciales. **Dos mediciones pendientes que
+  ningún gate puede hacer:** el impacto de latencia/cuota de mover la
+  frontera a Node (A-4) y el cambio de comportamiento de `page.tsx` que viene
+  de H-8, ambos requieren un preview real. **Propuesta de prioridad, no
+  decisión tomada** — Jean confirma o redirige al abrir el siguiente chat.
 
 ## Previous Update (sesión 6, cierre vía prompt_sesion_6.md)
 - **Date:** 2026-09-15
@@ -1224,7 +1376,7 @@ session compares against:
 | Route table | **20 routes**, **4 static `○`**: `/`, `/_not-found`, `/settings/credentials`, `/settings/mapping` — same four as under 14 |
 | Middleware line | the literal line **`ƒ Proxy (Middleware)`** is present, with **no kB** |
 | `.next/server/middleware-manifest.json` | **`"version": 3`**, **1 matcher**, `originalSource` = `/((?!login\|_next/static\|_next/image\|favicon.ico).*)` |
-| Expected warning, **exit 0 anyway** | `⚠ The "middleware" file convention is deprecated. Please use "proxy" instead.` — deliberate, platform decision nº 6. The suggested `middleware-to-proxy` codemod is **forbidden** until session 4 (A-4) |
+| ~~Expected warning~~ **ya no aparece** | `⚠ The "middleware" file convention is deprecated...` — **desapareció en la sesión 8 al cerrar A-4.** Si vuelve a aparecer, alguien revirtió `src/proxy.ts` a `src/middleware.ts` |
 | Noise that **disappeared** | `⨯ Failed to patch lockfile ... reading 'os'`. If it comes back, something reverted `next` |
 | Local-only noise on Jean's machine | `⚠ Next.js ignored package-lock.json in /Users/jean because it is outside the current Git repository`. Turbopack walks up looking for lockfiles to infer the workspace root and finds a **stray `package-lock.json` in the home directory**. It says `ignored`: the build used the correct root and is valid. **Does not appear on Vercel**, which clones only the repo. Fix by deleting the stray file — **never** by adding `turbopack.root` to `next.config.js` |
 

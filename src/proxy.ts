@@ -5,10 +5,23 @@ import { SESSION_COOKIE_NAME } from "@/services/sessionCookies";
 import { ACCESS_DENIED, denialBody } from "@/mappers/routeAuthz";
 
 /**
- * Edge route guard: protects the dashboard ("/") and all non-login routes.
+ * Route guard: protects the dashboard ("/") and all non-login routes.
  * Unauthenticated / expired / tampered session requests redirect to "/login".
  * Admin-only routes additionally require the `admin` flag in the verified JWT
- * payload. Runs on the Edge runtime (Web Crypto) — no external JWT dependency.
+ * payload.
+ *
+ * A-4 (2026-09-15): this was `src/middleware.ts` on the Edge runtime until
+ * Next 16 deprecated that convention. `proxy` ALWAYS runs on the Node.js
+ * runtime and its runtime is NOT configurable — `export const runtime` in a
+ * proxy file is a hard build error in 16.3.4 ("Route segment config is not
+ * allowed in Proxy file... Proxy always runs on Node.js runtime"). So the
+ * whole authorization boundary now runs in Node, not at the CDN edge.
+ * Verified in the build output: the matcher moved from
+ * `middleware-manifest.json` (edge-wrapper entrypoint) to
+ * `functions-config-manifest.json` with `"runtime": "nodejs"`, byte-identical
+ * regexp. The auth path needed no porting: `jwt.ts` is pure Web Crypto
+ * (`crypto.subtle`, `TextEncoder`, `btoa`/`atob`), all of which are global in
+ * Node 18+, and the tests below have always run under `environment: "node"`.
  *
  * "/api/emission-mode" is included here (not just its UI page
  * "/settings/credentials"): PUT is the endpoint that actually flips the
@@ -74,7 +87,7 @@ function requiresAdmin(pathname: string, method: string): boolean {
   );
 }
 
-export async function middleware(req: NextRequest): Promise<NextResponse> {
+export async function proxy(req: NextRequest): Promise<NextResponse> {
   const token = req.cookies.get(SESSION_COOKIE_NAME)?.value;
   const valid = token ? await verifySessionToken(token) : null;
   const isApiRoute = req.nextUrl.pathname.startsWith("/api/");

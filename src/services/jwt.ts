@@ -2,8 +2,10 @@ import { SESSION_TTL_SECONDS } from "@/services/sessionCookies";
 
 /**
  * Pure Web Crypto JWT layer (HMAC-SHA256). No credentials, no HTTP — only the
- * token sign/verify + base64url codec. Runs in Next.js Edge middleware and Node
- * server actions with no external JWT dependency and no Node `Buffer`.
+ * token sign/verify + base64url codec. Runs in `proxy.ts` and Node server
+ * actions with no external JWT dependency and no Node `Buffer`. Pure Web
+ * Crypto, so it was runtime-agnostic and needed no change when A-4 moved the
+ * authorization boundary from the Edge runtime to Node.
  *
  * Security (per 01_PROJECT_REQUIREMENTS §2):
  *   - Signature verified by crypto.subtle.verify (constant time).
