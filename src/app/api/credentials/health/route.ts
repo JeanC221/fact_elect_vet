@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { credentialsSchema } from "@/mappers/credentials";
 import { getSiigoAccessToken, SiigoAuthError } from "@/services/siigoAuth";
-import { requireSession } from "@/services/routeGuard";
+import { requireAdmin } from "@/services/routeGuard";
 
 export const dynamic = "force-dynamic";
 
@@ -11,9 +11,14 @@ export const dynamic = "force-dynamic";
  * Validates the UI-supplied credentials with Zod, attempts POST /auth
  * server-side, and returns ok=true when the badge should turn green.
  * Credentials live only in the request body — never persisted (§2.1).
+ *
+ * A-1: admin-only. Used exclusively from /settings/credentials (already an
+ * admin-only page), but nothing previously stopped an employee session from
+ * calling it directly to probe Siigo credentials. Policy mirrors
+ * middleware.ts's ADMIN_ONLY_RULES entry for this prefix.
  */
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  const guard = await requireSession(req);
+  const guard = await requireAdmin(req);
   if (!guard.ok) return guard.response;
   try {
     const body = await req.json();

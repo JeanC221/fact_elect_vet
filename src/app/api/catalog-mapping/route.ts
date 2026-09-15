@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { getPool } from "@/services/db";
 import { catalogMappingSchema, type CatalogMapping } from "@/mappers/catalogMapping";
-import { requireSession } from "@/services/routeGuard";
+import { requireAdmin, requireSession } from "@/services/routeGuard";
 
 export const dynamic = "force-dynamic";
 
@@ -81,7 +81,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 }
 
 export async function PUT(req: NextRequest): Promise<NextResponse> {
-  const guard = await requireSession(req);
+  // A-1: admin-only. This is what actually changes documentTypeId/sellerId/
+  // catalog mapping; GET above stays session-only (read-only, no fiscal
+  // consequence). Policy mirrors middleware.ts's ADMIN_ONLY_RULES entry for
+  // this prefix — see the note there.
+  const guard = await requireAdmin(req);
   if (!guard.ok) return guard.response;
   let parsed;
   try {

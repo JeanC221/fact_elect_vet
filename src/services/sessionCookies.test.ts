@@ -16,7 +16,7 @@ describe("session cookie", () => {
     expect(cookie.httpOnly).toBe(true);
     expect(cookie.sameSite).toBe("strict");
     expect(cookie.path).toBe("/");
-    expect(cookie.maxAge).toBe(86400);
+    expect(cookie.maxAge).toBe(28800); // A-3: 8h TTL, down from 24h
   });
 
   it("createSessionCookie secure flag toggles with NODE_ENV", () => {
@@ -48,7 +48,7 @@ describe("role cookie (client-readable, UI display only)", () => {
     expect(cookie.httpOnly).toBe(false);
     expect(cookie.sameSite).toBe("strict");
     expect(cookie.path).toBe("/");
-    expect(cookie.maxAge).toBe(86400);
+    expect(cookie.maxAge).toBe(28800); // A-3: 8h TTL, down from 24h
   });
 
   it("createRoleCookie secure flag toggles with NODE_ENV", () => {

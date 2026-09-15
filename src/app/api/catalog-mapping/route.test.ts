@@ -10,6 +10,7 @@ import { GET, PUT } from "./route";
 import {
   TEST_JWT_SECRET,
   ADMIN_SESSION,
+  EMPLOYEE_SESSION,
   issueSessionCookie,
   requestWithCookie,
 } from "@/test/sessionRequest";
@@ -22,14 +23,21 @@ import {
  * employee cases in `src/app/api/emission-mode/route.test.ts`.
  */
 let sessionCookie: string;
+let employeeCookie: string;
 beforeAll(async () => {
   process.env.JWT_SECRET = TEST_JWT_SECRET;
   sessionCookie = await issueSessionCookie(ADMIN_SESSION);
+  employeeCookie = await issueSessionCookie(EMPLOYEE_SESSION);
 });
 
 /** Authenticated request builder — same signature as the plain `new Request`. */
 function authed(url: string, init: RequestInit = {}) {
   return requestWithCookie(url, sessionCookie, init);
+}
+
+/** Employee-session request builder — A-1 coverage: PUT must reject this role. */
+function asEmployee(url: string, init: RequestInit = {}) {
+  return requestWithCookie(url, employeeCookie, init);
 }
 
 const validMapping = {
@@ -92,6 +100,19 @@ describe("GET /api/catalog-mapping", () => {
     const json = await res.json();
     expect(res.status).toBe(503);
     expect(json).toEqual(EMPTY_MAPPING);
+  });
+});
+
+describe("PUT /api/catalog-mapping — A-1: admin-only", () => {
+  it("refuses an employee session with 403 before touching the database — an employee must not change document type/seller/mapping by API", async () => {
+    const req = asEmployee("http://localhost/api/catalog-mapping", {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(validMapping),
+    });
+    const res = await PUT(req);
+    const json = await res.json();
+    expect(res.status).toBe(403);
+    expect(json.error.code).toBe("forbidden");
+    expect(queryMock).not.toHaveBeenCalled();
   });
 });
 

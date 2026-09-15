@@ -55,7 +55,7 @@ function base64urlDecode(str: string): Uint8Array<ArrayBuffer> {
   return bytes;
 }
 
-/** Sign a session token for an authenticated user (24h expiry). */
+/** Sign a session token for an authenticated user (expiry = SESSION_TTL_SECONDS, currently 8h — see A-3 in sessionCookies.ts). */
 export async function signSessionToken(
   payload: Pick<SessionPayload, "email"> & { admin?: boolean },
 ): Promise<string> {

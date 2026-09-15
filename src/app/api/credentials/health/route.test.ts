@@ -11,6 +11,7 @@ import { getSiigoAccessToken, SiigoAuthError } from "@/services/siigoAuth";
 import {
   TEST_JWT_SECRET,
   ADMIN_SESSION,
+  EMPLOYEE_SESSION,
   issueSessionCookie,
   requestWithCookie,
 } from "@/test/sessionRequest";
@@ -23,14 +24,21 @@ import {
  * employee cases in `src/app/api/emission-mode/route.test.ts`.
  */
 let sessionCookie: string;
+let employeeCookie: string;
 beforeAll(async () => {
   process.env.JWT_SECRET = TEST_JWT_SECRET;
   sessionCookie = await issueSessionCookie(ADMIN_SESSION);
+  employeeCookie = await issueSessionCookie(EMPLOYEE_SESSION);
 });
 
 /** Authenticated request builder — same signature as the plain `new Request`. */
 function authed(url: string, init: RequestInit = {}) {
   return requestWithCookie(url, sessionCookie, init);
+}
+
+/** Employee-session request builder — A-1 coverage: POST must reject this role. */
+function asEmployee(url: string, init: RequestInit = {}) {
+  return requestWithCookie(url, employeeCookie, init);
 }
 
 const validCreds = {
@@ -79,5 +87,16 @@ describe("POST /api/credentials/health", () => {
     });
     const res = await POST(req);
     expect(res.status).toBe(400);
+  });
+
+  it("A-1: refuses an employee session with 403 before calling Siigo — validating credentials is an admin-only action", async () => {
+    const req = asEmployee("http://localhost/api/credentials/health", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(validCreds),
+    });
+    const res = await POST(req);
+    const json = await res.json();
+    expect(res.status).toBe(403);
+    expect(json.error.code).toBe("forbidden");
+    expect(getSiigoAccessToken).not.toHaveBeenCalled();
   });
 });

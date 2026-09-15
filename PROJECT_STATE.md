@@ -446,11 +446,31 @@ preview.
 
 | # | Origen | Qué |
 |---|---|---|
-| **A-1** | N15 | `PUT /api/catalog-mapping` y `POST /api/credentials/health` solo piden `requireSession`. Un `employee` puede cambiar por API el tipo de comprobante DIAN y todo el mapeo. Misma clase que D0; sobrevivió al chat 6a |
-| **A-2** | N19 | El comentario de `auth.ts:14-19` afirma que el hash es irreversible. `sha256` sin sal ni coste no lo es. **La afirmación es falsa y hoy sirve de argumento para aplazar D1** |
-| **A-3** | N20 | Sin revocación de sesión: cambiar la contraseña no invalida JWT vivos (24 h) |
-| **A-4** | nuevo | **`middleware.ts` → `proxy.ts` y decisión de runtime.** Diferido desde la sesión 1 a propósito (ver Decisiones de plataforma). Aquí viven los 29 tests de `middleware`/`routeGuard`/`routeAuthz` |
-| **C-12** | nuevo 2026-09-11 (sesión 2) | **Assert de total server-side re-fetcheando Provet dentro de `POST /api/invoices`.** Es la **única** variante del control de C-11 que no se puede evadir. La de la sesión 2 no lo es: **A** vive en el mapper y en la UI, y **D** (`expectedTotal` en el body) lo manda el propio cliente, así que **un POST directo a `/api/invoices` con un `expectedTotal` coherente con un `items` equivocado pasa los dos**. A+D atrapan bugs, no malicia — que es exactamente su modelo de amenaza declarado. Coste de C-12: un round-trip a Provet por emisión. **No se implementó en la sesión 2 por desproporcionada, no por innecesaria** |
+| **A-1** ✅ **CERRADO 2026-09-14 (sesión 4)** — ver `### Resolved — sesión 4, A-1/A-2/A-3/C-12` | N15 | `PUT /api/catalog-mapping` y `POST /api/credentials/health` solo piden `requireSession`. Un `employee` puede cambiar por API el tipo de comprobante DIAN y todo el mapeo. Misma clase que D0; sobrevivió al chat 6a |
+| **A-2** ✅ **CERRADO 2026-09-14 (sesión 4)** — ver `### Resolved — sesión 4, A-1/A-2/A-3/C-12` | N19 | El comentario de `auth.ts:14-19` afirma que el hash es irreversible. `sha256` sin sal ni coste no lo es. **La afirmación es falsa y hoy sirve de argumento para aplazar D1** |
+| **A-3** ⚠️ **MITIGADO 2026-09-14 (sesión 4), no cerrado** — ver `### Resolved — sesión 4, A-1/A-2/A-3/C-12` | N20 | Sin revocación de sesión: cambiar la contraseña no invalida JWT vivos. TTL bajado de 24h a 8h (mitigación, acota la ventana a un turno). **El diseño completo (epoch de sesión en `credentials_config`, `ALTER TABLE`, UI de "cerrar todas las sesiones") queda para su propia sesión, con Opus High — decisión explícita de Jean, no re-litigar** |
+| **A-4** | nuevo | **`middleware.ts` → `proxy.ts` y decisión de runtime.** Diferido desde la sesión 1 a propósito (ver Decisiones de plataforma). Aquí viven los 29 tests de `middleware`/`routeGuard`/`routeAuthz`. **Excluido explícitamente de la sesión 4 por Jean** — queda para su propia sesión |
+| **C-12** ✅ **CERRADO 2026-09-14 (sesión 4)** — ver `### Resolved — sesión 4, A-1/A-2/A-3/C-12` | nuevo 2026-09-11 (sesión 2) | **Assert de total server-side re-fetcheando Provet dentro de `POST /api/invoices`.** Es la **única** variante del control de C-11 que no se puede evadir. La de la sesión 2 no lo es: **A** vive en el mapper y en la UI, y **D** (`expectedTotal` en el body) lo manda el propio cliente, así que **un POST directo a `/api/invoices` con un `expectedTotal` coherente con un `items` equivocado pasa los dos**. A+D atrapan bugs, no malicia — que es exactamente su modelo de amenaza declarado. Coste de C-12: un round-trip a Provet por emisión. **No se implementó en la sesión 2 por desproporcionada, no por innecesaria** |
+
+### Resolved — sesión 4, A-1/A-2/A-3/C-12 (2026-09-14)
+
+Base: `f706263` (merge del PR sesión 3, `sesion4/nota-credito`, sobre
+`93880d1`). Baseline verificado antes de tocar nada: 46 files / 711 tests,
+`tsc` limpio, build `(8/8)`, 20 rutas, 4 estáticas, `npm audit` 0/0 —
+coincidió al dígito con `prompt_sesion_5.md`. Orden ejecutado: A-1 → A-2 →
+C-12, con los tres gates completos entre cada uno; A-3 (mitigación) se
+intercaló entre A-2 y C-12 tras confirmar el TTL con Jean.
+
+- **A-1 — `PUT /api/catalog-mapping` y `POST /api/credentials/health` pasan a admin-only**, en ambas capas (defensa en profundidad, mismo patrón que `PUT /api/emission-mode`):
+  - `src/middleware.ts`: `ADMIN_ONLY_RULES` gana `{ prefix: "/api/catalog-mapping", sessionOnlyMethods: ["GET"] }` y `{ prefix: "/api/credentials/health" }`.
+  - `src/app/api/catalog-mapping/route.ts`: `PUT` pasa de `requireSession` a `requireAdmin` (GET sin cambio — lectura, sin consecuencia fiscal).
+  - `src/app/api/credentials/health/route.ts`: `POST` pasa de `requireSession` a `requireAdmin`.
+- **A-2 — comentario falso en `auth.ts:14-19` corregido.** Ya no afirma que el hash SHA-256 es "irreversible" (sin sal ni coste, es crackeable offline por diccionario/rainbow table). Documenta que esa afirmación falsa se usaba como argumento para aplazar D1, y referencia D1/`PROJECT_STATE.md` como la corrección real pendiente. Sin cambio de comportamiento, sin tests nuevos — es una corrección de documentación, no un bug de lógica.
+- **A-3 — mitigación, NO el diseño completo (decisión explícita de Jean).** `SESSION_TTL_SECONDS` baja de 24h a 8h (`src/services/sessionCookies.ts`). Acota la ventana de "contraseña rotada en Vercel pero JWT viejo sigue vivo" a un turno en vez de un día completo; no la cierra — sigue sin existir un mecanismo de revocación inmediata más allá de rotar `JWT_SECRET` (que además desloguea a todo el mundo, admin incluido). De paso se corrigió una violación de ZERO DUPLICATION que este mismo cambio habría dejado mintiendo: `src/app/settings/profile/page.tsx` tenía un `SESSION_TTL_HOURS = 24` hardcodeado e independiente de `SESSION_TTL_SECONDS`; ahora se deriva de la constante única. El diseño completo (epoch de sesión en `credentials_config`, `ALTER TABLE`, UI de "cerrar todas las sesiones") queda para su propia sesión con Opus High.
+- **C-12 — assert de total server-side, ya no evadible.** Nuevo `src/mappers/consultationInvoiceTotal.ts`: `resolveConsultationInvoiceTotal(consultationId, invoices)` filtra por `!credit_note && extractId(consultation) === consultationId` (reutiliza `extractId` de `provetToQueue.ts`), y **falla loud** — `NoInvoiceForConsultationError` con cero matches, `AmbiguousConsultationInvoiceError` con más de uno. **Decisión explícita de Jean: NO replicar el "último gana" de `invoiceByConsultation` — más de una factura es una ambigüedad fiscal que se revisa a mano en Provet, no se adivina.** Nueva `fetchInvoicesForConsultation` en `provetApi.ts` (extiende `firstPage`/`fetchProvetPage` con un `extraQuery` opcional) pide `GET /invoice/?consultation__is=<id>` — **DOCUMENTADO en el schema OpenAPI, NO OBSERVADO en vivo** (`EVIDENCIA_APIS.md §2.9`); por eso el filtrado real ocurre client-side en el mapper, no confía en que el filtro del servidor haya funcionado. `src/app/api/invoices/route.ts`: el fetch a Provet ocurre ANTES de tomar el claim y antes de tocar Siigo (mismo principio ya establecido para el check C-11/D); `expectedTotal` del cliente queda **vestigial** para el check real — sigue siendo obligatorio en el schema (compat de contrato con el frontend) pero ya no es el valor contra el que se compara `payload`. Nuevas ramas de error: `no_provet_invoice` (409), `ambiguous_consultation_invoice` (409), y mapeo de `ProvetAuthError`/`ProvetApiError` a 502 — las tres ocurren antes de `acquireInvoiceClaim`, así que ninguna toca la tabla de claims.
+- **Mutación manual (sin Stryker), 3 mutantes verificados, los 3 muertos:** subir el umbral de ambigüedad a `> 2` (muere en `consultationInvoiceTotal.test.ts`), quitar la exclusión de notas crédito (muere en el mismo archivo), y reemplazar el total de Provet por un valor fijo en `route.ts` (muere 29/38 tests de `invoices/route.test.ts` — confirma que el número realmente se usa, no decorativo).
+- **Verification:** `npx tsc --noEmit` ✅ exit 0 (los 4 sub-pasos) | `npx vitest run` ✅ **47 files / 733 tests** (711 → 733: +6 A-1, +0 A-2, +0 neto A-3 [2 asserts actualizados], +16 C-12 [3 en `provetApi.test.ts` + 7 en `consultationInvoiceTotal.test.ts` nuevo + 6 en `invoices/route.test.ts`]) | `env -u NODE_ENV npx next build` ✅ exit 0, **20 rutas, 4 estáticas, `(8/8)`**, sin cambio de forma | `npm audit` **0/0, sin cambio**.
+- **Entregable:** un solo ZIP (`sesion5_frontera_autorizacion.zip`), SHA-256 por archivo dado en el chat. **No aplicado todavía** — Jean lo aplica con `rsync` y confirma los gates de su lado antes de mergear.
 
 ### Higiene, desacople, CI — sesión 5
 
@@ -593,6 +613,34 @@ preview.
 ---
 
 ## Last Update
+- **Date:** 2026-09-14
+- **Agent:** Claude (`prompt_sesion_5.md` — **sesión 4**, Frontera de
+  autorización)
+- **Base commit:** `f706263` (merge de `sesion4/nota-credito` sobre `93880d1`).
+  Baseline verificado antes de tocar nada: 46 files / 711 tests, `tsc` limpio,
+  build `(8/8)`, 20 rutas, 4 estáticas, `npm audit` 0/0 — coincidió al dígito
+  con lo esperado.
+- **Completed Task:** A-1, A-2, C-12 (cerrados) y A-3 (mitigación: TTL 24h→8h,
+  diseño completo diferido por decisión explícita de Jean). A-4 excluido de
+  esta sesión, también por decisión de Jean. Detalle completo en
+  `### Resolved — sesión 4, A-1/A-2/A-3/C-12` más arriba. Con esto cierra
+  todo el bloque `### Frontera de autorización — sesión 4` salvo A-4, que
+  queda para su propia sesión.
+- **Verification:** `npx tsc --noEmit` ✅ exit 0 | `npx vitest run` ✅ **47
+  files / 733 tests** (711 → 733, +22) | `env -u NODE_ENV npx next build` ✅
+  exit 0, **20 rutas, 4 estáticas, `(8/8)`** | `npm audit` **0/0, sin cambio**.
+  Mutación manual (sin Stryker), 3 mutantes, los 3 muertos.
+- **Entregable:** un solo ZIP (`sesion5_frontera_autorizacion.zip`), SHA-256
+  por archivo dado en el chat. **No aplicado todavía** — Jean lo aplica con
+  `rsync` y confirma los gates de su lado antes de mergear.
+- **Next Pending Task:** ningún bloqueante crítico. Candidatos: A-4
+  (`middleware.ts` → `proxy.ts`, su propia sesión), el diseño completo de A-3
+  (epoch de sesión, su propia sesión con Opus High), o `### Higiene,
+  desacople, CI — sesión 5` (H-1 a H-14, H-19 — "mayor retorno por esfuerzo"
+  es H-10, CI). **Propuesta de prioridad, no decisión tomada** — Jean confirma
+  o redirige al abrir el siguiente chat. Ver `prompt_sesion_6.md`.
+
+## Previous Update (sesión 3, cierre vía prompt_sesion_4.md)
 - **Date:** 2026-09-14
 - **Agent:** Claude (`prompt_sesion_4.md` — pertenece al alcance de **sesión 3**,
   ver `### Nombres de sesión vs. alcance`)

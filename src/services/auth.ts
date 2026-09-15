@@ -14,9 +14,21 @@ export type { SessionPayload } from "@/services/jwt";
  * The environment stores only the SHA-256 hash of each password (base64url),
  * never the plaintext password itself — so anyone with read access to the
  * Vercel project's environment variables (dashboard, `vercel env pull`, a
- * misconfigured Preview scope) sees an irreversible hash, not the real
- * operational password used by clinic staff. Generate a hash with:
+ * misconfigured Preview scope) sees a hash, not the real operational password
+ * used by clinic staff. Generate a hash with:
  *   node -e "crypto.subtle.digest('SHA-256', new TextEncoder().encode('yourPassword')).then(d => console.log(Buffer.from(d).toString('base64url')))"
+ *
+ * A-2 (2026-09-14): this hash is NOT irreversible. Unsalted, single-round
+ * SHA-256 is fast to brute-force and has no per-install salt, so a leaked
+ * hash is crackable offline against a dictionary/rainbow table — a real risk
+ * for the kind of password clinic staff tends to pick. A prior revision of
+ * this comment claimed the hash was irreversible; that claim was false and
+ * had been used as an argument for not prioritising D1 (see
+ * `PROJECT_STATE.md` — password hashing, blocked on an agreed deployment
+ * window because changing the hash format invalidates the deployed
+ * `ADMIN_PASSWORD_HASH`/`EMPLOYEE_PASSWORD_HASH` until regenerated in
+ * Vercel). D1 replaces this with `scrypt`; not done here — this fix only
+ * corrects what the comment claims about the current hash.
  *
  * Security (per 01_PROJECT_REQUIREMENTS section 2):
  *   - Credentials sourced exclusively from environment variables.

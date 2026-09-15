@@ -4,9 +4,12 @@ import { CheckCircle2, LogOut, Mail } from "lucide-react";
 import { NavBar } from "@/components/NavBar";
 import { logoutAction } from "@/app/actions";
 import { verifySessionToken } from "@/services/auth";
-import { SESSION_COOKIE_NAME } from "@/services/sessionCookies";
+import { SESSION_COOKIE_NAME, SESSION_TTL_SECONDS } from "@/services/sessionCookies";
 
-const SESSION_TTL_HOURS = 24;
+// A-3: derived from the single source of truth in sessionCookies.ts instead
+// of a duplicated literal, so this label can't go stale the next time the
+// TTL changes (it already did once — 24h to 8h).
+const SESSION_TTL_HOURS = SESSION_TTL_SECONDS / 3600;
 
 /** Formats a unix-seconds expiry as a Colombian-localized timestamp. */
 function formatExpiry(exp: number): string {

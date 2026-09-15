@@ -36,6 +36,14 @@ import { ACCESS_DENIED, denialBody } from "@/mappers/routeAuthz";
  * server-side guard against stamping a second DIAN document for the same
  * consultation, so it must never be reachable by the employee role.
  *
+ * A-1: "/api/catalog-mapping" PUT and "/api/credentials/health" POST used to
+ * require only a session, so an employee could change the DIAN document
+ * type/seller/catalog mapping, or probe Siigo credentials, directly by API —
+ * same class of gap as D0, and it survived chat 6a. GET on catalog-mapping
+ * stays session-only (read-only, no fiscal consequence, and the dashboard
+ * reads it); credentials/health has no GET at all, so its whole prefix is
+ * admin-only.
+ *
  * The two refusal bodies are no longer inlined here: D0.1 lifted them into
  * `@/mappers/routeAuthz` so this middleware and the per-handler guards in
  * `@/services/routeGuard` cannot answer the same rejection with different
@@ -53,6 +61,8 @@ const ADMIN_ONLY_RULES: readonly AdminOnlyRule[] = [
   { prefix: "/settings/mapping" },
   { prefix: "/api/emission-mode", sessionOnlyMethods: ["GET"] },
   { prefix: "/api/invoice-claims" },
+  { prefix: "/api/catalog-mapping", sessionOnlyMethods: ["GET"] },
+  { prefix: "/api/credentials/health" },
 ];
 
 /** True when this path+method pair is reserved to the admin role. */

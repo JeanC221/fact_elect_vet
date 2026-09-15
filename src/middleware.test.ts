@@ -90,10 +90,32 @@ describe("middleware — the method exception does not leak to the other admin-o
   });
 });
 
+describe("middleware — A-1: catalog-mapping PUT and credentials/health are admin-only", () => {
+  it("lets an employee GET the catalog mapping, but refuses PUT — an employee must not change the DIAN document type or seller by API", async () => {
+    expect((await request("/api/catalog-mapping", "GET", EMPLOYEE)).status).toBe(200);
+    const res = await request("/api/catalog-mapping", "PUT", EMPLOYEE);
+    expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toMatchObject({ error: { code: "forbidden" } });
+  });
+
+  it("lets an admin PUT the catalog mapping", async () => {
+    expect((await request("/api/catalog-mapping", "PUT", ADMIN)).status).toBe(200);
+  });
+
+  it("refuses an employee POST to credentials/health on every method — no session-only exception here, unlike emission-mode's GET", async () => {
+    const res = await request("/api/credentials/health", "POST", EMPLOYEE);
+    expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toMatchObject({ error: { code: "forbidden" } });
+  });
+
+  it("lets an admin POST to credentials/health", async () => {
+    expect((await request("/api/credentials/health", "POST", ADMIN)).status).toBe(200);
+  });
+});
+
 describe("middleware — unchanged baseline behaviour", () => {
   it("lets an employee reach the dashboard and the non-admin API routes", async () => {
     expect((await request("/", "GET", EMPLOYEE)).status).toBe(200);
-    expect((await request("/api/catalog-mapping", "GET", EMPLOYEE)).status).toBe(200);
     expect((await request("/api/invoices", "POST", EMPLOYEE)).status).toBe(200);
   });
 

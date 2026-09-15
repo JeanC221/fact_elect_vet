@@ -3,6 +3,8 @@ import type { NextRequest } from "next/server";
 import { z } from "zod";
 import { siigoInvoicePayloadSchema, type SiigoInvoiceResponse } from "@/schemas/siigo";
 import { getSiigoAccessToken, SiigoAuthError } from "@/services/siigoAuth";
+import { getProvetAccessToken, ProvetAuthError } from "@/services/provetAuth";
+import { fetchInvoicesForConsultation, ProvetApiError } from "@/services/provetApi";
 import { generateIdempotencyKey, idempotencyKeyHeaderSchema, SiigoApiError, submitInvoice } from "@/services/siigoApi";
 import {
   buildEmissionMarker,
@@ -19,6 +21,11 @@ import {
   markClaimUnknown,
   releaseInvoiceClaim,
 } from "@/services/invoiceClaims";
+import {
+  resolveConsultationInvoiceTotal,
+  NoInvoiceForConsultationError,
+  AmbiguousConsultationInvoiceError,
+} from "@/mappers/consultationInvoiceTotal";
 import { requireSession } from "@/services/routeGuard";
 import { toCents } from "@/schemas/provet";
 
@@ -41,11 +48,13 @@ const invoiceRequestSchema = z.object({
    * check by omission, which is the silent fallback this whole guard exists to
    * remove.
    *
-   * This does NOT make the route safe against a malicious client — a crafted
-   * request can send an `expectedTotal` that agrees with a wrong `items`. The
-   * threat model here is bugs, not malice, and against a bug it works,
-   * because the two numbers come from different places: the Provet header and
-   * the already-filtered rows. The non-evadable version is C-12, session 4.
+   * C-12 (session 4): this field is now VESTIGIAL to the security check
+   * itself — kept required so the frontend contract and the mandatory-field
+   * test below don't change, but `assertPayloadMatchesProvetTotal` is called
+   * with a value independently re-fetched from Provet
+   * (`resolveConsultationInvoiceTotal`), not with this one. A client can no
+   * longer make the check pass by sending an `expectedTotal` that merely
+   * agrees with a wrong `items` array — the whole point of C-12.
    */
   expectedTotal: z.number().finite().max(1e12),
   payload: siigoInvoicePayloadSchema,
@@ -131,14 +140,24 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   let claimHeld = false;
   try {
     const body = await req.json();
-    const { consultationId: id, expectedTotal, payload } = invoiceRequestSchema.parse(body);
+    const { consultationId: id, payload } = invoiceRequestSchema.parse(body);
     consultationId = id;
+
+    // C-12 (session 4). Independently re-derive Provet's header total for
+    // this consultation BEFORE the claim is acquired and before Siigo is
+    // touched — same ordering rule as the check below, and for the same
+    // reason: a request refused here must not leave the consultation holding
+    // a claim in `unknown`. This is what makes the check non-evadable: the
+    // number compared against `payload` no longer comes from the client.
+    const provetToken = await getProvetAccessToken();
+    const consultationInvoices = await fetchInvoicesForConsultation(consultationId, provetToken);
+    const provetTotal = resolveConsultationInvoiceTotal(consultationId, consultationInvoices);
 
     // C-11 / D. Checked here, BEFORE the claim is acquired and before Siigo is
     // touched: exactly the ordering bug C-6 describes in reverse. A payload
     // that fails this check has not reached Siigo, so the consultation must
     // not be left holding a claim in `unknown`.
-    assertPayloadMatchesProvetTotal(payload, expectedTotal);
+    assertPayloadMatchesProvetTotal(payload, provetTotal);
 
     // One emission attempt = one marker, reused across the internal retry so
     // reconciliation stays stable. The Idempotency-Key, by contrast, must be
@@ -217,6 +236,23 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         { error: { code: "consultation_already_claimed", message: claimConflictMessage(err.claim) } },
         { status: 409 },
       );
+    }
+
+    // C-12. These three all occur BEFORE `acquireInvoiceClaim`, so
+    // `claimHeld` is always false here — nothing to release or mark
+    // `unknown`, same as the pre-existing Zod/EmissionTotalMismatch paths
+    // right below.
+    if (err instanceof NoInvoiceForConsultationError) {
+      return NextResponse.json({ error: { code: "no_provet_invoice", message: err.message } }, { status: 409 });
+    }
+    if (err instanceof AmbiguousConsultationInvoiceError) {
+      return NextResponse.json({ error: { code: "ambiguous_consultation_invoice", message: err.message } }, { status: 409 });
+    }
+    if (err instanceof ProvetAuthError) {
+      return NextResponse.json({ error: { code: err.code, message: "Error de autenticación con Provet." } }, { status: 502 });
+    }
+    if (err instanceof ProvetApiError) {
+      return NextResponse.json({ error: { code: err.code, message: err.message } }, { status: 502 });
     }
 
     if (claimHeld && consultationId) {

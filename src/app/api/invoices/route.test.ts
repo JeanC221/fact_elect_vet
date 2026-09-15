@@ -99,6 +99,16 @@ vi.mock("@/services/siigoAuth", async () => {
   return { ...actual, getSiigoAccessToken: vi.fn() };
 });
 
+vi.mock("@/services/provetAuth", async () => {
+  const actual = await vi.importActual<typeof import("@/services/provetAuth")>("@/services/provetAuth");
+  return { ...actual, getProvetAccessToken: vi.fn() };
+});
+
+vi.mock("@/services/provetApi", async () => {
+  const actual = await vi.importActual<typeof import("@/services/provetApi")>("@/services/provetApi");
+  return { ...actual, fetchInvoicesForConsultation: vi.fn() };
+});
+
 vi.mock("@/services/invoiceReconciliation", async () => {
   const actual = await vi.importActual<typeof import("@/services/invoiceReconciliation")>("@/services/invoiceReconciliation");
   return { ...actual, reconcileInvoice: vi.fn() };
@@ -111,6 +121,8 @@ vi.mock("@/services/siigoApi", async () => {
 
 import { POST } from "./route";
 import { getSiigoAccessToken, SiigoAuthError } from "@/services/siigoAuth";
+import { getProvetAccessToken } from "@/services/provetAuth";
+import { fetchInvoicesForConsultation } from "@/services/provetApi";
 import { SiigoApiError, submitInvoice } from "@/services/siigoApi";
 import { reconcileInvoice, AmbiguousReconciliationError, ReconciliationTruncatedError } from "@/services/invoiceReconciliation";
 
@@ -123,11 +135,27 @@ function makeRequest(body: unknown, idempotencyKey?: string): NextRequest {
 
 const validBody = { consultationId: CONSULTATION_ID, expectedTotal: EXPECTED_TOTAL, payload: validPayload };
 
+/**
+ * C-12 — minimal fake ProvetInvoiceRaw, standing in for what
+ * `fetchInvoicesForConsultation` returns. `total_with_vat` here is what the
+ * route now actually checks the payload against — NOT `expectedTotal` in the
+ * request body, which C-12 makes irrelevant to the outcome.
+ */
+function provetInvoice(consultationId: string, totalWithVat: number) {
+  return {
+    id: "PROVET-INV-1", url: null, status: "3", total: totalWithVat, total_vat: 0,
+    total_with_vat: totalWithVat, consultation: consultationId, credit_note: false,
+    original_consultation: null, client: null, invoice_number: null,
+  };
+}
+
 describe("POST /api/invoices", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     claims.clear();
     vi.mocked(getSiigoAccessToken).mockResolvedValue({ accessToken: mockAccessToken, partnerId: mockPartnerId });
+    vi.mocked(getProvetAccessToken).mockResolvedValue("provet-tok-live");
+    vi.mocked(fetchInvoicesForConsultation).mockResolvedValue([provetInvoice(CONSULTATION_ID, EXPECTED_TOTAL)]);
     vi.mocked(reconcileInvoice).mockResolvedValue(null);
     process.env.SIIGO_RECONCILE_DELAY_MS = "0";
   });
@@ -205,7 +233,9 @@ describe("POST /api/invoices", () => {
   it("returns 400 total_mismatch when the payload lines do not add up to Provet's header total", async () => {
     // Invoice 12 of the live tenant, in the shape it reaches the route:
     // Provet's header says 158.28, the lines built from the filtered rows say
-    // 187.50. Neither may be stamped.
+    // 187.50. Neither may be stamped. Provet's total is now independently
+    // fetched (C-12) — expectedTotal in the body is no longer what's compared.
+    vi.mocked(fetchInvoicesForConsultation).mockResolvedValue([provetInvoice(CONSULTATION_ID, 158.28)]);
     const res = await POST(makeRequest({
       consultationId: CONSULTATION_ID,
       expectedTotal: 158.28,
@@ -231,6 +261,7 @@ describe("POST /api/invoices", () => {
   });
 
   it("catches the mismatch across several lines, not just a single wrong one", async () => {
+    vi.mocked(fetchInvoicesForConsultation).mockResolvedValue([provetInvoice(CONSULTATION_ID, 300)]);
     const res = await POST(makeRequest({
       consultationId: CONSULTATION_ID,
       expectedTotal: 300,
@@ -249,6 +280,7 @@ describe("POST /api/invoices", () => {
 
   it("accepts cent-level float drift, because both sides are compared as whole cents", async () => {
     vi.mocked(submitInvoice).mockResolvedValue({ id: "INV-DRIFT", number: 1, cufe: "CUFE-DRIFT", status: "Accepted" as const, observations: undefined });
+    vi.mocked(fetchInvoicesForConsultation).mockResolvedValue([provetInvoice(CONSULTATION_ID, 0.3)]);
     const res = await POST(makeRequest({
       consultationId: CONSULTATION_ID,
       expectedTotal: 0.3,
@@ -557,6 +589,96 @@ describe("POST /api/invoices", () => {
 
     expect(res.status).toBe(400);
     expect(claims.has(CONSULTATION_ID)).toBe(false);
+    expect(submitInvoice).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/invoices — C-12: server-side re-fetch closes the client-controlled total gap", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    claims.clear();
+    vi.mocked(getSiigoAccessToken).mockResolvedValue({ accessToken: mockAccessToken, partnerId: mockPartnerId });
+    vi.mocked(getProvetAccessToken).mockResolvedValue("provet-tok-live");
+    vi.mocked(fetchInvoicesForConsultation).mockResolvedValue([provetInvoice(CONSULTATION_ID, EXPECTED_TOTAL)]);
+    vi.mocked(reconcileInvoice).mockResolvedValue(null);
+    process.env.SIIGO_RECONCILE_DELAY_MS = "0";
+  });
+
+  it("the check can no longer be evaded by a client whose expectedTotal and payload merely agree with EACH OTHER — this is exactly the C-11/D gap C-12 closes", async () => {
+    // Client sends payload + expectedTotal that are internally consistent
+    // (both say 80000), same as C-11/D would accept. But Provet's actual
+    // header for this consultation is 1 — a stale/tampered client. The
+    // old check (comparing payload against the client's own expectedTotal)
+    // would have passed this; the new one, comparing against a fetched
+    // value, must not.
+    vi.mocked(fetchInvoicesForConsultation).mockResolvedValue([provetInvoice(CONSULTATION_ID, 1)]);
+    const res = await POST(makeRequest(validBody));
+    const json = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(json.error.code).toBe("total_mismatch");
+    expect(submitInvoice).not.toHaveBeenCalled();
+    expect(claims.size).toBe(0);
+  });
+
+  it("fetches Provet's total BEFORE acquiring the claim and BEFORE touching Siigo", async () => {
+    await POST(makeRequest(validBody));
+    expect(fetchInvoicesForConsultation).toHaveBeenCalledWith(CONSULTATION_ID, "provet-tok-live");
+    expect(getSiigoAccessToken).toHaveBeenCalled();
+    // Call order: Provet fetch resolves before Siigo auth is even requested.
+    const provetCallOrder = vi.mocked(fetchInvoicesForConsultation).mock.invocationCallOrder[0];
+    const siigoCallOrder = vi.mocked(getSiigoAccessToken).mock.invocationCallOrder[0];
+    expect(provetCallOrder).toBeLessThan(siigoCallOrder);
+  });
+
+  it("returns 409 no_provet_invoice when Provet reports nothing for the consultation, and takes no claim", async () => {
+    vi.mocked(fetchInvoicesForConsultation).mockResolvedValue([]);
+    const res = await POST(makeRequest(validBody));
+    const json = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(json.error.code).toBe("no_provet_invoice");
+    expect(claims.size).toBe(0);
+    expect(submitInvoice).not.toHaveBeenCalled();
+  });
+
+  it("returns 409 ambiguous_consultation_invoice when Provet reports more than one non-credit-note invoice — fails loud rather than guessing which is authoritative", async () => {
+    vi.mocked(fetchInvoicesForConsultation).mockResolvedValue([
+      provetInvoice(CONSULTATION_ID, EXPECTED_TOTAL),
+      provetInvoice(CONSULTATION_ID, 200),
+    ]);
+    const res = await POST(makeRequest(validBody));
+    const json = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(json.error.code).toBe("ambiguous_consultation_invoice");
+    expect(json.error.message).toContain("Provet Cloud");
+    expect(claims.size).toBe(0);
+    expect(submitInvoice).not.toHaveBeenCalled();
+  });
+
+  it("returns 502 when Provet auth fails during this check, without touching Siigo or the claims table", async () => {
+    const { ProvetAuthError } = await import("@/services/provetAuth");
+    vi.mocked(getProvetAccessToken).mockRejectedValue(new ProvetAuthError("missing_credentials", "PROVET_CLIENT_ID no configurada."));
+    const res = await POST(makeRequest(validBody));
+    const json = await res.json();
+
+    expect(res.status).toBe(502);
+    expect(json.error.code).toBe("missing_credentials");
+    expect(claims.size).toBe(0);
+    expect(getSiigoAccessToken).not.toHaveBeenCalled();
+    expect(submitInvoice).not.toHaveBeenCalled();
+  });
+
+  it("returns 502 when the Provet invoice fetch itself fails, without touching Siigo or the claims table", async () => {
+    const { ProvetApiError } = await import("@/services/provetApi");
+    vi.mocked(fetchInvoicesForConsultation).mockRejectedValue(new ProvetApiError("service_unavailable", "No se pudo contactar la API de Provet (/invoice)."));
+    const res = await POST(makeRequest(validBody));
+    const json = await res.json();
+
+    expect(res.status).toBe(502);
+    expect(json.error.code).toBe("service_unavailable");
+    expect(claims.size).toBe(0);
     expect(submitInvoice).not.toHaveBeenCalled();
   });
 });

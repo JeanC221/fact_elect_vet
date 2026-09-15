@@ -7,6 +7,7 @@ import {
   fetchPhoneNumbers,
   fetchConsultationItems,
   fetchInvoiceRows,
+  fetchInvoicesForConsultation,
   ProvetApiError,
 } from "./provetApi";
 
@@ -178,5 +179,34 @@ describe("the modified__gte window applies ONLY to consultations", () => {
     await fetchInvoiceRows("tok");
     expect(url()).toContain("/invoicerow");
     expect(url()).toContain("page=1");
+  });
+});
+
+describe("fetchInvoicesForConsultation — C-12", () => {
+  it("sends consultation__is with the given id, unwindowed", async () => {
+    fetchMock.mockResolvedValue(fakeRes(page([])));
+    await fetchInvoicesForConsultation("38", "tok");
+    const url = fetchMock.mock.calls[0][0] as string;
+    expect(url).toContain("/invoice?");
+    expect(url).toContain("consultation__is=38");
+    expect(url).not.toContain("modified__gte");
+  });
+
+  it("URL-encodes the consultation id", async () => {
+    fetchMock.mockResolvedValue(fakeRes(page([])));
+    await fetchInvoicesForConsultation("has space", "tok");
+    const url = fetchMock.mock.calls[0][0] as string;
+    expect(url).toContain("consultation__is=has%20space");
+  });
+
+  it("returns whatever Provet answers verbatim — callers filter defensively, this fetch does not assume the filter narrowed anything", async () => {
+    fetchMock.mockResolvedValue(
+      fakeRes(page([
+        { id: "5", url: null, status: "3", total: 1699.04, total_vat: 0, total_with_vat: 1699.04, consultation: "https://api.provet.test/consultation/4/", credit_note: false },
+        { id: "6", url: null, status: "3", total: 125.0, total_vat: 0, total_with_vat: 125.0, consultation: null, credit_note: true },
+      ])),
+    );
+    const rows = await fetchInvoicesForConsultation("4", "tok");
+    expect(rows).toHaveLength(2); // both come back — no client-side filtering happens in provetApi.ts
   });
 });

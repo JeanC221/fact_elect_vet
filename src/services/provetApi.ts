@@ -66,11 +66,13 @@ async function fetchProvetPage<S extends z.ZodTypeAny>(
   schema: S,
   pageUrl: string | null,
   windowed: boolean,
+  extraQuery = "",
 ): Promise<{ results: z.infer<S>[]; next: string | null }> {
   const url =
     pageUrl ??
     `${requireBaseUrl()}${path}?page=1&page_size=1000&ordering=-modified` +
-      (windowed ? `&modified__gte=${encodeURIComponent(modifiedSinceParam())}` : "");
+      (windowed ? `&modified__gte=${encodeURIComponent(modifiedSinceParam())}` : "") +
+      extraQuery;
   let res: Response;
   for (let attempt = 0; ; attempt++) {
     try {
@@ -130,6 +132,7 @@ async function firstPage<S extends z.ZodTypeAny>(
   token: string,
   schema: S,
   windowed = false,
+  extraQuery = "",
 ): Promise<z.infer<S>[]> {
   const all: z.infer<S>[] = [];
   let pageUrl: string | null = null;
@@ -140,6 +143,7 @@ async function firstPage<S extends z.ZodTypeAny>(
       schema,
       pageUrl,
       windowed,
+      extraQuery,
     );
     all.push(...results);
     if (!next) return all;
@@ -166,3 +170,27 @@ export const fetchConsultationItems = (token: string) =>
 /** Invoice lines — the authoritative billing amounts (see provetInvoiceRowRawSchema). */
 export const fetchInvoiceRows = (token: string) =>
   firstPage("/invoicerow", token, provetInvoiceRowRawSchema);
+
+/**
+ * C-12 — filtered fetch for the server-side re-derivation of a single
+ * consultation's Provet total inside `POST /api/invoices`, so that check
+ * cannot be evaded by a client-controlled `expectedTotal`.
+ *
+ * `consultation__is` is DOCUMENTADO (declared in the OpenAPI schema,
+ * `EVIDENCIA_APIS.md` §2.9) but not OBSERVADO — nobody has measured it
+ * against a live response, unlike `/invoicerow/?invoice__in=` on the same
+ * page. This function does NOT assume the filter narrowed the result: it
+ * returns whatever Provet answers verbatim. Correctness depends on the
+ * caller (`resolveConsultationInvoiceTotal`) filtering client-side by
+ * `consultation` regardless of whether the server-side filter worked — if it
+ * is silently ignored (as `consultationitem?consultation=` is), this just
+ * costs more bytes on one page (223 invoices today, well under page_size).
+ */
+export const fetchInvoicesForConsultation = (consultationId: string, token: string) =>
+  firstPage(
+    "/invoice",
+    token,
+    provetInvoiceRawSchema,
+    false,
+    `&consultation__is=${encodeURIComponent(consultationId)}`,
+  );
