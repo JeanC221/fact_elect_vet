@@ -1,0 +1,33 @@
+name: CI
+
+"on":
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  gates:
+    name: Gates (tsc, vitest, next build)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Gate 1 - Type check (tsc --noEmit)
+        run: npx tsc --noEmit
+
+      - name: Gate 2 - Test suite (vitest run)
+        run: npx vitest run
+
+      - name: Gate 3 - Production build (next build)
+        run: env -u NODE_ENV npx next build

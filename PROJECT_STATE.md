@@ -485,13 +485,61 @@ intercaló entre A-2 y C-12 tras confirmar el TTL con Jean.
 | **H-7** | N12 | `fetchInvoiceFile` y `getSiigoAccessToken` sin timeout |
 | **H-8** | N23 | 12 `fetch` crudos en 5 archivos. No existe `src/services/apiClient.ts` |
 | **H-9** | L2/L4 | Tres implementaciones de `America/Bogota`, dos utilidades de redondeo |
-| **H-10** | D-c | **CI en GitHub Actions.** ~15 min. El mayor retorno por esfuerzo del backlog |
+| **H-10** ✅ **CERRADO 2026-09-15 (sesión 6)** — ver `### Resolved — sesión 6, H-10` | D-c | **CI en GitHub Actions.** ~15 min. El mayor retorno por esfuerzo del backlog |
 | **H-11** | D-d | **Smoke test de emisión autenticado.** Habría atrapado 3 de los 4 fallos que escaparon a los tres gates |
 | **H-12** | D-j | Sanear texto también en `creditNote.ts:44` |
 | **H-13** | D-k | `customer_settings` en la tabla de traducción de errores |
 | **H-14** | P-1 rama A | **Detector de anulaciones en Provet.** Especificado y sin incógnitas: `/invoice/?credit_note__is=true&modified__gte=` → id del path de `credit_note_original_invoice` → factura → consulta. **Solo detector, nunca emisor automático.** Nota: C-1 hay que arreglarlo aunque este detector no se construya |
 | **H-19** | nuevo 2026-09-14 (sesión 3) | **`invoice_claims.ts` no tiene archivo de test propio en todo el proyecto.** Detectado por mutación manual al cerrar C-10: el `WHERE status = 'emitted'` de `acquireAnnulmentClaim` (y su análogo preexistente en `acquireInvoiceClaim`) puede borrarse sin que ningún test lo note — toda la suite de `invoice_claims` mockea `getPool().query` con respuestas canned, agnósticas del SQL real enviado. Un test que capture la query exacta (no solo el resultado que el mock decide devolver) cerraría el hueco para ambas funciones a la vez |
 | **H-19** | nuevo 2026-09-14 (sesión 3) | **`invoice_claims` no tiene archivo de test propio en todo el proyecto.** Los guards `WHERE status = 'emitted'`/`'annulling'` de `acquireInvoiceClaim`/`acquireAnnulmentClaim` solo se ejercitan indirectamente vía tests de ruta que mockean `getPool().query` con respuestas canned — un mutante que borra esa cláusula WHERE no lo detecta ningún test existente (confirmado por mutación manual en la sesión 3). Un test dedicado contra SQL real (o al menos contra una cláusula WHERE explícita en el mock) cerraría el hueco |
+
+### Resolved — sesión 6, H-10 (2026-09-15)
+
+Base: `65bbb63` (HEAD real de `main` al clonar, confirmado — sin PR pendiente
+de merge esta vez). Baseline verificado antes de tocar nada: 47 files / 733
+tests, `tsc` limpio, build `(8/8)`, 20 rutas, 4 estáticas, `npm audit` 0/0 —
+coincidió al dígito con `prompt_sesion_6.md`.
+
+- **H-10 — CI en GitHub Actions.** Nuevo `.github/workflows/ci.yml`: un job
+  (`gates`) en `push`/`pull_request` sobre `main`, que corre los tres gates
+  exactos de `.clinerules §2` como steps separados — `npx tsc --noEmit`,
+  `npx vitest run`, `env -u NODE_ENV npx next build` — sin `npm run lint`
+  (alias de `tsc`, no añade cobertura) ni `npm audit` (no es uno de los tres
+  gates oficiales; se puede añadir aparte si se decide que lo sea). Node fijado
+  en **24**, no 20: Vercel deprecó Node 20 para Builds/Functions el 1 de
+  octubre de 2026 (`vercel.com/changelog/node-js-20-is-being-deprecated`, medido
+  el 2026-09-15), y 24 es lo que Jean ya tiene puesto en Vercel → Project
+  Settings → Node.js Version, y coincide con su máquina local (`v24.15.0`,
+  medido en sesión 1). Confirmado en la sesión: el `next build` de este mismo
+  repo pasa sin ninguna variable de entorno de secretos seteada (Postgres,
+  Siigo, Provet) — las rutas dinámicas (`ƒ`) no las evalúan en build time, solo
+  en runtime — así que el workflow **no requiere GitHub Secrets** para pasar.
+- **Cierra de paso la brecha abierta desde la sesión 1** ("el repo no fija
+  versión de Node en ningún lado"): `package.json` gana
+  `"engines": { "node": "24.x" }`. Es el mecanismo que Vercel documenta para
+  sobreescribir Project Settings si el selector cambia sin que nadie lo note.
+- **TDD no aplica** — configuración pura (YAML + `engines`), sin lógica que un
+  test de Vitest pueda ejercitar; se dice explícito en vez de fabricar un test
+  decorativo, como exige el protocolo para cambios de solo-configuración.
+  **Mutación manual tampoco aplica**, por la misma razón: no hay rama de
+  código que mutar.
+- **Verification:** `npx tsc --noEmit` ✅ exit 0 | `npx vitest run` ✅ **47
+  files / 733 tests, sin cambio** | `env -u NODE_ENV npx next build` ✅ exit 0,
+  **20 rutas, 4 estáticas, `(8/8)`, sin cambio de forma** | `npm audit`
+  **0/0, sin cambio**. Los tres gates se corrieron dos veces: baseline antes
+  de tocar nada, y de nuevo después de añadir `engines` a `package.json` por
+  si `npm ci` cambiaba algo — no cambió (solo un warning `EBADENGINE` no
+  bloqueante en el entorno de verificación, que corre Node 22; ni la máquina
+  de Jean —Node 24.15.0— ni el CI —Node 24 fijado en `setup-node`— lo verán).
+  El YAML se validó por separado con un parser antes de entregarlo (no es
+  posible disparar un run real de GitHub Actions desde este entorno).
+- **Entregable:** `sesion6_higiene_h10.zip` (`package.json` únicamente) +
+  `ci_workflow_sesion6.yml.txt` **suelto, fuera del ZIP** — `.github/` es un
+  dotfolder en la raíz y Archive Utility lo habría descartado en la
+  extracción, el mismo problema que ya perdió un `.clinerules` entero. SHA-256
+  de cada uno dado en el chat. **No aplicado todavía** — Jean lo aplica y
+  confirma los gates de su lado antes de mergear (commit directo a `main` o
+  PR, a su criterio).
 
 ### Con credenciales de producción — sesión 6
 
@@ -613,6 +661,39 @@ intercaló entre A-2 y C-12 tras confirmar el TTL con Jean.
 ---
 
 ## Last Update
+- **Date:** 2026-09-15
+- **Agent:** Claude (`prompt_sesion_6.md` — **sesión 6**, Higiene/CI, bloque
+  H-10)
+- **Base commit:** `65bbb63` (HEAD real de `main` al clonar, commit directo,
+  sin PR pendiente de merge). Baseline verificado antes de tocar nada: 47
+  files / 733 tests, `tsc` limpio, build `(8/8)`, 20 rutas, 4 estáticas,
+  `npm audit` 0/0 — coincidió al dígito con `prompt_sesion_6.md`.
+- **Completed Task:** H-10 (cerrado) — CI en GitHub Actions con los tres
+  gates de `.clinerules §2`, Node **24** (no 20: deprecación de Vercel el
+  2026-10-01), más `"engines": {"node": "24.x"}` en `package.json`, que de
+  paso cierra la brecha "el repo no fija versión de Node" abierta desde la
+  sesión 1. Detalle completo en `### Resolved — sesión 6, H-10` más arriba.
+  Resto del bloque `### Higiene, desacople, CI — sesión 5` (H-1 a H-9, H-11 a
+  H-14, H-19) sigue abierto — H-10 fue el único hallazgo tomado esta sesión.
+- **Verification:** `npx tsc --noEmit` ✅ exit 0 | `npx vitest run` ✅ **47
+  files / 733 tests, sin cambio** | `env -u NODE_ENV npx next build` ✅ exit 0,
+  **20 rutas, 4 estáticas, `(8/8)`, sin cambio de forma** | `npm audit`
+  **0/0, sin cambio**. TDD y mutación manual no aplican — configuración pura,
+  sin lógica que ejercitar (justificado explícitamente en vez de un test
+  decorativo).
+- **Entregable:** `sesion6_higiene_h10.zip` (`package.json`) +
+  `ci_workflow_sesion6.yml.txt` **suelto, fuera del ZIP** (`.github/` es
+  dotfolder de raíz, Archive Utility lo habría descartado). SHA-256 de cada
+  uno dado en el chat. **No aplicado todavía** — Jean lo aplica y confirma
+  los gates de su lado antes de mergear.
+- **Next Pending Task:** ningún bloqueante crítico. Queda el resto del bloque
+  de Higiene (H-1 a H-9, H-11 a H-14, H-19), A-4 (`middleware.ts` → `proxy.ts`,
+  su propia sesión), el diseño completo de A-3 (su propia sesión con Opus
+  High), y `### Con credenciales de producción — sesión 6` si para el próximo
+  chat ya hay credenciales. **Propuesta de prioridad, no decisión tomada** —
+  Jean confirma o redirige al abrir el siguiente chat.
+
+## Previous Update (sesión 4, cierre vía prompt_sesion_5.md)
 - **Date:** 2026-09-14
 - **Agent:** Claude (`prompt_sesion_5.md` — **sesión 4**, Frontera de
   autorización)
@@ -633,12 +714,6 @@ intercaló entre A-2 y C-12 tras confirmar el TTL con Jean.
 - **Entregable:** un solo ZIP (`sesion5_frontera_autorizacion.zip`), SHA-256
   por archivo dado en el chat. **No aplicado todavía** — Jean lo aplica con
   `rsync` y confirma los gates de su lado antes de mergear.
-- **Next Pending Task:** ningún bloqueante crítico. Candidatos: A-4
-  (`middleware.ts` → `proxy.ts`, su propia sesión), el diseño completo de A-3
-  (epoch de sesión, su propia sesión con Opus High), o `### Higiene,
-  desacople, CI — sesión 5` (H-1 a H-14, H-19 — "mayor retorno por esfuerzo"
-  es H-10, CI). **Propuesta de prioridad, no decisión tomada** — Jean confirma
-  o redirige al abrir el siguiente chat. Ver `prompt_sesion_6.md`.
 
 ## Previous Update (sesión 3, cierre vía prompt_sesion_4.md)
 - **Date:** 2026-09-14
