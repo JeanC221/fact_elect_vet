@@ -57,6 +57,10 @@ describe("claimStatusPresentation", () => {
     expect(claimStatusPresentation("unknown").releasable).toBe(true);
   });
 
+  it("marks annulling as releasable too — same wedged-process reasoning as pending", () => {
+    expect(claimStatusPresentation("annulling").releasable).toBe(true);
+  });
+
   it("REFUSES to mark an emitted claim as releasable — that guard prevents a duplicate DIAN document", () => {
     expect(claimStatusPresentation("emitted").releasable).toBe(false);
     expect(claimStatusPresentation("emitted").hint).toMatch(/nota crédito/i);
@@ -67,7 +71,7 @@ describe("claimStatusPresentation", () => {
   });
 
   it("gives every modelled status a non-empty Spanish label", () => {
-    for (const s of ["pending", "unknown", "emitted", "annulled"] as const) {
+    for (const s of ["pending", "unknown", "annulling", "emitted", "annulled"] as const) {
       expect(claimStatusPresentation(s).label.length).toBeGreaterThan(0);
     }
   });

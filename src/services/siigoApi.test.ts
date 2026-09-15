@@ -194,11 +194,11 @@ describe("postToSiigo header validation (defense-in-depth)", () => {
 
 const cnPayload = toCreditNotePayload(
   payload,
-  { id: "INV-7751", cufe: "CUFE-abc123" },
+  { id: "INV-7751" },
   "billing_error",
   { documentTypeId: 3001 },
 );
-const cnOkBody = { id: "NC-101", cufe: "NCUFE-xyz789", status: "Accepted" };
+const cnOkBody = { id: "NC-101", invoice: { id: "INV-7751", name: "FV-1-1" }, stamp: { cufe: "NCUFE-xyz789", status: "Accepted" } };
 
 describe("submitCreditNote", () => {
   it("POSTs to /v1/credit-notes with mandatory headers and returns a parsed response", async () => {
@@ -211,8 +211,18 @@ describe("submitCreditNote", () => {
     expect(headers["Partner-Id"]).toBe("PARTNER1");
     expect(headers.Authorization).toBe("Bearer tok-9");
     expect(headers["Idempotency-Key"]).toMatch(/^[A-Za-z0-9]{1,30}$/);
-    expect(JSON.parse(String(init.body)).base_document.id).toBe("INV-7751");
-    expect(res).toEqual(cnOkBody);
+    const sentBody = JSON.parse(String(init.body));
+    expect(sentBody.invoice).toBe("INV-7751");
+    expect(sentBody.base_document).toBeUndefined();
+    expect(sentBody.customer).toBeUndefined();
+    expect(sentBody.total).toBeUndefined();
+    expect(sentBody.reason).toBe(2);
+    // Every item/payment must be positive — the whole point of C-8.
+    expect(sentBody.items.every((i: { price?: number; taxed_price?: number }) => (i.price ?? i.taxed_price ?? 0) > 0)).toBe(true);
+    expect(sentBody.payments.every((p: { value: number }) => p.value > 0)).toBe(true);
+    expect(res.id).toBe("NC-101");
+    expect(res.cufe).toBe("NCUFE-xyz789");
+    expect(res.status).toBe("Accepted");
   });
 
   it("reuses a provided Idempotency-Key across retries (no duplicate credit notes)", async () => {
@@ -245,13 +255,32 @@ describe("submitCreditNote", () => {
   });
 
   it("validates the payload with Zod before any network call", async () => {
-    const bad = { ...cnPayload, total: cnPayload.total + 1 };
+    const bad = {
+      ...cnPayload,
+      payments: [{ ...cnPayload.payments[0], value: cnPayload.payments[0].value + 1 }],
+    };
     await expect(submitCreditNote(bad, "t", "PARTNER1")).rejects.toThrow();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("throws when the success body fails response schema validation", async () => {
-    fetchMock.mockResolvedValue(fakeRes({ id: "NC-1", cufe: "X", status: "Draft" }, 200));
+  it("rejects a negative item price, the exact C-8 defect (values must be positive)", async () => {
+    const bad = {
+      ...cnPayload,
+      items: [{ ...cnPayload.items[0], taxed_price: -(cnPayload.items[0].taxed_price ?? 1) }],
+    };
+    await expect(submitCreditNote(bad, "t", "PARTNER1")).rejects.toThrow();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("defaults cufe/status when Siigo returns no populated stamp — never throws, mirrors invoices' Draft handling", async () => {
+    fetchMock.mockResolvedValue(fakeRes({ id: "NC-1" }, 200));
+    const res = await submitCreditNote(cnPayload, "t", "PARTNER1");
+    expect(res.cufe).toBe("");
+    expect(res.status).toBe("Draft");
+  });
+
+  it("throws when the success body is missing even the credit-note id", async () => {
+    fetchMock.mockResolvedValue(fakeRes({ status: "Accepted" }, 200));
     await expect(submitCreditNote(cnPayload, "t", "PARTNER1")).rejects.toThrow();
   });
 });

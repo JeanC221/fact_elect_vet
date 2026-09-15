@@ -57,7 +57,7 @@ export interface ReconciledInvoice {
   number?: number;
 }
 
-/** Thrown when the marker matches more than one document — never guess which. */
+/** Thrown when a credit-note lookup matches more than one document — never guess which. */
 export class AmbiguousReconciliationError extends Error {
   constructor(public readonly matches: number) {
     super(`La verificación encontró ${matches} facturas con la misma marca de emisión.`);
