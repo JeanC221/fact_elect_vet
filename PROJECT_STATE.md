@@ -533,13 +533,31 @@ coincidió al dígito con `prompt_sesion_6.md`.
   de Jean —Node 24.15.0— ni el CI —Node 24 fijado en `setup-node`— lo verán).
   El YAML se validó por separado con un parser antes de entregarlo (no es
   posible disparar un run real de GitHub Actions desde este entorno).
+- **Confirmado en producción, commit `efc52b8` (2026-09-15):** Jean aplicó,
+  corrió los 3 gates de su lado (idénticos, sin cambio de forma) y pusheó a
+  `main`. El primer run real de GitHub Actions pasó en verde — **47/47
+  archivos, 733/733 tests** — con un único warning no bloqueante: GitHub
+  fuerza `actions/checkout@v4`/`actions/setup-node@v4` a correr sobre un
+  runtime interno Node 24 vía shim porque su propio Node 20 está deprecado
+  (`github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners`).
+  **Distinto del Node 24 de la app** — es el runtime con el que GitHub
+  ejecuta el *código* de la action, no el que compila/testea el proyecto.
+  Corregido en el mismo chat: bump a `actions/checkout@v5` /
+  `actions/setup-node@v5`, que migraron de verdad su `action.yml` a
+  `using: node24` (confirmado contra el registro de cambios real de
+  `actions/setup-node`, PR #1325 "Upgrade action to use node24") — no como
+  `actions/upload-artifact@v5`, que pese al major bump se quedó en
+  `using: node20` hasta su v6; ese es el caso a vigilar si se agregan más
+  actions al workflow: el número de versión mayor no garantiza el runtime,
+  hay que mirar el `action.yml` de cada tag. No requiere rerun de los 3 gates
+  locales — cambio de metadata de CI, no toca código de la app.
 - **Entregable:** `sesion6_higiene_h10.zip` (`package.json` únicamente) +
   `ci_workflow_sesion6.yml.txt` **suelto, fuera del ZIP** — `.github/` es un
   dotfolder en la raíz y Archive Utility lo habría descartado en la
   extracción, el mismo problema que ya perdió un `.clinerules` entero. SHA-256
-  de cada uno dado en el chat. **No aplicado todavía** — Jean lo aplica y
-  confirma los gates de su lado antes de mergear (commit directo a `main` o
-  PR, a su criterio).
+  de cada uno dado en el chat. **Aplicado y confirmado en `main` (`efc52b8`).**
+  El bump a v5 de `checkout`/`setup-node` queda como entregable suelto nuevo
+  (`ci_workflow_sesion6_v2.yml.txt`) para que Jean lo aplique encima.
 
 ### Con credenciales de producción — sesión 6
 
@@ -680,12 +698,19 @@ coincidió al dígito con `prompt_sesion_6.md`.
   **20 rutas, 4 estáticas, `(8/8)`, sin cambio de forma** | `npm audit`
   **0/0, sin cambio**. TDD y mutación manual no aplican — configuración pura,
   sin lógica que ejercitar (justificado explícitamente en vez de un test
-  decorativo).
+  decorativo). **Confirmado en producción:** Jean aplicó, corrió los 3 gates
+  de su lado (idénticos) y pusheó directo a `main` — commit `efc52b8`. Primer
+  run real de GitHub Actions en verde: 47/47 archivos, 733/733 tests.
 - **Entregable:** `sesion6_higiene_h10.zip` (`package.json`) +
   `ci_workflow_sesion6.yml.txt` **suelto, fuera del ZIP** (`.github/` es
   dotfolder de raíz, Archive Utility lo habría descartado). SHA-256 de cada
-  uno dado en el chat. **No aplicado todavía** — Jean lo aplica y confirma
-  los gates de su lado antes de mergear.
+  uno dado en el chat. **Aplicado y confirmado en `main` (`efc52b8`).**
+  Corrección menor en el mismo chat, ya con el run real como evidencia: bump
+  `actions/checkout@v4`→`v5` y `actions/setup-node@v4`→`v5` en `ci.yml`
+  (limpia el warning `Node.js 20 is deprecated` del run — ver detalle en
+  `### Resolved — sesión 6, H-10`). Entregado como
+  `ci_workflow_sesion6_v2.yml.txt`, suelto, mismo destino
+  (`.github/workflows/ci.yml`, sobrescribe la v1).
 - **Next Pending Task:** ningún bloqueante crítico. Queda el resto del bloque
   de Higiene (H-1 a H-9, H-11 a H-14, H-19), A-4 (`middleware.ts` → `proxy.ts`,
   su propia sesión), el diseño completo de A-3 (su propia sesión con Opus
