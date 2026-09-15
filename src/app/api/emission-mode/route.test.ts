@@ -21,7 +21,7 @@ import {
  * D0 added a session guard to every route handler, so these tests now send a
  * genuinely signed cookie. An admin session is used because it satisfies both
  * `requireSession` and `requireAdmin`; the role boundary itself is covered by
- * `middleware.test.ts` and, for the emission-mode asymmetry, by the dedicated
+ * `proxy.test.ts` and, for the emission-mode asymmetry, by the dedicated
  * employee cases in `src/app/api/emission-mode/route.test.ts`.
  */
 let sessionCookie: string;
@@ -140,12 +140,12 @@ describe("PUT /api/emission-mode", () => {
   });
 });
 /**
- * The asymmetry, asserted from the HANDLER — not only from `middleware.test.ts`.
+ * The asymmetry, asserted from the HANDLER — not only from `proxy.test.ts`.
  *
- * `middleware.test.ts` proves the edge layer lets an employee GET this route and
+ * `proxy.test.ts` proves the edge layer lets an employee GET this route and
  * refuses their PUT. It cannot prove the handler agrees, because it never runs
  * the handler. Without the two cases below, applying `requireAdmin` to the GET
- * by mistake would leave all 9 middleware tests green while every reception
+ * by mistake would leave all 9 proxy tests green while every reception
  * device silently fell back to `sandbox` — `stampSendFor("sandbox")` is false,
  * so the clinic would emit invoices that are never stamped at the DIAN and have
  * no legal validity. Both sides are asserted: one alone leaves half blind.

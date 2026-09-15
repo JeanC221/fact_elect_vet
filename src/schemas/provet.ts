@@ -25,8 +25,21 @@ export const identificationSchema = z
     }
   });
 
+/**
+ * N24 — `n * 10**decimals` can land a hair under an exact `x.5` boundary
+ * (e.g. `1.005 * 100 === 100.49999999999999`), which `Math.round` then
+ * rounds DOWN — wrong. `Number(`${n}e${decimals}`)` reparses the shifted
+ * decimal literal as a string instead of computing the multiplication, which
+ * doesn't drift. Shared primitive behind both `toCents` below and
+ * `provetToSiigo.ts`'s `round2` (was duplicated as its own local trick).
+ */
+const shiftRound = (n: number, decimals: number): number => Math.round(Number(`${n}e${decimals}`));
+
+/** n rounded to `decimals` decimal places, defeating the drift `shiftRound` documents above. */
+export const roundTo = (n: number, decimals: number): number => Number(`${shiftRound(n, decimals)}e-${decimals}`);
+
 /** O(1) cent-integer rounding to defeat float drift in total reconciliations. */
-export const toCents = (n: number): number => Math.round(n * 100);
+export const toCents = (n: number): number => shiftRound(n, 2);
 
 /**
  * H-9 — the single source of truth for "what day is it in Colombia right

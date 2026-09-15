@@ -23,7 +23,7 @@ import { apiRequest } from "@/services/apiClient";
  *
  * All decisions (parsing, wording, status handling) live in
  * `@/mappers/invoiceClaimsAdmin`; this file only renders and calls fetch.
- * Access is enforced server-side by ADMIN_ONLY_PREFIXES in middleware.ts, not
+ * Access is enforced server-side by ADMIN_ONLY_RULES in proxy.ts, not
  * by hiding this component.
  */
 

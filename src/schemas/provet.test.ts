@@ -3,6 +3,7 @@ import {
   consultationSchema,
   identificationSchema,
   toCents,
+  roundTo,
   hasMaxDecimals,
   sanitizeText,
   formatColombiaDate,
@@ -146,6 +147,30 @@ describe("toCents — the drift absorber the refine depends on", () => {
   it("returns an integer number of cents for whole-peso COP amounts", () => {
     expect(toCents(119000)).toBe(11900000);
     expect(Number.isInteger(toCents(84033.61))).toBe(true);
+  });
+
+  it("rounds x.xx5 boundaries up instead of drifting down (N24)", () => {
+    // `n * 100` lands a hair under the exact half (e.g. 1.005 * 100 ===
+    // 100.49999999999999), which `Math.round` then rounds DOWN to 100 —
+    // wrong. These would fail against the old `Math.round(n * 100)` body.
+    expect(toCents(1.005)).toBe(101);
+    expect(toCents(1.015)).toBe(102);
+    expect(toCents(1.025)).toBe(103);
+    expect(toCents(1.035)).toBe(104);
+  });
+});
+
+describe("roundTo — the shared primitive behind toCents and provetToSiigo's round2 (N24)", () => {
+  it("rounds to n decimal places, defeating the same x.xx5 drift as toCents", () => {
+    expect(roundTo(1.005, 2)).toBe(1.01);
+    expect(roundTo(7763.980000000001, 2)).toBe(7763.98);
+  });
+
+  it("matches provetToSiigo's pre-N24 round2 output bit-for-bit on realistic totals", () => {
+    // round2 = Number(Math.round(Number(`${n}e2`)) + "e-2"); roundTo(n, 2) is
+    // the same operation generalized to any decimal count.
+    expect(roundTo(33.335, 2)).toBe(33.34);
+    expect(roundTo(-50.005, 2)).toBe(-50);
   });
 });
 

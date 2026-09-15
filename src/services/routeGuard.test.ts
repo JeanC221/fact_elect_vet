@@ -10,16 +10,16 @@ import {
 } from "@/test/sessionRequest";
 
 /**
- * Handler-level session guard — defense in depth behind `middleware.ts`.
+ * Handler-level session guard — defense in depth behind `proxy.ts`.
  *
- * The threat this closes: middleware is the ONLY authorization layer today, so
+ * The threat this closes: the boundary file is the ONLY authorization layer, so
  * a middleware bypass (CVE-2025-29927 was exactly one HTTP header) reaches
  * `POST /api/invoices` unauthenticated and stamps a DIAN document. These tests
- * therefore exercise the guard with no middleware in the picture at all.
+ * therefore exercise the guard with no proxy in the picture at all.
  *
  * Every denial here must be JSON, never a redirect: these guards only ever run
  * inside `/api/` route handlers, which is the `isApiRoute` branch of
- * `middleware.ts`. A 307 to `/login` from an API route would be parsed as a
+ * `proxy.ts`. A 307 to `/login` from an API route would be parsed as a
  * successful response body by `fetch` callers.
  */
 
@@ -89,7 +89,7 @@ describe("requireAdmin", () => {
 describe("routeGuard — the guard is independent of the request, not of the cookie", () => {
   /**
    * The method-aware exception for `/api/emission-mode` lives in
-   * `middleware.ts` (ADMIN_ONLY_RULES) and stays there. The handler guard must
+   * `proxy.ts` (ADMIN_ONLY_RULES) and stays there. The handler guard must
    * NOT re-derive policy from the path or verb, or the two layers drift. It
    * decides purely from the cookie plus the requirement the handler names.
    */

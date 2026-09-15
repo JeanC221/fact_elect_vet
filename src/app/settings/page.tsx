@@ -17,7 +17,7 @@ const linkBase =
  * clean navigation links: "Perfil" for everyone; "Credenciales" and "Catálogo"
  * only when the verified JWT carries admin (authoritative, unlike the
  * client-only vet_role cookie used by NavBar). Redirects to /login if
- * unauthenticated. Guarded by the edge middleware; this is defense-in-depth.
+ * unauthenticated. Guarded by `proxy.ts`; this is defense-in-depth.
  */
 export default async function SettingsPage() {
   const token = (await cookies()).get(SESSION_COOKIE_NAME)?.value;
@@ -51,7 +51,7 @@ export default async function SettingsPage() {
         {/*
           Admin-only rescue panel. Rendered here (and not on its own route)
           because it is a rare-use safety net, not a workflow screen. The
-          server-side guard is ADMIN_ONLY_RULES in middleware.ts; this
+          server-side guard is ADMIN_ONLY_RULES in proxy.ts; this
           `isAdmin` check only avoids showing an employee a panel whose every
           request would 403.
         */}

@@ -31,7 +31,7 @@ function readIsAdmin(): boolean {
  * Clinical-nav bar used by the dashboard and settings pages.
  * Highlights the active route; Sandbox badge + logout on the right.
  * Admin-only links (Credenciales, Catálogo) are hidden for non-admins
- * based on the vet_role cookie; the middleware enforces the real guard.
+ * based on the vet_role cookie; proxy.ts enforces the real guard.
  * Clinical palette, compact p-1, rounded-md, max 6px borders.
  */
 export function NavBar() {

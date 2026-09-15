@@ -15,7 +15,7 @@ export const dynamic = "force-dynamic";
  * A-1: admin-only. Used exclusively from /settings/credentials (already an
  * admin-only page), but nothing previously stopped an employee session from
  * calling it directly to probe Siigo credentials. Policy mirrors
- * middleware.ts's ADMIN_ONLY_RULES entry for this prefix.
+ * proxy.ts's ADMIN_ONLY_RULES entry for this prefix.
  */
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const guard = await requireAdmin(req);

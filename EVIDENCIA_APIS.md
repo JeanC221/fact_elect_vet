@@ -25,10 +25,16 @@
 > Si escribes código contra algo **DOCUMENTADO**, dilo explícitamente en el
 > comentario del código y en tu reporte de sesión.
 >
-> **Última actualización:** 2026-09-10.
-> **Cambios de esta revisión:** §3.1 corregida y reclasificada (era el dato caducado
-> que originó N11) · §1.8 pasa de "sin verificar" a DOCUMENTADO con la tabla oficial
-> · §1.9 pasa de SIN EVIDENCIA a DOCUMENTADO · §2.3 y §2.4 ampliadas · §2.6 nueva.
+> **Última actualización:** 2026-09-15 (sesión 8).
+> **Cambios de esta revisión:** §1.12 nueva — cierra N25 (cap de `observations` en
+> nota crédito) con evidencia del portal de ayuda al cliente de Siigo, fuente
+> distinta de la doc de API ya citada en H-5/§1.8. Pendiente de confirmación
+> empírica en P-2.
+>
+> **Cambios de la revisión anterior (2026-09-10):** §3.1 corregida y reclasificada
+> (era el dato caducado que originó N11) · §1.8 pasa de "sin verificar" a
+> DOCUMENTADO con la tabla oficial · §1.9 pasa de SIN EVIDENCIA a DOCUMENTADO ·
+> §2.3 y §2.4 ampliadas · §2.6 nueva.
 
 **Documentos hermanos, en la raíz del repo:** `API_SIIGO_REFERENCIA_COMPLETA.md` y
 `API_PROVET_CLOUD_REFERENCIA_COMPLETA.md`. Contienen la doc oficial capturada,
@@ -262,6 +268,35 @@ diagnosticarlos hoy:
 **Riesgo operativo, DOCUMENTADO:** Siigo bloquea temporalmente el usuario API si durante
 7 días la proporción de errores supera el **80%** de las peticiones. Con el sandbox
 devolviendo 500 en ~10% y sesiones largas de scripts de prueba, es alcanzable.
+
+### 1.12 DOCUMENTADO (clase A) — Nota crédito: límite de `observations`, fuente distinta de la doc de API
+
+**No es el mismo hallazgo que H-5, ni la misma fuente.** El límite de `observations`
+de **factura** (500 → 4.000 caracteres, ya corregido en H-5) sale de
+`API_SIIGO_REFERENCIA_COMPLETA.md` §3.1 — la doc de API para desarrolladores
+(`developers.siigo.com`). Para **nota crédito**, esa misma doc de API (§4.1, tabla
+de campos) no da un número: solo dice "Comentarios adicionales", sin cifra.
+
+El número sí existe, pero en una fuente **distinta y no capturada hasta ahora en el
+repo**: el **portal de ayuda al cliente** de Siigo (manuales de uso de la interfaz
+web — `siigonube.portaldeclientes.siigo.com`, `posweb.portaldeclientes.siigo.com`
+—, no documentación de API para integradores). Cinco páginas independientes de ese
+portal (nota crédito sin referencia, con cargos y descuentos, con orden de compra y
+entrega, en POS, y la nota débito hermana) repiten el mismo texto literal:
+*"Observaciones: puedes incluir comentarios adicionales... Es posible ingresar
+máximo 500 caracteres."*
+
+**Conclusión:** el cap de 500 que ya tenía `creditNote.ts`
+(`siigoCreditNoteSchema.observations: z.string().max(500)`) coincide con esta
+fuente. No se tocó código — no hay nada que corregir.
+
+**Sigue siendo más débil que OBSERVADO, y más débil que la doc de API citada en
+H-5.** Es documentación oficial de Siigo, pero del manual de la interfaz web, no de
+la API — el formulario y el endpoint podrían divergir; no hay garantía de que
+compartan la misma validación de backend. Un POST real con más de 500 caracteres en
+`observations` de nota crédito (dentro de **P-2**, cuando haya credenciales de
+producción) es lo único que lo sube a OBSERVADO. Hasta entonces, DOCUMENTADO con
+esta salvedad explícita, y **pendiente de confirmación empírica**.
 
 ---
 

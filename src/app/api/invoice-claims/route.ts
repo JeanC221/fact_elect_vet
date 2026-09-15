@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 /**
  * Admin view + unblock for emission claims.
  *
- * Admin-only enforcement lives in middleware.ts (ADMIN_ONLY_PREFIXES), which
+ * Admin-only enforcement lives in proxy.ts (ADMIN_ONLY_RULES), which
  * runs at the edge before this handler and returns 403 for the employee role.
  * That is the same mechanism protecting /api/emission-mode — the check is
  * server-side, not merely a hidden button.
