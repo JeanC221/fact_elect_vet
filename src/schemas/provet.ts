@@ -28,6 +28,19 @@ export const identificationSchema = z
 /** O(1) cent-integer rounding to defeat float drift in total reconciliations. */
 export const toCents = (n: number): number => Math.round(n * 100);
 
+/**
+ * H-9 — the single source of truth for "what day is it in Colombia right
+ * now", used to be reimplemented identically four times (`provetToSiigo.ts`,
+ * `consultationQueue.ts`, `invoiceReconciliation.ts`,
+ * `creditNoteReconciliation.ts`). Colombia has no DST, so a fixed IANA zone
+ * is safe year-round. `Date#toISOString()` returns UTC, which is already the
+ * next calendar day in Colombia for roughly 7pm–midnight COT — a DIAN
+ * invoice date or a reconciliation window computed from it would silently
+ * land on the wrong day.
+ */
+export const formatColombiaDate = (d: Date): string =>
+  new Intl.DateTimeFormat("en-CA", { timeZone: "America/Bogota" }).format(d);
+
 /** True when n has at most `max` decimal places (string-based, float-safe). */
 export const hasMaxDecimals = (n: number, max: number): boolean => {
   if (!Number.isFinite(n)) return false;

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, Clock, HelpCircle, RefreshCw } from "lucide-react";
 import { healthReportSchema, type HealthReport, type ServiceState } from "@/schemas/health";
+import { apiRequest } from "@/services/apiClient";
 
 const REFRESH_MS = 60_000;
 
@@ -15,9 +16,9 @@ const STATE_STYLE: Record<ServiceState, { dot: string; text: string; border: str
 
 /** Fetch the same-origin health endpoint and validate with Zod. */
 async function fetchHealth(): Promise<HealthReport> {
-  const res = await fetch("/api/health", { cache: "no-store" });
-  if (!res.ok) throw new Error("health");
-  return healthReportSchema.parse(await res.json());
+  const { ok, data } = await apiRequest("/api/health", { cache: "no-store" });
+  if (!ok) throw new Error("health");
+  return healthReportSchema.parse(data);
 }
 
 /**

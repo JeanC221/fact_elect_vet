@@ -22,6 +22,7 @@ import { SIIGO_PRODUCTS_KEY, SIIGO_PAYMENT_TYPES_KEY, SIIGO_DOCUMENT_TYPES_KEY, 
 import { EmissionSettings } from "@/components/EmissionSettings";
 import type { SiigoPaymentType, SiigoProduct, SiigoDocumentTypeCatalogEntry, SiigoSeller } from "@/schemas/siigo";
 import type { ConsultationQueueRow } from "@/mappers/consultationQueue";
+import { apiRequest } from "@/services/apiClient";
 
 const STORAGE_KEY = "fact_vet.catalogMapping";
 
@@ -81,14 +82,14 @@ export default function MappingPage() {
     // device/browser. localStorage is only a fast local cache for offline reads.
     (async () => {
       try {
-        const res = await fetch("/api/catalog-mapping");
-        if (res.status === 503) {
+        const { ok, status, data } = await apiRequest("/api/catalog-mapping");
+        if (status === 503) {
           // Storage read genuinely failed — do NOT treat this as "no mapping
           // saved yet". Fall through to the local cache below and warn; the
           // server's own version check on save still prevents a blind overwrite.
           setReadWarning(true);
-        } else if (res.ok) {
-          const serverMapping = catalogMappingSchema.parse(await res.json());
+        } else if (ok) {
+          const serverMapping = catalogMappingSchema.parse(data);
           setMapping((m) => ({ ...serverMapping, items: m.items.length ? m.items : serverMapping.items }));
           window.localStorage.setItem(STORAGE_KEY, serializeCatalogMapping(serverMapping));
           setLoaded(true);
@@ -112,9 +113,8 @@ export default function MappingPage() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch("/api/consultations");
-        const data = (await res.json()) as { rows?: ConsultationQueueRow[] };
-        if (cancelled || !res.ok || !Array.isArray(data.rows)) return;
+        const { ok, data } = await apiRequest<{ rows?: ConsultationQueueRow[] }>("/api/consultations");
+        if (cancelled || !ok || !Array.isArray(data?.rows)) return;
         const seen = new Set<string>();
         const items: { code: string; name: string }[] = [];
         for (const row of data.rows) for (const it of row.items) {
@@ -180,23 +180,22 @@ export default function MappingPage() {
   const handleSave = useCallback(async () => {
     const next: CatalogMappingState = { ...mapping, updatedAt: new Date().toISOString() };
     try {
-      const res = await fetch("/api/catalog-mapping", {
-        method: "PUT", headers: { "Content-Type": "application/json" },
+      const { ok, status, data } = await apiRequest<{ error?: { code?: string; message?: string }; current?: CatalogMappingState } & CatalogMappingState>("/api/catalog-mapping", {
+        method: "PUT",
         body: serializeCatalogMapping(next),
       });
-      if (!res.ok) {
-        const data = (await res.json().catch(() => null)) as { error?: { code?: string; message?: string }; current?: CatalogMappingState } | null;
+      if (!ok) {
         // 409 = someone else saved a newer version while this device was editing.
         // Pull their version into local state so the edits can be re-applied and
         // retried, instead of leaving this device stuck retrying against a stale version forever.
-        if (res.status === 409 && data?.current) {
+        if (status === 409 && data?.current) {
           setMapping(data.current);
         }
         setToast(data?.error?.message ?? "Error al guardar el mapeo en el servidor");
         setTimeout(() => setToast(null), 4000);
         return;
       }
-      const saved = (await res.json()) as CatalogMappingState;
+      const saved = data as CatalogMappingState;
       window.localStorage.setItem(STORAGE_KEY, serializeCatalogMapping(saved));
       setMapping(saved); setDirty(false); setToast("Mapeo guardado — visible para todos los dispositivos");
       setTimeout(() => setToast(null), 2500);
@@ -221,12 +220,11 @@ export default function MappingPage() {
   const handleSyncCatalogs = useCallback(async () => {
     setIsSyncing(true);
     try {
-      const res = await fetch("/api/catalogs/sync", {
-        method: "POST", headers: { "Content-Type": "application/json" },
+      const { ok, data } = await apiRequest<{ paymentTypes?: SiigoPaymentType[]; products?: SiigoProduct[]; documentTypes?: SiigoDocumentTypeCatalogEntry[]; sellers?: SiigoSeller[]; error?: { message?: string } }>("/api/catalogs/sync", {
+        method: "POST",
         body: "{}",
       });
-      const data = (await res.json()) as { paymentTypes?: SiigoPaymentType[]; products?: SiigoProduct[]; documentTypes?: SiigoDocumentTypeCatalogEntry[]; sellers?: SiigoSeller[]; error?: { message?: string } };
-      if (!res.ok || !data.paymentTypes || !data.products || !data.documentTypes || !data.sellers) { setToast(data.error?.message ?? "Error al sincronizar"); setTimeout(() => setToast(null), 2500); return; }
+      if (!ok || !data?.paymentTypes || !data?.products || !data?.documentTypes || !data?.sellers) { setToast(data?.error?.message ?? "Error al sincronizar"); setTimeout(() => setToast(null), 2500); return; }
       const next = reconcileMapping(mapping, provetItems, data.products, provetMethods, data.paymentTypes, data.documentTypes, data.sellers);
       setMapping(next);
       setDirty(true);

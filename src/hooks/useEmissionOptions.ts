@@ -3,18 +3,20 @@ import type { CatalogMapping } from "@/mappers/catalogMapping";
 import type { EnvironmentMode } from "@/mappers/credentials";
 import { resolveEmissionGate, type CachedModeRead, type EmissionGate } from "@/mappers/emissionModeState";
 import type { ProvetToSiigoOptions } from "@/mappers/provetToSiigo";
-import type { SiigoProduct } from "@/schemas/siigo";
+import type { SiigoProduct, SiigoPaymentType } from "@/schemas/siigo";
 import {
   CREDENTIALS_KEY,
   FALLBACK_ITEM_CODE_KEY,
   MAPPING_KEY,
   SIIGO_PRODUCTS_KEY,
+  SIIGO_PAYMENT_TYPES_KEY,
   fetchServerMapping,
   fetchServerMode,
   readCachedMode,
   readFallbackItemCode,
   readLocalMapping,
   readProducts,
+  readPaymentTypes,
 } from "./emissionOptionsStorage";
 
 // Re-exported: settings/mapping/page.tsx imports these storage keys from here.
@@ -49,6 +51,7 @@ export function useEmissionOptions(): EmissionOptionsResult {
   const [isModeReady, setIsModeReady] = useState(false);
   const [mapping, setMapping] = useState<CatalogMapping>(readLocalMapping);
   const [siigoProducts, setSiigoProducts] = useState<SiigoProduct[]>(readProducts);
+  const [siigoPaymentTypes, setSiigoPaymentTypes] = useState<SiigoPaymentType[]>(readPaymentTypes);
   const [fallbackItemCode, setFallbackItemCode] = useState<string | undefined>(readFallbackItemCode);
 
   const loadMode = useCallback(async () => {
@@ -90,6 +93,7 @@ export function useEmissionOptions(): EmissionOptionsResult {
         setServerMode(null);
       }
       if (e.key === SIIGO_PRODUCTS_KEY) setSiigoProducts(readProducts());
+      if (e.key === SIIGO_PAYMENT_TYPES_KEY) setSiigoPaymentTypes(readPaymentTypes());
       if (e.key === FALLBACK_ITEM_CODE_KEY) setFallbackItemCode(readFallbackItemCode());
     };
     window.addEventListener("storage", onStorage);
@@ -101,6 +105,7 @@ export function useEmissionOptions(): EmissionOptionsResult {
   return {
     mapping,
     siigoProducts,
+    siigoPaymentTypes,
     mode: gate.mode,
     isModeReady,
     gate,

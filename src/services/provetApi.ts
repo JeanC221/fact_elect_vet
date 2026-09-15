@@ -156,20 +156,20 @@ async function firstPage<S extends z.ZodTypeAny>(
 }
 
 export const fetchConsultations = (token: string) =>
-  firstPage("/consultation", token, provetConsultationRawSchema, true);
+  firstPage("/consultation/", token, provetConsultationRawSchema, true);
 export const fetchClients = (token: string) =>
-  firstPage("/client", token, provetClientRawSchema);
+  firstPage("/client/", token, provetClientRawSchema);
 export const fetchPatients = (token: string) =>
-  firstPage("/patient", token, provetPatientRawSchema);
+  firstPage("/patient/", token, provetPatientRawSchema);
 export const fetchInvoices = (token: string) =>
-  firstPage("/invoice", token, provetInvoiceRawSchema);
+  firstPage("/invoice/", token, provetInvoiceRawSchema);
 export const fetchPhoneNumbers = (token: string) =>
-  firstPage("/phonenumber", token, provetPhoneNumberRawSchema);
+  firstPage("/phonenumber/", token, provetPhoneNumberRawSchema);
 export const fetchConsultationItems = (token: string) =>
-  firstPage("/consultationitem", token, provetConsultationItemRawSchema);
+  firstPage("/consultationitem/", token, provetConsultationItemRawSchema);
 /** Invoice lines — the authoritative billing amounts (see provetInvoiceRowRawSchema). */
 export const fetchInvoiceRows = (token: string) =>
-  firstPage("/invoicerow", token, provetInvoiceRowRawSchema);
+  firstPage("/invoicerow/", token, provetInvoiceRowRawSchema);
 
 /**
  * C-12 — filtered fetch for the server-side re-derivation of a single
@@ -188,7 +188,7 @@ export const fetchInvoiceRows = (token: string) =>
  */
 export const fetchInvoicesForConsultation = (consultationId: string, token: string) =>
   firstPage(
-    "/invoice",
+    "/invoice/",
     token,
     provetInvoiceRawSchema,
     false,

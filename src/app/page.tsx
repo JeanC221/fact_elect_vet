@@ -31,6 +31,7 @@ import { toCreditNotePayload, siigoCreditNoteSchema, type AnnulmentReason } from
 import { generateIdempotencyKey, SiigoApiError } from "@/services/siigoApi";
 import { siigoInvoiceResponseSchema } from "@/schemas/siigo";
 import { translateSiigoError, retryWithBackoff, type TranslatedError, type QuickAction } from "@/services/errorTranslator";
+import { apiRequest } from "@/services/apiClient";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { mockClients, mockConsultations, mockPatients } from "@/mocks/provet";
 import { useEmissionOptions, readCreditNoteDocumentTypeId } from "@/hooks/useEmissionOptions";
@@ -61,9 +62,9 @@ export default function HomePage() {
 
   const fetchHistoryFromServer = useCallback(async (): Promise<InvoiceHistoryEntry[] | null> => {
     try {
-      const res = await fetch("/api/invoice-history", { cache: "no-store" });
-      if (!res.ok) return null;
-      return z.array(invoiceHistoryEntrySchema).parse(await res.json());
+      const { ok, data } = await apiRequest("/api/invoice-history", { cache: "no-store" });
+      if (!ok) return null;
+      return z.array(invoiceHistoryEntrySchema).parse(data);
     } catch {
       return null;
     }
@@ -125,9 +126,9 @@ export default function HomePage() {
       catch { /* localStorage unavailable/full — history still updates in memory */ }
       // Fire-and-forget: push only the changed entries; the server merges by
       // invoiceId. UI already reflects `next` optimistically.
-      fetch("/api/invoice-history", {
-        method: "PUT", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ entries: z.array(invoiceHistoryEntrySchema).parse(changedEntries) }),
+      apiRequest("/api/invoice-history", {
+        method: "PUT",
+        body: { entries: z.array(invoiceHistoryEntrySchema).parse(changedEntries) },
       }).catch(() => { /* offline/network error — local state + cache still updated */ });
       return next;
     });
@@ -287,14 +288,17 @@ export default function HomePage() {
       siigoCreditNoteSchema.parse(cn);
       const idemKey = generateIdempotencyKey();
       const response = await retryWithBackoff(async () => {
-        const res = await fetch("/api/credit-notes", {
+        const { ok, data } = await apiRequest<{ id: string; cufe: string; status: "Accepted"; observations?: string; error?: { code?: string; message?: string } }>("/api/credit-notes", {
           method: "POST",
-          headers: { "Content-Type": "application/json", "X-Idempotency-Key": idemKey },
-          body: JSON.stringify({ consultationId: annulTarget.consultationId, payload: cn }),
+          idempotencyKey: idemKey,
+          body: { consultationId: annulTarget.consultationId, payload: cn },
         });
-        const data = await res.json();
-        if (!res.ok) throw new SiigoApiError(data.error?.code ?? "default", data.error?.message ?? "Error al generar la nota crédito.");
-        return data as { id: string; cufe: string; status: "Accepted"; observations?: string };
+        if (!ok) throw new SiigoApiError(data?.error?.code ?? "default", data?.error?.message ?? "Error al generar la nota crédito.");
+        // A 2xx with an unparseable/empty body is a server bug, not "no credit
+        // note was created" — must fail loudly, never silently return undefined
+        // as if the annulment succeeded.
+        if (data === null) throw new Error("Respuesta 2xx de /api/credit-notes sin cuerpo JSON válido.");
+        return data;
       }, { maxRetries: 5 });
       const creditNoteEntry: InvoiceHistoryEntry = { invoiceId: response.id, cufe: response.cufe, status: "Accepted" as InvoiceStatus, consultationId: annulTarget.consultationId, paymentMethod: annulTarget.paymentMethod, observations: `Nota crédito que anula ${annulTarget.invoiceId}`, emittedAt: new Date(), patientName: annulTarget.patientName, formSnapshot: annulTarget.formSnapshot };
       const annulledOriginal: InvoiceHistoryEntry = { ...(history.find((e) => e.invoiceId === annulTarget.invoiceId) as InvoiceHistoryEntry), status: "Annulled" as InvoiceStatus, observations: `Anulada vía nota crédito ${response.id}` };
@@ -326,13 +330,15 @@ export default function HomePage() {
       if (expectedTotal === undefined) throw new Error("No se pudo determinar el total de Provet para esta consulta.");
       const idemKey = generateIdempotencyKey();
       const response = await retryWithBackoff(async () => {
-        const res = await fetch("/api/invoices", {
+        const { ok, data } = await apiRequest<{ error?: { code?: string; message?: string } }>("/api/invoices", {
           method: "POST",
-          headers: { "Content-Type": "application/json", "X-Idempotency-Key": idemKey },
-          body: JSON.stringify({ consultationId: selectedId, expectedTotal, payload }),
+          idempotencyKey: idemKey,
+          body: { consultationId: selectedId, expectedTotal, payload },
         });
-        const data = await res.json();
-        if (!res.ok) throw new SiigoApiError(data.error?.code ?? "default", data.error?.message ?? "Error al emitir la factura.");
+        if (!ok) throw new SiigoApiError(data?.error?.code ?? "default", data?.error?.message ?? "Error al emitir la factura.");
+        // siigoInvoiceResponseSchema.parse(null) already throws loudly on an
+        // unparseable 2xx body — same fail-loud outcome as the original
+        // `res.json()` throwing, just via Zod instead of a raw SyntaxError.
         return siigoInvoiceResponseSchema.parse(data);
       }, { maxRetries: 5, onRetry: (n) => setRetryAttempt(n) });
       setRowStatus(selectedId, mapSiigoInvoiceStatus(response.status));

@@ -1,5 +1,6 @@
 import type { Consultation, Client, Patient } from "@/schemas/provet";
-import type { SiigoInvoicePayload, SiigoProduct } from "@/schemas/siigo";
+import { formatColombiaDate } from "@/schemas/provet";
+import type { SiigoInvoicePayload, SiigoProduct, SiigoPaymentType } from "@/schemas/siigo";
 import { resolvePaymentTypeId, type CatalogMapping } from "@/mappers/catalogMapping";
 import { stampSendFor, type EnvironmentMode } from "@/mappers/credentials";
 import { buildSiigoCustomer } from "@/mappers/customerNormalizer";
@@ -14,7 +15,7 @@ const round2 = (n: number): number => Number(Math.round(Number(`${n}e2`)) + "e-2
  * silently record the wrong day for any consultation billed that evening.
  */
 export function todayInColombia(): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Bogota" }).format(new Date());
+  return formatColombiaDate(new Date());
 }
 
 /** Dynamic emission context supplied by the caller (Settings UI state). */
@@ -23,6 +24,14 @@ export interface ProvetToSiigoOptions {
   mapping: CatalogMapping;
   /** Active Siigo product catalog (source of product codes). */
   siigoProducts: SiigoProduct[];
+  /**
+   * Active Siigo payment-type catalog — H-6. Used only to check the mapped
+   * payment type's `due_date` flag before emission; optional and defaults to
+   * empty so existing callers/tests that don't exercise this guard are
+   * unaffected (the guard simply can't fire without the catalog, matching
+   * today's behavior).
+   */
+  siigoPaymentTypes?: SiigoPaymentType[];
   /** Environment mode — gates DIAN stamping via stampSendFor. */
   mode: EnvironmentMode;
   /** Active Siigo invoice document type id — required, throws MissingEmissionSettingError if not configured in Ajustes. */
@@ -69,6 +78,27 @@ export class EmptyConsultationError extends Error {
     );
     this.name = "EmptyConsultationError";
     this.reason = reason;
+  }
+}
+
+/**
+ * H-6 — thrown when the mapped Siigo payment type manages a due date
+ * (`due_date: true` in the catalog). Siigo's contract requires
+ * `payments[].due_date` in that case and rejects the document with
+ * `parameter_required` otherwise; this integration has no source for a due
+ * date (Provet consultations carry none), so emission stops here rather than
+ * either inventing a date or letting the client burn an Idempotency-Key on a
+ * guaranteed Siigo rejection. Verified: `due_date` appears nowhere else in
+ * `src/` — it was read from the catalog and discarded (N4/H-6).
+ */
+export class PaymentTypeRequiresDueDateError extends Error {
+  readonly siigoPaymentTypeId: number;
+  constructor(siigoPaymentTypeId: number) {
+    super(
+      `El medio de pago mapeado (Siigo #${siigoPaymentTypeId}) maneja fecha de vencimiento (crédito/financiación), que esta integración no soporta todavía. Mapee la consulta a un medio de pago sin vencimiento (efectivo, tarjeta) o facture manualmente en Siigo.`,
+    );
+    this.name = "PaymentTypeRequiresDueDateError";
+    this.siigoPaymentTypeId = siigoPaymentTypeId;
   }
 }
 
@@ -184,7 +214,7 @@ export function provetToSiigoInvoice(
   options: ProvetToSiigoOptions = DEFAULT_OPTIONS,
 ): SiigoInvoicePayload {
   void patient; // reserved for future audit/logging
-  const { mapping, siigoProducts, mode, documentTypeId, sellerId, fallbackItemCode } = options;
+  const { mapping, siigoProducts, mode, documentTypeId, sellerId, fallbackItemCode, siigoPaymentTypes = [] } = options;
   if (documentTypeId === undefined) throw new MissingEmissionSettingError("documentTypeId");
   if (sellerId === undefined) throw new MissingEmissionSettingError("sellerId");
 
@@ -194,6 +224,11 @@ export function provetToSiigoInvoice(
   const productById = new Map(siigoProducts.map((p) => [p.id, p]));
 
   const paymentTypeId = resolvePaymentTypeId(consultation.payment_method, mapping.payments);
+  // H-6: block emission rather than let Siigo reject the document with
+  // parameter_required for a payment type this integration cannot supply a
+  // due_date for.
+  const mappedPaymentType = siigoPaymentTypes.find((pt) => pt.id === paymentTypeId);
+  if (mappedPaymentType?.due_date) throw new PaymentTypeRequiresDueDateError(paymentTypeId);
 
   const stampSend = stampSendFor(mode);
   // No lines: fall back ONLY to an explicitly configured product code and a

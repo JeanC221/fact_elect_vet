@@ -5,6 +5,7 @@ import type { ConsultationQueueRow, InvoiceStatus } from "@/mappers/consultation
 import { buildConsultationQueue } from "@/mappers/consultationQueue";
 import { mockClients, mockConsultations, mockPatients } from "@/mocks/provet";
 import type { TranslatedError } from "@/services/errorTranslator";
+import { apiRequest } from "@/services/apiClient";
 import {
   buildInitialRows,
   decideAfterFetch,
@@ -113,13 +114,12 @@ export function useConsultationQueue(): UseConsultationQueueResult {
     let serverMessage: string | null = null;
     try {
       try {
-        const res = await fetch("/api/consultations", { cache: "no-store" });
-        const data = (await res.json()) as {
+        const { ok, data } = await apiRequest<{
           rows?: ConsultationQueueRow[];
           meta?: QueueMeta;
           error?: { message?: string };
-        };
-        if (res.ok && Array.isArray(data?.rows)) {
+        }>("/api/consultations", { cache: "no-store" });
+        if (ok && Array.isArray(data?.rows)) {
           liveRows = data.rows as ConsultationQueueRow[];
           meta = data.meta;
         }

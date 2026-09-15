@@ -23,7 +23,7 @@ export function generateIdempotencyKey(): string {
 }
 
 /** Runtime validation for mandatory Siigo headers (defense-in-depth for non-UI callers). */
-const partnerIdHeaderSchema = z.string().trim().min(3, "Partner-Id requiere 3-100 caracteres").max(100).regex(/^[A-Za-z0-9-]+$/, "Partner-Id inválido");
+const partnerIdHeaderSchema = z.string().trim().min(3, "Partner-Id requiere 3-100 caracteres").max(100).regex(/^[A-Za-z0-9]+$/, "Partner-Id inválido: solo caracteres alfanuméricos, sin guiones ni espacios.");
 /**
  * Strictly alphanumeric. Siigo's Idempotencia page requires "alfanumérico, sin
  * caracteres especiales, sin espacios en blanco, máximo 30 caracteres", and the
@@ -103,7 +103,7 @@ export async function toSiigoError(res: Response): Promise<SiigoApiError> {
   );
 }
 
-const SIIGO_POST_TIMEOUT_MS = 120_000;
+export const SIIGO_POST_TIMEOUT_MS = 120_000;
 
 async function postToSiigo<B, R>(
   path: string, body: B, bodySchema: z.ZodType<B>, responseSchema: z.ZodType<R, z.ZodTypeDef, unknown>,
@@ -171,6 +171,8 @@ function base64ToBlob(base64: string, mimeType: string): Blob {
 async function fetchInvoiceFile(
   invoiceId: string, format: "pdf" | "xml", accessToken: string, partnerId: string,
 ): Promise<Blob> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SIIGO_POST_TIMEOUT_MS);
   let res: Response;
   try {
     // Percent-encode the id even though callers are expected to validate it
@@ -181,9 +183,18 @@ async function fetchInvoiceFile(
     res = await fetch(`${SIIGO_API_BASE_URL}/v1/invoices/${encodeURIComponent(invoiceId)}/${format}`, {
       method: "GET",
       headers: { "Partner-Id": partnerId, Authorization: `Bearer ${accessToken}` },
+      signal: controller.signal,
     });
-  } catch {
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new SiigoApiError(
+        "request_timeout",
+        `Siigo no respondió en ${SIIGO_POST_TIMEOUT_MS / 1000}s al descargar el ${format.toUpperCase()}.`,
+      );
+    }
     throw new SiigoApiError("service_unavailable", "Network failure while reaching the Siigo API.");
+  } finally {
+    clearTimeout(timer);
   }
   if (!res.ok) throw await toSiigoError(res);
   try {

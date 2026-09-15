@@ -8,6 +8,7 @@ import {
   buildAnnulmentObservations,
   ANNULMENT_REASONS,
   ANNULMENT_DIAN_REASON,
+  type AnnulmentReason,
 } from "@/mappers/creditNote";
 import { mockSiigoInvoicePayloads } from "@/mocks/siigo";
 
@@ -55,6 +56,17 @@ describe("toCreditNotePayload", () => {
     const cn = toCreditNotePayload(original, { id: INVOICE_ID }, "duplicate_invoice", { documentTypeId: 162 });
     expect(cn.observations).toBe(buildAnnulmentObservations("duplicate_invoice"));
     expect(cn.observations).toContain("Factura duplicada");
+  });
+
+  it("H-12 — sanitizes an unrecognized reason instead of forwarding it raw (defensive fallback for a value outside AnnulmentReason at runtime)", () => {
+    // Siigo rejects quotes/control chars in text fields (see `sanitizeText`).
+    // The fixed labels in ANNULMENT_REASONS are always safe, but the `?? reason`
+    // fallback for a value with no matching label was forwarding the raw
+    // string untouched.
+    const corrupt = 'bad"reason\u0007' as AnnulmentReason;
+    const observations = buildAnnulmentObservations(corrupt);
+    expect(observations).not.toContain('"');
+    expect(observations).not.toMatch(/[\u0000-\u001F]/);
   });
 
   it("mirrors item prices POSITIVE — the exact inverse of the old (negated) mapper", () => {

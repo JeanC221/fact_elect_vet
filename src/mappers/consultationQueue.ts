@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   hasMaxDecimals,
   toCents,
+  formatColombiaDate,
   identificationSchema,
   identificationTypes,
   type Client,
@@ -153,7 +154,7 @@ export const formatCOP = (value: number): string =>
  * date), so shifting the rendered day does not move any row.
  */
 export const formatDate = (value: Date): string =>
-  new Intl.DateTimeFormat("en-CA", { timeZone: "America/Bogota" }).format(new Date(value));
+  formatColombiaDate(new Date(value));
 
 /** Active mapped payment option for the Quick-Edit drawer dropdown. */
 export interface PaymentOption {

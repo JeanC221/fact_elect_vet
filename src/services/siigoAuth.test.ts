@@ -101,6 +101,21 @@ describe("getSiigoAccessToken", () => {
       code: "missing_credentials",
     });
   });
+
+  it("H-7 — aborts and reports a friendly timeout instead of hanging forever (was the other Siigo call with no AbortController, alongside fetchInvoiceFile)", async () => {
+    vi.useFakeTimers();
+    fetchMock.mockImplementation((_url: string, init: RequestInit) => new Promise((_resolve, reject) => {
+      init.signal?.addEventListener("abort", () => {
+        const err = new Error("This operation was aborted");
+        err.name = "AbortError";
+        reject(err);
+      });
+    }));
+    const promise = getSiigoAccessToken();
+    const assertion = expect(promise).rejects.toMatchObject({ name: "SiigoAuthError", code: "request_timeout" });
+    await vi.advanceTimersByTimeAsync(120_000);
+    await assertion;
+  });
 });
 
 describe("getSiigoAccessToken (explicit credentials)", () => {

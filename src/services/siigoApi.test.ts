@@ -185,6 +185,11 @@ describe("postToSiigo header validation (defense-in-depth)", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("rejects a Partner-Id containing a hyphen before any network call (H-3 — Siigo rejects special chars, and the credentials form already blocks it; the server-side defense-in-depth was looser than the form)", async () => {
+    await expect(submitInvoice(payload, "t", "vet-siigo")).rejects.toThrow();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("rejects an Idempotency-Key longer than 30 chars before any network call", async () => {
     const longKey = "A".repeat(31);
     await expect(submitInvoice(payload, "t", "PARTNER1", longKey)).rejects.toThrow();
@@ -349,5 +354,21 @@ describe("fetchInvoicePdf / fetchInvoiceXml", () => {
     fetchMock.mockResolvedValue(fileRes(fileBody(btoa("PDF-DATA"))));
     await fetchInvoicePdf("5bb7d6d6-9c74-4b5f-9d0e-7f9c1a2b3c4d", "t", "PARTNER1");
     expect(callAt(0)[0]).toBe(`${SIIGO_API_BASE_URL}/v1/invoices/5bb7d6d6-9c74-4b5f-9d0e-7f9c1a2b3c4d/pdf`);
+  });
+
+  it("H-7 — aborts and reports a friendly timeout instead of hanging forever (was the one Siigo call with no AbortController)", async () => {
+    vi.useFakeTimers();
+    fetchMock.mockImplementation((_url: string, init: RequestInit) => new Promise((_resolve, reject) => {
+      init.signal?.addEventListener("abort", () => {
+        const err = new Error("This operation was aborted");
+        err.name = "AbortError";
+        reject(err);
+      });
+    }));
+    const promise = fetchInvoicePdf("INV-7751", "t", "PARTNER1");
+    const assertion = expect(promise).rejects.toMatchObject({ name: "SiigoApiError", code: "request_timeout" });
+    await vi.advanceTimersByTimeAsync(120_000);
+    await assertion;
+    vi.useRealTimers();
   });
 });

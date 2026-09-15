@@ -179,16 +179,32 @@ describe("siigoInvoiceItemSchema — the price / taxed_price XOR rule", () => {
     expect(siigoInvoiceItemSchema.safeParse(line).success).toBe(false);
   });
 
-  it("REJECTS a taxed_price with more than 2 decimals (Siigo's limit)", () => {
-    expect(siigoInvoiceItemSchema.safeParse({ ...line, taxed_price: 119000.123 }).success).toBe(false);
+  it("REJECTS a taxed_price with more than 6 decimals (Siigo's real limit — H-4, was wrongly capped at 2)", () => {
+    expect(siigoInvoiceItemSchema.safeParse({ ...line, taxed_price: 119000.1234567 }).success).toBe(false);
   });
 
   it("accepts a taxed_price with exactly 2 decimals", () => {
     expect(siigoInvoiceItemSchema.safeParse({ ...line, taxed_price: 119000.12 }).success).toBe(true);
   });
 
-  it("REJECTS a price with more than 2 decimals as well", () => {
-    expect(siigoInvoiceItemSchema.safeParse({ ...line, price: 100000.456 }).success).toBe(false);
+  it("accepts a taxed_price with up to 6 decimals — the previous 2-decimal cap silently rejected valid Siigo payloads (H-4)", () => {
+    expect(siigoInvoiceItemSchema.safeParse({ ...line, taxed_price: 119000.123456 }).success).toBe(true);
+  });
+
+  it("REJECTS a price with more than 6 decimals as well", () => {
+    expect(siigoInvoiceItemSchema.safeParse({ ...line, price: 100000.1234567 }).success).toBe(false);
+  });
+
+  it("accepts a price with up to 6 decimals (H-4)", () => {
+    expect(siigoInvoiceItemSchema.safeParse({ ...line, price: 100000.456 }).success).toBe(true);
+  });
+
+  it("REJECTS a quantity with more than 2 decimals (H-4 — was completely unvalidated; a Provet dosage quantity like 0.028 passed Zod and Siigo rejected it, burning the Idempotency-Key)", () => {
+    expect(siigoInvoiceItemSchema.safeParse({ ...line, quantity: 0.028, taxed_price: 119000 }).success).toBe(false);
+  });
+
+  it("accepts a quantity with up to 2 decimals", () => {
+    expect(siigoInvoiceItemSchema.safeParse({ ...line, quantity: 2.5, taxed_price: 119000 }).success).toBe(true);
   });
 
   it("carries the mapped product tax ids through untouched", () => {
@@ -198,17 +214,22 @@ describe("siigoInvoiceItemSchema — the price / taxed_price XOR rule", () => {
 });
 
 describe("siigoInvoicePayloadSchema — observations bound", () => {
-  it("accepts observations at exactly the 500-character limit", () => {
-    const result = siigoInvoicePayloadSchema.safeParse({ ...basePayload, observations: "x".repeat(500) });
+  it("accepts observations at exactly the 4000-character limit (H-5 — Siigo's real limit; was wrongly capped at 500)", () => {
+    const result = siigoInvoicePayloadSchema.safeParse({ ...basePayload, observations: "x".repeat(4000) });
     expect(result.success).toBe(true);
   });
 
-  it("REJECTS observations above 500 characters — the field carries the reconciliation marker and must never be truncated by Siigo", () => {
-    const result = siigoInvoicePayloadSchema.safeParse({ ...basePayload, observations: "x".repeat(501) });
+  it("REJECTS observations above 4000 characters — the field carries the reconciliation marker and must never be truncated by Siigo", () => {
+    const result = siigoInvoicePayloadSchema.safeParse({ ...basePayload, observations: "x".repeat(4001) });
     expect(result.success).toBe(false);
     if (!result.success) {
       expect(result.error.issues[0].path).toEqual(["observations"]);
     }
+  });
+
+  it("accepts observations well past the old 500-char cap (H-5 — a payload this size was silently rejected before the fix)", () => {
+    const result = siigoInvoicePayloadSchema.safeParse({ ...basePayload, observations: "x".repeat(1500) });
+    expect(result.success).toBe(true);
   });
 
   it("accepts a payload with no observations at all", () => {
